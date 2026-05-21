@@ -1,0 +1,11 @@
+{
+  "name": "class-memories",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "npx -y live-server --port=3000 --no-browser"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.10.0"
+  }
+}

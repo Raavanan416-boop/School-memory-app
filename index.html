@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+  <meta name="theme-color" content="#f5e8d0"/>
+  <meta name="description" content="Class Memories — A private social platform for school alumni. Share memories, chat, play games, and stay connected with your class forever."/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+  <meta name="keywords" content="school memories, alumni, social network, class reunion, nostalgia"/>
+  <meta property="og:title" content="Class Memories"/>
+  <meta property="og:description" content="A digital home for school memories — Private social platform for our batch"/>
+  <meta property="og:type" content="website"/>
+  <title>Class Memories — Your School, Forever</title>
+  <link rel="manifest" href="/manifest.json"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Inter:wght@300;400;500;600;700;800&family=Playfair+Display:ital,wght@0,700;1,400&display=swap" rel="stylesheet"/>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="/css/styles.css"/>
+</head>
+<body class="bg-cream-100 text-navy-800 font-sans min-h-screen overflow-x-hidden">
+  <!-- Splash Screen -->
+  <div id="splash-screen" class="fixed inset-0 z-[100] bg-cream-200 flex flex-col items-center justify-center transition-opacity duration-700">
+    <div class="school-crest animate-scaleIn">
+      <span class="text-4xl mb-1">📖</span>
+      <span class="text-[11px] font-bold text-navy-500 tracking-wide">ClassMemories</span>
+      <div class="ribbon">EST. 2024</div>
+    </div>
+    <p class="mt-6 text-navy-500 font-medium text-sm">Loading memories...</p>
+    <div class="mt-4 w-40 h-1.5 bg-cream-300 rounded-full overflow-hidden">
+      <div id="splash-progress" class="h-full bg-navy-500 rounded-full transition-all duration-300" style="width:0%"></div>
+    </div>
+  </div>
+
+  <!-- App Container -->
+  <div id="app" class="hidden min-h-screen pb-20"></div>
+
+  <!-- Bottom Navigation -->
+  <nav id="bottom-nav" class="hidden fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-gray-100 shadow-nav safe-area-bottom">
+    <div class="flex items-center justify-around py-1.5 px-2 max-w-lg mx-auto" id="nav-buttons"></div>
+  </nav>
+
+  <!-- Login Page -->
+  <div id="login-page" class="hidden fixed inset-0 z-[90] bg-cream-100"></div>
+
+  <!-- Call Overlay -->
+  <div id="call-overlay" class="hidden fixed inset-0 z-[80]"></div>
+
+  <!-- Modal Container -->
+  <div id="modal-container" class="z-[70]"></div>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="fixed top-4 right-4 z-[200] space-y-2 max-w-xs"></div>
+
+  <!-- PWA Install Banner -->
+  <div id="pwa-install-banner" class="hidden fixed bottom-20 left-0 right-0 z-[55]"></div>
+
+  <script type="module" src="/js/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(e => console.log('SW:', e));
+    }
+  </script>
+</body>
+</html>

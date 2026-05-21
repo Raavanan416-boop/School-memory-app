@@ -1,0 +1,221 @@
+// Auth module — Full featured with presence, password change, profile updates
+import { auth, db, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail,
+  updatePassword, EmailAuthProvider, reauthenticateWithCredential,
+  doc, getDoc, updateDoc, setDoc, serverTimestamp, Timestamp,
+  storage, storageRef, uploadBytes, getDownloadURL } from './firebase-config.js';
+
+const ADMIN_EMAIL = 'raavanan@admin.com';
+
+class AuthManager {
+  constructor() {
+    this.currentUser = null;
+    this.userData = null;
+    this.listeners = [];
+    this._presenceInterval = null;
+    this._isAdmin = false;
+  }
+
+  get isAdmin() { return this._isAdmin; }
+
+  onChange(cb) { this.listeners.push(cb); }
+  _notify() { this.listeners.forEach(cb => cb(this.currentUser, this.userData)); }
+
+  init() {
+    return new Promise((resolve) => {
+      onAuthStateChanged(auth, async (user) => {
+        if (user) {
+          this.currentUser = user;
+          await this._loadUserData(user.uid);
+          await this._setOnline(true);
+          this._startHeartbeat();
+        } else {
+          if (this.currentUser) await this._setOnline(false);
+          this._stopHeartbeat();
+          this.currentUser = null;
+          this.userData = null;
+        }
+        this._notify();
+        resolve(this.currentUser);
+      });
+
+      // Mark offline on page unload
+      window.addEventListener('beforeunload', () => {
+        if (this.currentUser) {
+          const data = JSON.stringify({ online: false, lastSeen: new Date().toISOString() });
+          navigator.sendBeacon && navigator.sendBeacon('/api/presence', data);
+          // Also try direct Firestore update
+          this._setOnline(false);
+        }
+      });
+
+      // Handle visibility changes
+      document.addEventListener('visibilitychange', () => {
+        if (this.currentUser) {
+          if (document.hidden) {
+            this._setOnline(false);
+          } else {
+            this._setOnline(true);
+          }
+        }
+      });
+    });
+  }
+
+  async _loadUserData(uid) {
+    try {
+      // Silently detect admin role
+      this._isAdmin = (this.currentUser?.email?.toLowerCase() === ADMIN_EMAIL);
+
+      const snap = await getDoc(doc(db, 'users', uid));
+      if (snap.exists()) {
+        this.userData = { id: uid, ...snap.data() };
+        // Store role in Firestore silently
+        if (this._isAdmin && snap.data().role !== 'admin') {
+          await updateDoc(doc(db, 'users', uid), { role: 'admin' });
+          this.userData.role = 'admin';
+        }
+      } else {
+        // Create minimal user document if it doesn't exist
+        const defaultData = {
+          fullName: this._isAdmin ? 'Raavanan' : (this.currentUser.email?.split('@')[0] || 'User'),
+          email: this.currentUser.email,
+          profilePic: '',
+          nickname: '',
+          bio: '',
+          dateOfBirth: '',
+          rollNumber: '',
+          joinedYear: '',
+          endYear: '',
+          themeColor: '',
+          online: true,
+          lastSeen: serverTimestamp(),
+          savedPosts: [],
+          slamBook: {},
+          role: this._isAdmin ? 'admin' : 'user',
+          createdAt: serverTimestamp()
+        };
+        await setDoc(doc(db, 'users', uid), defaultData);
+        this.userData = { id: uid, ...defaultData };
+      }
+    } catch (e) { console.error('Error loading user data:', e); }
+  }
+
+  async _setOnline(status) {
+    if (!this.currentUser) return;
+    try {
+      await updateDoc(doc(db, 'users', this.currentUser.uid), {
+        online: status,
+        lastSeen: serverTimestamp()
+      });
+      if (this.userData) this.userData.online = status;
+    } catch (e) { /* silently fail on disconnect */ }
+  }
+
+  _startHeartbeat() {
+    this._stopHeartbeat();
+    this._presenceInterval = setInterval(() => {
+      this._setOnline(true);
+    }, 60000); // Every 60 seconds
+  }
+
+  _stopHeartbeat() {
+    if (this._presenceInterval) {
+      clearInterval(this._presenceInterval);
+      this._presenceInterval = null;
+    }
+  }
+
+  async login(email, password) {
+    const cred = await signInWithEmailAndPassword(auth, email, password);
+    this.currentUser = cred.user;
+    await this._loadUserData(cred.user.uid);
+    await this._setOnline(true);
+    this._startHeartbeat();
+    return cred.user;
+  }
+
+  async logout() {
+    await this._setOnline(false);
+    this._stopHeartbeat();
+    await signOut(auth);
+    this.currentUser = null;
+    this.userData = null;
+  }
+
+  async resetPassword(email) {
+    await sendPasswordResetEmail(auth, email);
+  }
+
+  async changePassword(currentPassword, newPassword) {
+    if (!this.currentUser) throw new Error('Not logged in');
+    const credential = EmailAuthProvider.credential(this.currentUser.email, currentPassword);
+    await reauthenticateWithCredential(this.currentUser, credential);
+    await updatePassword(this.currentUser, newPassword);
+  }
+
+  async updateProfile(fields) {
+    if (!this.currentUser) throw new Error('Not logged in');
+    await updateDoc(doc(db, 'users', this.currentUser.uid), fields);
+    // Refresh local data
+    Object.assign(this.userData, fields);
+    this._notify();
+  }
+
+  async updateProfilePic(file) {
+    if (!this.currentUser) throw new Error('Not logged in');
+    const path = `profilePics/${this.currentUser.uid}_${Date.now()}`;
+    const sRef = storageRef(storage, path);
+    await uploadBytes(sRef, file);
+    const url = await getDownloadURL(sRef);
+    await this.updateProfile({ profilePic: url });
+    return url;
+  }
+
+  async changePassword(currentPassword, newPassword) {
+    if (!this.currentUser) throw new Error('Not logged in');
+    // Re-authenticate first
+    const credential = EmailAuthProvider.credential(this.currentUser.email, currentPassword);
+    await reauthenticateWithCredential(this.currentUser, credential);
+    // Now update
+    await updatePassword(this.currentUser, newPassword);
+  }
+
+  async updateSlamBook(data) {
+    if (!this.currentUser) throw new Error('Not logged in');
+    const slamBook = { ...(this.userData?.slamBook || {}), ...data };
+    await this.updateProfile({ slamBook });
+  }
+
+  async savePost(postId) {
+    if (!this.currentUser) return;
+    const { arrayUnion } = await import('./firebase-config.js');
+    await updateDoc(doc(db, 'users', this.currentUser.uid), {
+      savedPosts: arrayUnion(postId)
+    });
+    if (this.userData) {
+      if (!this.userData.savedPosts) this.userData.savedPosts = [];
+      if (!this.userData.savedPosts.includes(postId)) this.userData.savedPosts.push(postId);
+    }
+  }
+
+  async unsavePost(postId) {
+    if (!this.currentUser) return;
+    const { arrayRemove } = await import('./firebase-config.js');
+    await updateDoc(doc(db, 'users', this.currentUser.uid), {
+      savedPosts: arrayRemove(postId)
+    });
+    if (this.userData) {
+      this.userData.savedPosts = (this.userData.savedPosts || []).filter(id => id !== postId);
+    }
+  }
+
+  isLoggedIn() { return !!this.currentUser; }
+
+  // Admin-only: update any user's protected fields
+  async adminUpdateUser(targetUid, fields) {
+    if (!this._isAdmin) throw new Error('Unauthorized');
+    await updateDoc(doc(db, 'users', targetUid), fields);
+  }
+}
+
+export const authManager = new AuthManager();

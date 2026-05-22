@@ -204,22 +204,23 @@ export async function renderProfile(container, data = null) {
       </button>
       <div id="settings-overlay" class="settings-overlay hidden">
         <div class="settings-backdrop" id="settings-backdrop"></div>
-        <div class="settings-sheet" id="settings-sheet">
-          <div class="settings-handle"></div>
-          <div class="p-5 pb-8">
+        <div class="settings-drawer" id="settings-drawer">
+          <button class="settings-close-btn" id="settings-close-btn" aria-label="Close menu">✕</button>
+          <div class="settings-drawer-accent"></div>
+          <div class="p-5 pb-8 pt-14">
             <!-- User Header -->
-            <div class="flex items-center gap-3 mb-5 pb-4" style="border-bottom: 1px solid rgba(30,58,95,0.06);">
+            <div class="flex items-center gap-3 mb-5 pb-4" style="border-bottom: 1px solid rgba(255,255,255,0.08);">
               ${user.profilePic
-                ? `<img src="${user.profilePic}" class="w-14 h-14 rounded-full object-cover border-2 border-cream-200 shadow-sm" alt=""/>`
-                : `<div class="w-14 h-14 rounded-full bg-gradient-to-br from-navy-500 to-navy-300 flex items-center justify-center text-white text-xl font-bold shadow-sm">${(user.fullName || '?')[0]}</div>`}
+                ? `<img src="${user.profilePic}" class="w-14 h-14 rounded-full object-cover border-2 border-white/10 shadow-sm" alt=""/>`
+                : `<div class="w-14 h-14 rounded-full bg-gradient-to-br from-navy-400 to-navy-600 flex items-center justify-center text-white text-xl font-bold shadow-sm">${(user.fullName || '?')[0]}</div>`}
               <div class="flex-1">
-                <p class="font-bold text-navy-800 text-base">${sanitizeHTML(user.fullName || 'Your Name')}</p>
+                <p class="font-bold text-white text-base">${sanitizeHTML(user.fullName || 'Your Name')}</p>
                 <p class="text-xs text-gray-400">${user.email || ''}</p>
               </div>
             </div>
 
             <!-- Account Section -->
-            <p class="text-[10px] text-gray-400 uppercase tracking-widest font-semibold mb-2 px-2">Account</p>
+            <p class="text-[10px] text-gray-500 uppercase tracking-widest font-semibold mb-2 px-2">Account</p>
             <div class="space-y-0.5 mb-4">
               <button class="settings-item" data-action="edit-profile">
                 <div class="settings-item-icon bg-blue-50 text-blue-500">
@@ -238,14 +239,14 @@ export async function renderProfile(container, data = null) {
             </div>
 
             <!-- App Section -->
-            <p class="text-[10px] text-gray-400 uppercase tracking-widest font-semibold mb-2 px-2">App</p>
+            <p class="text-[10px] text-gray-500 uppercase tracking-widest font-semibold mb-2 px-2">App</p>
             <div class="space-y-0.5 mb-4">
               <button class="settings-item" data-action="saved-memories">
                 <div class="settings-item-icon bg-amber-50 text-amber-500">
                   <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z"/></svg>
                 </div>
                 <span>Saved Memories</span>
-                <span class="text-xs text-gray-400 ml-auto mr-2">${(user.savedPosts?.length || 0)}</span>
+                <span class="text-xs text-gray-500 ml-auto mr-2">${(user.savedPosts?.length || 0)}</span>
                 <svg class="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
               </button>
               <button class="settings-item" data-action="leaderboard">
@@ -265,7 +266,7 @@ export async function renderProfile(container, data = null) {
             </div>
 
             <!-- Preferences Section -->
-            <p class="text-[10px] text-gray-400 uppercase tracking-widest font-semibold mb-2 px-2">Preferences</p>
+            <p class="text-[10px] text-gray-500 uppercase tracking-widest font-semibold mb-2 px-2">Preferences</p>
             <div class="space-y-0.5 mb-4">
               <button class="settings-item" data-action="notification-settings">
                 <div class="settings-item-icon bg-green-50 text-green-500">
@@ -284,7 +285,7 @@ export async function renderProfile(container, data = null) {
             </div>
 
             <!-- Logout -->
-            <div class="pt-2" style="border-top: 1px solid rgba(30,58,95,0.06);">
+            <div class="pt-2" style="border-top: 1px solid rgba(255,255,255,0.06);">
               <button class="settings-item text-red-500" data-action="logout">
                 <div class="settings-item-icon bg-red-50 text-red-500">
                   <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/></svg>
@@ -320,42 +321,62 @@ export async function renderProfile(container, data = null) {
 
   renderTabContent('posts');
 
-  // === SETTINGS MENU ===
+  // === SETTINGS DRAWER ===
   const settingsBtn = container.querySelector('#settings-menu-btn');
   const settingsOverlay = container.querySelector('#settings-overlay');
   const settingsBackdrop = container.querySelector('#settings-backdrop');
-  const settingsSheet = container.querySelector('#settings-sheet');
+  const settingsDrawer = container.querySelector('#settings-drawer');
+  const settingsCloseBtn = container.querySelector('#settings-close-btn');
 
   function openSettings() {
     settingsOverlay?.classList.remove('hidden');
+    // Double-rAF ensures the 'hidden' removal is painted before the transition class is added
     requestAnimationFrame(() => {
-      settingsOverlay?.classList.add('settings-active');
+      requestAnimationFrame(() => {
+        settingsOverlay?.classList.add('settings-active');
+      });
     });
   }
 
   function closeSettings() {
     settingsOverlay?.classList.remove('settings-active');
-    setTimeout(() => settingsOverlay?.classList.add('hidden'), 350);
+    setTimeout(() => {
+      settingsOverlay?.classList.add('hidden');
+    }, 400); // match the 0.38s CSS transition
   }
 
   settingsBtn?.addEventListener('click', openSettings);
   settingsBackdrop?.addEventListener('click', closeSettings);
+  settingsCloseBtn?.addEventListener('click', closeSettings);
 
-  // Touch drag to dismiss
-  let startY = 0;
-  settingsSheet?.addEventListener('touchstart', (e) => {
-    startY = e.touches[0].clientY;
-  });
-  settingsSheet?.addEventListener('touchmove', (e) => {
-    const dy = e.touches[0].clientY - startY;
-    if (dy > 0) {
-      settingsSheet.style.transform = `translateY(${dy}px)`;
+  // Horizontal swipe-to-close gesture (swipe RIGHT to dismiss)
+  let startX = 0;
+  let isDragging = false;
+  settingsDrawer?.addEventListener('touchstart', (e) => {
+    startX = e.touches[0].clientX;
+    isDragging = true;
+    settingsDrawer.style.transition = 'none'; // disable CSS transition during drag
+  }, { passive: true });
+
+  settingsDrawer?.addEventListener('touchmove', (e) => {
+    if (!isDragging) return;
+    const dx = e.touches[0].clientX - startX;
+    if (dx > 0) {
+      // Only allow dragging to the right (closing direction)
+      settingsDrawer.style.transform = `translateX(${dx}px)`;
     }
-  });
-  settingsSheet?.addEventListener('touchend', (e) => {
-    const dy = (e.changedTouches?.[0]?.clientY || 0) - startY;
-    settingsSheet.style.transform = '';
-    if (dy > 80) closeSettings();
+  }, { passive: true });
+
+  settingsDrawer?.addEventListener('touchend', (e) => {
+    if (!isDragging) return;
+    isDragging = false;
+    settingsDrawer.style.transition = ''; // restore CSS transition
+    const dx = (e.changedTouches?.[0]?.clientX || 0) - startX;
+    if (dx > 60) {
+      // Swiped far enough — close
+      closeSettings();
+    }
+    settingsDrawer.style.transform = '';
   });
 
   // Settings actions

@@ -1,14 +1,20 @@
-// Time Capsule page — Create, view, and unlock time capsules
+// Time Capsule page — Enhanced with date+time, visibility selection, delete support
 import { db, collection, addDoc, getDocs, query, orderBy, onSnapshot, doc, updateDoc,
-  serverTimestamp, limit } from '../firebase-config.js';
+  serverTimestamp, limit, deleteDoc } from '../firebase-config.js';
 import { showToast, sanitizeHTML, formatDate } from '../utils.js';
 import { authManager } from '../auth.js';
 import { router } from '../router.js';
+import { showDeleteConfirmation } from '../delete-confirm.js';
 
 let unsubCapsules = null;
 
-export async function renderTimeCapsule(container) {
+export function destroyTimeCapsule() {
   if (unsubCapsules) unsubCapsules();
+  unsubCapsules = null;
+}
+
+export async function renderTimeCapsule(container) {
+  destroyTimeCapsule();
 
   container.innerHTML = `
     <section class="px-4 pt-4">
@@ -63,6 +69,9 @@ function createCapsuleCard(capsule) {
   const unlockDate = capsule.unlockDate ? new Date(capsule.unlockDate) : null;
   const isUnlocked = capsule.isUnlocked || (unlockDate && unlockDate <= new Date());
   const time = capsule.createdAt?.toDate ? formatDate(capsule.createdAt.toDate()) : '';
+  const isOwner = capsule.authorId === authManager.currentUser?.uid;
+  const visibilityIcon = capsule.visibility === 'close' ? '👥' : '🌍';
+  const visibilityLabel = capsule.visibility === 'close' ? 'Close Friends' : 'All Friends';
 
   const card = document.createElement('div');
   card.className = 'card overflow-hidden animate-fadeIn';
@@ -71,12 +80,19 @@ function createCapsuleCard(capsule) {
     // Unlocked capsule — show content
     card.innerHTML = `
       <div class="p-4">
-        <div class="flex items-center gap-2 mb-3">
-          <span class="text-xl">🔓</span>
-          <div>
-            <p class="font-semibold text-sm text-navy-800">${sanitizeHTML(capsule.authorName || 'A classmate')}'s Time Capsule</p>
-            <p class="text-[10px] text-gray-400">Created ${time} · Unlocked!</p>
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="text-xl">🔓</span>
+            <div>
+              <p class="font-semibold text-sm text-navy-800">${sanitizeHTML(capsule.authorName || 'A classmate')}'s Time Capsule</p>
+              <p class="text-[10px] text-gray-400">Created ${time} · Unlocked! · ${visibilityIcon} ${visibilityLabel}</p>
+            </div>
           </div>
+          ${isOwner ? `
+            <button class="capsule-delete-btn p-1 text-gray-300 hover:text-red-400 transition-colors" data-id="${capsule.id}" title="Delete">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
+            </button>
+          ` : ''}
         </div>
         ${capsule.imageUrl ? `
           <div class="rounded-xl overflow-hidden border-2 border-warm-300 mb-3">
@@ -91,10 +107,9 @@ function createCapsuleCard(capsule) {
       </div>
     `;
 
-    // Auto-update + cinematic reveal if was locked but time has passed
+    // Auto-update if was locked but time has passed
     if (!capsule.isUnlocked && unlockDate && unlockDate <= new Date()) {
       updateDoc(doc(db, 'timeCapsules', capsule.id), { isUnlocked: true }).catch(() => {});
-      // Show cinematic reveal
       setTimeout(() => showCapsuleReveal(capsule), 500);
     }
   } else {
@@ -103,14 +118,22 @@ function createCapsuleCard(capsule) {
     const diff = unlockDate ? unlockDate - now : 0;
     const daysLeft = Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
     const hoursLeft = Math.max(0, Math.ceil((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)));
+    const minsLeft = Math.max(0, Math.ceil((diff % (1000 * 60 * 60)) / (1000 * 60)));
 
     card.innerHTML = `
       <div class="capsule-locked p-6 text-center">
+        <div class="flex justify-end mb-2">
+          ${isOwner ? `
+            <button class="capsule-delete-btn p-1 text-gray-300 hover:text-red-400 transition-colors" data-id="${capsule.id}" title="Delete">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          ` : ''}
+        </div>
         <div class="capsule-lock-icon mb-3">
           <div class="text-4xl capsule-shake">🔒</div>
         </div>
         <p class="font-semibold text-navy-800">${sanitizeHTML(capsule.authorName || 'A classmate')}'s Capsule</p>
-        <p class="text-xs text-gray-400 mt-1">Created ${time}</p>
+        <p class="text-xs text-gray-400 mt-1">Created ${time} · ${visibilityIcon} ${visibilityLabel}</p>
         <div class="mt-4 flex items-center justify-center gap-3">
           <div class="text-center">
             <p class="text-2xl font-bold text-navy-500">${daysLeft}</p>
@@ -121,19 +144,36 @@ function createCapsuleCard(capsule) {
             <p class="text-2xl font-bold text-navy-500">${hoursLeft}</p>
             <p class="text-[10px] text-gray-400">hours</p>
           </div>
+          <span class="text-gray-300">:</span>
+          <div class="text-center">
+            <p class="text-2xl font-bold text-navy-500">${minsLeft}</p>
+            <p class="text-[10px] text-gray-400">mins</p>
+          </div>
         </div>
         <p class="text-xs text-gray-400 mt-3">
-          Opens on ${unlockDate ? formatDate(unlockDate) : 'Unknown date'}
+          Opens on ${unlockDate ? unlockDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Unknown date'}
+          ${unlockDate ? ' at ' + unlockDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
         </p>
       </div>
     `;
   }
+
+  // Delete handler — instant UI removal
+  card.querySelector('.capsule-delete-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    showDeleteConfirmation('this time capsule', async () => {
+      await deleteDoc(doc(db, 'timeCapsules', capsule.id));
+    }, { element: card });
+  });
 
   return card;
 }
 
 function showCreateCapsuleModal() {
   const modal = router.openModal('', { title: '🔒 Create Time Capsule' });
+  const now = new Date();
+  const minDate = now.toISOString().split('T')[0];
+
   modal.body.innerHTML = `
     <div class="p-4 space-y-4">
       <div>
@@ -142,23 +182,61 @@ function showCreateCapsuleModal() {
           class="w-full px-4 py-3 border border-gray-200 rounded-2xl text-sm text-navy-800 placeholder:text-gray-400 focus:outline-none focus:border-navy-500 resize-none bg-white font-handwriting text-base"></textarea>
       </div>
 
+      <!-- Date & Time -->
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs font-semibold text-navy-600 mb-1 block">📅 Unlock Date</label>
+          <input type="date" id="capsule-date" min="${minDate}"
+            class="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm text-navy-800 focus:outline-none focus:border-navy-500 bg-white"/>
+        </div>
+        <div>
+          <label class="text-xs font-semibold text-navy-600 mb-1 block">⏰ Unlock Time</label>
+          <input type="time" id="capsule-time" value="09:00"
+            class="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm text-navy-800 focus:outline-none focus:border-navy-500 bg-white"/>
+        </div>
+      </div>
+      <p class="text-xs text-gray-400">When should this capsule be opened?</p>
+
+      <!-- Visibility -->
       <div>
-        <label class="text-xs font-semibold text-navy-600 mb-1 block">Unlock Date</label>
-        <input type="date" id="capsule-date" min="${new Date().toISOString().split('T')[0]}"
-          class="w-full px-4 py-3 border border-gray-200 rounded-2xl text-sm text-navy-800 focus:outline-none focus:border-navy-500 bg-white"/>
-        <p class="text-xs text-gray-400 mt-1">When should this capsule be opened?</p>
+        <label class="text-xs font-semibold text-navy-600 mb-2 block">Who can see this?</label>
+        <div class="flex gap-2">
+          <button class="privacy-btn active" data-visibility="all">🌍 All Friends</button>
+          <button class="privacy-btn" data-visibility="close">👥 Close Friends</button>
+        </div>
       </div>
 
       <button id="submit-capsule" class="btn-primary">LOCK CAPSULE 🔒</button>
     </div>
   `;
 
+  // Visibility selection
+  let selectedVisibility = 'all';
+  modal.body.querySelectorAll('.privacy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      modal.body.querySelectorAll('.privacy-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      selectedVisibility = btn.dataset.visibility;
+    });
+  });
+
   modal.body.querySelector('#submit-capsule')?.addEventListener('click', async () => {
     const message = modal.body.querySelector('#capsule-message')?.value.trim();
     const date = modal.body.querySelector('#capsule-date')?.value;
+    const time = modal.body.querySelector('#capsule-time')?.value || '09:00';
 
     if (!message) { showToast('Write a message', 'warning'); return; }
     if (!date) { showToast('Set an unlock date', 'warning'); return; }
+
+    const unlockDateTime = new Date(`${date}T${time}`);
+    if (unlockDateTime <= new Date()) {
+      showToast('Unlock date must be in the future', 'warning');
+      return;
+    }
+
+    const btn = modal.body.querySelector('#submit-capsule');
+    btn.disabled = true;
+    btn.textContent = 'LOCKING...';
 
     try {
       await addDoc(collection(db, 'timeCapsules'), {
@@ -167,8 +245,9 @@ function showCreateCapsuleModal() {
         authorPhoto: authManager.userData?.profilePic || '',
         caption: message,
         imageUrl: '',
-        unlockDate: new Date(date).toISOString(),
+        unlockDate: unlockDateTime.toISOString(),
         isUnlocked: false,
+        visibility: selectedVisibility,
         createdAt: serverTimestamp()
       });
       showToast('Time capsule locked! 🔒', 'success');
@@ -176,6 +255,8 @@ function showCreateCapsuleModal() {
     } catch (e) {
       console.error(e);
       showToast('Failed to create capsule', 'error');
+      btn.disabled = false;
+      btn.textContent = 'LOCK CAPSULE 🔒';
     }
   });
 }
@@ -218,7 +299,5 @@ function showCapsuleReveal(capsule) {
 
   overlay.querySelector('#capsule-reveal-close')?.addEventListener('click', dismiss);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) dismiss(); });
-
-  // Auto-dismiss after 12 seconds
   setTimeout(() => { if (document.body.contains(overlay)) dismiss(); }, 12000);
 }

@@ -1,15 +1,22 @@
-// Polls page — Full poll system with real-time voting
+// Polls page — Fixed: no auto-show voters, view votes popup, delete support
 import { db, collection, addDoc, getDocs, query, orderBy, onSnapshot, doc, updateDoc,
-  arrayUnion, serverTimestamp, limit, getDoc } from '../firebase-config.js';
+  arrayUnion, serverTimestamp, limit, getDoc, deleteDoc } from '../firebase-config.js';
 import { showToast, sanitizeHTML, formatNumber } from '../utils.js';
 import { authManager } from '../auth.js';
 import { router } from '../router.js';
 import { createNotification } from '../notifications.js';
+import { showDeleteConfirmation } from '../delete-confirm.js';
 
 let unsubPolls = null;
+const deletedPollIds = new Set();
+
+export function destroyPolls() {
+  if (unsubPolls) unsubPolls();
+  unsubPolls = null;
+}
 
 export async function renderPolls(container) {
-  if (unsubPolls) unsubPolls();
+  destroyPolls();
 
   container.innerHTML = `
     <section class="px-4 pt-4">
@@ -56,6 +63,7 @@ function loadPolls(container) {
       }
       pollsEl.innerHTML = '';
       snap.forEach(d => {
+        if (deletedPollIds.has(d.id)) return;
         pollsEl.appendChild(createPollCard({ id: d.id, ...d.data() }));
       });
     });
@@ -69,19 +77,25 @@ function createPollCard(poll) {
   const myVoteIdx = poll.options?.findIndex(opt => opt.votes?.includes(authManager.currentUser?.uid));
   const hasVoted = myVoteIdx >= 0;
   const isExpired = poll.expiresAt && new Date(poll.expiresAt) < new Date();
+  const isOwner = poll.authorId === authManager.currentUser?.uid;
   const time = poll.createdAt?.toDate ? new Date(poll.createdAt.toDate()).toLocaleDateString() : '';
 
   const card = document.createElement('div');
   card.className = 'card p-4 animate-fadeIn';
   card.innerHTML = `
     <div class="flex items-start justify-between mb-3">
-      <div>
+      <div class="flex-1">
         <p class="font-semibold text-navy-800">${sanitizeHTML(poll.question)}</p>
         <p class="text-xs text-gray-400 mt-0.5">by ${sanitizeHTML(poll.authorName || 'Unknown')} · ${time}</p>
       </div>
       <div class="flex items-center gap-2">
         <span class="poll-live-badge">${formatNumber(totalVotes)} vote${totalVotes !== 1 ? 's' : ''}</span>
         ${isExpired ? '<span class="text-[10px] px-2 py-0.5 rounded-full bg-red-50 text-red-500 font-medium">Ended</span>' : ''}
+        ${isOwner ? `
+          <button class="poll-delete-btn p-1 text-gray-300 hover:text-red-400 transition-colors" data-poll-id="${poll.id}" title="Delete poll">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
+          </button>
+        ` : ''}
       </div>
     </div>
     <div class="space-y-3" id="poll-options-${poll.id}">
@@ -89,9 +103,9 @@ function createPollCard(poll) {
         const optVotes = opt.votes?.length || 0;
         const pct = totalVotes > 0 ? Math.round((optVotes / totalVotes) * 100) : 0;
         const isMyVote = myVoteIdx === i;
-        const voterIds = opt.votes || [];
 
         if (hasVoted || isExpired) {
+          // SHOW ONLY percentage + vote count — NO voter list
           return `
             <div class="poll-option-result">
               <div class="poll-result-bar ${isMyVote ? 'poll-my-vote' : ''}">
@@ -104,25 +118,6 @@ function createPollCard(poll) {
                   </span>
                 </div>
               </div>
-              ${optVotes > 0 ? `
-                <div class="poll-voters-inline" id="voters-${poll.id}-${i}">
-                  <div class="poll-voters-avatars">
-                    ${voterIds.slice(0, 5).map(uid => `
-                      <div class="poll-voter-chip" data-uid="${uid}">
-                        <div class="poll-voter-avatar"></div>
-                        <span class="poll-voter-name">Loading...</span>
-                      </div>
-                    `).join('')}
-                    ${voterIds.length > 5 ? `<span class="poll-voters-more">+${voterIds.length - 5} more</span>` : ''}
-                  </div>
-                  ${voterIds.length > 5 ? `
-                    <button class="poll-voters-expand" data-poll="${poll.id}" data-opt="${i}">
-                      View all ${optVotes} voters
-                    </button>
-                    <div class="poll-voters-full hidden" id="voters-full-${poll.id}-${i}"></div>
-                  ` : ''}
-                </div>
-              ` : ''}
             </div>
           `;
         } else {
@@ -134,7 +129,23 @@ function createPollCard(poll) {
         }
       }).join('')}
     </div>
+
+    <!-- View Votes button — only shown after voting -->
+    ${hasVoted || isExpired ? `
+      <button class="poll-view-votes-btn" data-poll-id="${poll.id}">
+        👀 View Votes
+      </button>
+    ` : ''}
   `;
+
+  // Delete handler — instant UI removal
+  card.querySelector('.poll-delete-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    showDeleteConfirmation('this poll', async () => {
+      deletedPollIds.add(poll.id);
+      await deleteDoc(doc(db, 'polls', poll.id));
+    }, { element: card });
+  });
 
   // Vote handlers
   card.querySelectorAll('.poll-option-btn').forEach(btn => {
@@ -158,71 +169,73 @@ function createPollCard(poll) {
     });
   });
 
-  // Animate poll bars from 0 to target width
+  // Animate poll bars
   requestAnimationFrame(() => {
     card.querySelectorAll('.poll-result-fill[data-target]').forEach(bar => {
       setTimeout(() => { bar.style.width = bar.dataset.target + '%'; }, 100);
     });
   });
 
-  // Resolve voter names inline (auto-load visible voters)
-  if (hasVoted || isExpired) {
-    resolveVoterNames(card, poll);
-  }
-
-  // Expand full voter list
-  card.querySelectorAll('.poll-voters-expand').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const fullEl = card.querySelector(`#voters-full-${btn.dataset.poll}-${btn.dataset.opt}`);
-      if (!fullEl) return;
-      fullEl.classList.toggle('hidden');
-      if (!fullEl.dataset.loaded) {
-        fullEl.dataset.loaded = 'true';
-        const optIdx = parseInt(btn.dataset.opt);
-        const voterIds = poll.options[optIdx]?.votes || [];
-        fullEl.innerHTML = '<div class="text-[10px] text-gray-400 py-1">Loading all voters...</div>';
-        const names = [];
-        for (const uid of voterIds) {
-          try {
-            const snap = await getDoc(doc(db, 'users', uid));
-            names.push(snap.exists() ? snap.data().fullName || 'Unknown' : 'Unknown');
-          } catch { names.push('Unknown'); }
-        }
-        fullEl.innerHTML = names.map(n => `
-          <div class="poll-voter-chip">
-            <div class="poll-voter-avatar-sm">${n[0]}</div>
-            <span class="poll-voter-name">${sanitizeHTML(n)}</span>
-          </div>
-        `).join('');
-      }
-    });
+  // View Votes popup
+  card.querySelector('.poll-view-votes-btn')?.addEventListener('click', () => {
+    showVotersPopup(poll);
   });
 
   return card;
 }
 
-// Resolve voter names for inline display
-async function resolveVoterNames(card, poll) {
-  for (let i = 0; i < poll.options.length; i++) {
-    const voterIds = poll.options[i]?.votes || [];
-    const chips = card.querySelectorAll(`#voters-${poll.id}-${i} .poll-voter-chip`);
-    for (const chip of chips) {
-      const uid = chip.dataset.uid;
-      if (!uid) continue;
-      try {
-        const snap = await getDoc(doc(db, 'users', uid));
-        const userData = snap.exists() ? snap.data() : {};
-        const name = userData.fullName || 'Unknown';
-        const initial = name[0] || '?';
-        chip.querySelector('.poll-voter-avatar').textContent = initial;
-        chip.querySelector('.poll-voter-avatar').style.background = `linear-gradient(135deg, #1e3a5f, #5c82b7)`;
-        chip.querySelector('.poll-voter-avatar').style.color = '#fff';
-        chip.querySelector('.poll-voter-name').textContent = name;
-      } catch {
-        chip.querySelector('.poll-voter-name').textContent = 'Unknown';
-      }
-    }
+// Smooth popup showing who voted for what
+async function showVotersPopup(poll) {
+  const modal = router.openModal('', { title: '👀 Who Voted' });
+  modal.body.innerHTML = '<div class="p-6 text-center"><div class="text-2xl mb-2">⏳</div><p class="text-sm text-gray-400">Loading voters...</p></div>';
+
+  const totalVotes = poll.options?.reduce((sum, opt) => sum + (opt.votes?.length || 0), 0) || 0;
+
+  // Resolve all voter names
+  const voterCache = {};
+  const allUids = new Set();
+  poll.options.forEach(opt => (opt.votes || []).forEach(uid => allUids.add(uid)));
+
+  for (const uid of allUids) {
+    try {
+      const snap = await getDoc(doc(db, 'users', uid));
+      voterCache[uid] = snap.exists() ? snap.data() : { fullName: 'Unknown' };
+    } catch { voterCache[uid] = { fullName: 'Unknown' }; }
   }
+
+  modal.body.innerHTML = `
+    <div class="p-4 space-y-4">
+      <p class="text-center text-sm text-gray-400 mb-3">${totalVotes} total vote${totalVotes !== 1 ? 's' : ''}</p>
+      ${poll.options.map((opt, i) => {
+        const optVotes = opt.votes || [];
+        const pct = totalVotes > 0 ? Math.round((optVotes.length / totalVotes) * 100) : 0;
+        return `
+          <div class="voters-option-group">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-sm font-semibold text-navy-800">${sanitizeHTML(opt.text)}</span>
+              <span class="text-xs text-gray-400">${pct}% · ${optVotes.length}</span>
+            </div>
+            ${optVotes.length > 0 ? `
+              <div class="space-y-1.5">
+                ${optVotes.map(uid => {
+                  const u = voterCache[uid] || {};
+                  const name = u.fullName || 'Unknown';
+                  return `
+                    <div class="flex items-center gap-2 py-1.5 px-2 rounded-lg bg-cream-50">
+                      ${u.profilePic
+                        ? `<img src="${u.profilePic}" class="w-6 h-6 rounded-full object-cover" alt=""/>`
+                        : `<div class="w-6 h-6 rounded-full bg-navy-500 text-white flex items-center justify-center text-[9px] font-bold">${name[0]}</div>`}
+                      <span class="text-sm text-navy-800">${sanitizeHTML(name)}</span>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            ` : '<p class="text-xs text-gray-300 italic">No votes</p>'}
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
 }
 
 function showCreatePollModal() {

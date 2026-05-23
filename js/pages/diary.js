@@ -1,16 +1,22 @@
-// Shared Diary page — Enhanced with privacy modes, reactions, photos, thread replies
+// Shared Diary page — Fixed replies, continue writing, privacy, delete support
 import { db, collection, addDoc, query, orderBy, onSnapshot, doc, updateDoc,
   serverTimestamp, limit, arrayUnion, arrayRemove, getDocs, where, storage,
-  storageRef, uploadBytes, getDownloadURL } from '../firebase-config.js';
+  storageRef, uploadBytes, getDownloadURL, deleteDoc } from '../firebase-config.js';
 import { showToast, sanitizeHTML, formatDate, MOOD_EMOJIS, timeAgo } from '../utils.js';
 import { authManager } from '../auth.js';
 import { router } from '../router.js';
+import { showDeleteConfirmation, deleteDocFull } from '../delete-confirm.js';
 
 let unsubDiary = null;
+let replyUnsubs = {};  // Track reply listeners per entry
+const deletedDiaryIds = new Set();
 
 export function destroyDiary() {
   if (unsubDiary) unsubDiary();
   unsubDiary = null;
+  // Clean up all reply listeners
+  Object.values(replyUnsubs).forEach(unsub => { if (unsub) unsub(); });
+  replyUnsubs = {};
 }
 
 export async function renderDiary(container) {
@@ -62,6 +68,9 @@ export async function renderDiary(container) {
 function loadDiary(container, filter = 'all') {
   const diaryEl = container.querySelector('#diary-container');
   if (unsubDiary) unsubDiary();
+  // Clean up old reply listeners
+  Object.values(replyUnsubs).forEach(unsub => { if (unsub) unsub(); });
+  replyUnsubs = {};
 
   try {
     const q = query(collection(db, 'diary'), orderBy('createdAt', 'desc'), limit(30));
@@ -81,6 +90,7 @@ function loadDiary(container, filter = 'all') {
       let hasEntries = false;
 
       snap.forEach(d => {
+        if (deletedDiaryIds.has(d.id)) return; // Skip deleted
         const entry = { id: d.id, ...d.data() };
 
         // Apply privacy filter
@@ -121,6 +131,7 @@ function createDiaryEntry(entry) {
   const date = entry.createdAt?.toDate ? formatDate(entry.createdAt.toDate()) : '';
   const time = entry.createdAt?.toDate ? timeAgo(entry.createdAt.toDate()) : '';
   const uid = authManager.currentUser?.uid;
+  const isOwner = entry.authorId === uid;
   const myReaction = entry.reactions?.find(r => r.userId === uid);
   const reactionCounts = {};
   (entry.reactions || []).forEach(r => {
@@ -146,7 +157,14 @@ function createDiaryEntry(entry) {
             <p class="text-[10px] text-gray-400">${time} · ${privacyIcons[entry.privacy] || '🌍'} ${privacyLabel[entry.privacy] || 'All'}</p>
           </div>
         </div>
-        <span class="text-2xl">${entry.mood || '📝'}</span>
+        <div class="flex items-center gap-2">
+          <span class="text-2xl">${entry.mood || '📝'}</span>
+          ${isOwner ? `
+            <button class="diary-delete-btn" data-entry-id="${entry.id}" title="Delete">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
+            </button>
+          ` : ''}
+        </div>
       </div>
 
       <!-- Title -->
@@ -177,16 +195,21 @@ function createDiaryEntry(entry) {
             ${myReaction ? '😊' : '+'} React
           </button>
         </div>
-        <button class="diary-reply-btn" data-entry-id="${entry.id}">
-          💬 ${replyCount > 0 ? replyCount : ''} ${replyCount > 0 ? 'replies' : 'Reply'}
-        </button>
+        <div class="flex items-center gap-2">
+          <button class="diary-continue-btn" data-entry-id="${entry.id}" title="Continue writing">
+            ✍️ Continue
+          </button>
+          <button class="diary-reply-btn" data-entry-id="${entry.id}">
+            💬 ${replyCount > 0 ? replyCount : ''} ${replyCount > 0 ? 'replies' : 'Reply'}
+          </button>
+        </div>
       </div>
 
       <!-- Replies (hidden by default) -->
       <div class="diary-replies hidden" id="replies-${entry.id}">
         <div class="diary-replies-list" id="replies-list-${entry.id}"></div>
         <div class="diary-reply-input-row">
-          <input type="text" placeholder="Continue the thread..." class="diary-reply-input" id="reply-input-${entry.id}"/>
+          <input type="text" placeholder="Write a reply..." class="diary-reply-input" id="reply-input-${entry.id}"/>
           <button class="diary-reply-send" data-entry-id="${entry.id}">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>
           </button>
@@ -195,9 +218,23 @@ function createDiaryEntry(entry) {
     </div>
   `;
 
+  // Delete button — instant UI removal
+  card.querySelector('.diary-delete-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    showDeleteConfirmation('this diary entry', async () => {
+      deletedDiaryIds.add(entry.id);
+      await deleteDocFull('diary', entry.id, ['replies', 'continuations'], [entry.imageUrl]);
+    }, { element: card });
+  });
+
   // React button
   card.querySelector('.diary-react-btn')?.addEventListener('click', () => {
     showReactionPicker(entry.id);
+  });
+
+  // Continue Writing button
+  card.querySelector('.diary-continue-btn')?.addEventListener('click', () => {
+    showContinueWritingModal(entry);
   });
 
   // Reply toggle
@@ -242,8 +279,8 @@ function showReactionPicker(entryId) {
 
       try {
         const entryRef = doc(db, 'diary', entryId);
-        // Remove old reaction first
-        const entrySnap = await import('../firebase-config.js').then(m => m.getDoc(entryRef));
+        const { getDoc } = await import('../firebase-config.js');
+        const entrySnap = await getDoc(entryRef);
         if (entrySnap.exists()) {
           const data = entrySnap.data();
           const oldReactions = (data.reactions || []).filter(r => r.userId !== authManager.currentUser.uid);
@@ -264,33 +301,54 @@ function showReactionPicker(entryId) {
   });
 }
 
-async function loadReplies(entryId) {
+function loadReplies(entryId) {
   const list = document.querySelector(`#replies-list-${entryId}`);
   if (!list) return;
 
+  // Clean up previous listener for this entry
+  if (replyUnsubs[entryId]) {
+    replyUnsubs[entryId]();
+  }
+
   try {
-    const q = query(collection(db, 'diary', entryId, 'replies'), orderBy('createdAt', 'asc'), limit(20));
-    onSnapshot(q, (snap) => {
+    const q = query(collection(db, 'diary', entryId, 'replies'), orderBy('createdAt', 'asc'), limit(50));
+    replyUnsubs[entryId] = onSnapshot(q, (snap) => {
       list.innerHTML = '';
       if (snap.empty) {
         list.innerHTML = '<p class="text-xs text-gray-400 text-center py-2 font-handwriting">No replies yet. Continue the thread!</p>';
         return;
       }
       snap.forEach(d => {
-        const r = d.data();
+        const r = { id: d.id, ...d.data() };
         const time = r.createdAt?.toDate ? timeAgo(r.createdAt.toDate()) : '';
+        const isOwner = r.authorId === authManager.currentUser?.uid;
+        const privacyIcon = r.privacy ? ({ all: '🌍', close: '👥', private: '🔒' }[r.privacy] || '') : '';
+        const isContinuation = r.isContinuation;
+
         const div = document.createElement('div');
-        div.className = 'diary-reply-item animate-fadeIn';
+        div.className = `diary-reply-item animate-fadeIn ${isContinuation ? 'diary-continuation' : ''}`;
         div.innerHTML = `
           ${r.authorPhoto
             ? `<img src="${r.authorPhoto}" class="w-6 h-6 rounded-full object-cover flex-shrink-0" alt=""/>`
             : `<div class="w-6 h-6 rounded-full bg-navy-500 text-white flex items-center justify-center text-[9px] font-bold flex-shrink-0">${(r.authorName || '?')[0]}</div>`}
           <div class="flex-1 min-w-0">
-            <p class="text-xs"><span class="font-semibold text-navy-800">${sanitizeHTML(r.authorName || 'Unknown')}</span> <span class="text-gray-600 font-handwriting text-sm">${sanitizeHTML(r.text)}</span></p>
+            <p class="text-xs"><span class="font-semibold text-navy-800">${sanitizeHTML(r.authorName || 'Unknown')}</span> ${isContinuation ? '<span class="text-[9px] text-navy-400 bg-navy-50 px-1.5 py-0.5 rounded-full ml-1">✍️ continued</span>' : ''}</p>
+            <p class="font-handwriting text-sm text-gray-600 mt-0.5">${sanitizeHTML(r.text)}</p>
             ${r.imageUrl ? `<img src="${r.imageUrl}" class="mt-1 max-h-32 rounded-lg" alt="" loading="lazy"/>` : ''}
-            <p class="text-[9px] text-gray-400 mt-0.5">${time}</p>
+            <p class="text-[9px] text-gray-400 mt-0.5">${time} ${privacyIcon}</p>
           </div>
+          ${isOwner ? `<button class="reply-delete-btn text-gray-300 hover:text-red-400" data-reply-id="${r.id}" data-entry-id="${entryId}" title="Delete"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg></button>` : ''}
         `;
+
+        // Delete reply handler
+        div.querySelector('.reply-delete-btn')?.addEventListener('click', () => {
+          showDeleteConfirmation('this reply', async () => {
+            await deleteDoc(doc(db, 'diary', entryId, 'replies', r.id));
+            const { increment } = await import('../firebase-config.js');
+            await updateDoc(doc(db, 'diary', entryId), { replyCount: increment(-1) });
+          });
+        });
+
         list.appendChild(div);
       });
     });
@@ -302,7 +360,10 @@ async function submitReply(entryId) {
   if (!input || !authManager.currentUser) return;
   const text = input.value.trim();
   if (!text) return;
+
+  // Clear input immediately for instant feel
   input.value = '';
+  input.disabled = true;
 
   try {
     await addDoc(collection(db, 'diary', entryId, 'replies'), {
@@ -310,6 +371,7 @@ async function submitReply(entryId) {
       authorId: authManager.currentUser.uid,
       authorName: authManager.userData?.fullName || 'Unknown',
       authorPhoto: authManager.userData?.profilePic || '',
+      isContinuation: false,
       createdAt: serverTimestamp()
     });
     // Increment reply count
@@ -318,7 +380,92 @@ async function submitReply(entryId) {
   } catch (e) {
     console.error(e);
     showToast('Could not send reply', 'error');
+    // Restore text on error
+    input.value = text;
   }
+  input.disabled = false;
+  input.focus();
+}
+
+// Continue Writing modal with privacy selection
+function showContinueWritingModal(entry) {
+  const modal = router.openModal('', { title: '✍️ Continue Writing' });
+  modal.body.innerHTML = `
+    <div class="p-4 space-y-4">
+      <div class="p-3 bg-cream-50 rounded-xl border border-cream-200">
+        <p class="text-[10px] text-gray-400 mb-1">Original by ${sanitizeHTML(entry.authorName || 'Anonymous')}</p>
+        <p class="font-handwriting text-base text-gray-600 line-clamp-3">${sanitizeHTML(entry.content?.substring(0, 150))}${entry.content?.length > 150 ? '...' : ''}</p>
+      </div>
+
+      <!-- Privacy selector -->
+      <div>
+        <label class="text-xs font-semibold text-navy-600 mb-2 block">Who can see your continuation?</label>
+        <div class="flex gap-2">
+          <button class="privacy-btn active" data-privacy="all">🌍 All Friends</button>
+          <button class="privacy-btn" data-privacy="close">👥 Close Friends</button>
+          <button class="privacy-btn" data-privacy="private">🔒 Private</button>
+        </div>
+      </div>
+
+      <!-- Content -->
+      <div>
+        <textarea id="continue-content" rows="5" placeholder="Continue the story..."
+          class="w-full px-4 py-3 border border-gray-200 rounded-2xl text-sm text-navy-800 placeholder:text-gray-400 focus:outline-none focus:border-navy-500 resize-none bg-white font-handwriting text-lg"></textarea>
+      </div>
+
+      <button id="submit-continuation" class="btn-primary">CONTINUE WRITING ✍️</button>
+    </div>
+  `;
+
+  // Privacy selection
+  let selectedPrivacy = 'all';
+  modal.body.querySelectorAll('.privacy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      modal.body.querySelectorAll('.privacy-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      selectedPrivacy = btn.dataset.privacy;
+    });
+  });
+
+  // Submit
+  modal.body.querySelector('#submit-continuation')?.addEventListener('click', async () => {
+    const content = modal.body.querySelector('#continue-content')?.value.trim();
+    if (!content) { showToast('Write something!', 'warning'); return; }
+    if (!authManager.currentUser) return;
+
+    const submitBtn = modal.body.querySelector('#submit-continuation');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'SAVING...';
+
+    try {
+      await addDoc(collection(db, 'diary', entry.id, 'replies'), {
+        text: content,
+        authorId: authManager.currentUser.uid,
+        authorName: authManager.userData?.fullName || 'Unknown',
+        authorPhoto: authManager.userData?.profilePic || '',
+        privacy: selectedPrivacy,
+        isContinuation: true,
+        createdAt: serverTimestamp()
+      });
+      const { increment } = await import('../firebase-config.js');
+      await updateDoc(doc(db, 'diary', entry.id), { replyCount: increment(1) });
+
+      showToast('Continued the story! ✍️', 'success');
+      modal.close();
+
+      // Auto-open the replies section to show the new continuation
+      const repliesSection = document.querySelector(`#replies-${entry.id}`);
+      if (repliesSection?.classList.contains('hidden')) {
+        repliesSection.classList.remove('hidden');
+        loadReplies(entry.id);
+      }
+    } catch (e) {
+      console.error(e);
+      showToast('Failed to continue', 'error');
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'CONTINUE WRITING ✍️';
+    }
+  });
 }
 
 function showDiaryEntryModal() {

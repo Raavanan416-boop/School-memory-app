@@ -231,6 +231,35 @@ function buildAppShell() {
 
   router.navigate('home');
 
+  // Apply saved theme
+  const savedTheme = localStorage.getItem('app_theme');
+  if (savedTheme && savedTheme !== 'theme-cream') {
+    document.body.classList.add(savedTheme);
+  }
+
+  // Page cleanup on navigation
+  router.onNavigate = async (page) => {
+    try {
+      // Lazy cleanup for pages that support it
+      if (page !== 'diary') {
+        const { destroyDiary } = await import('./pages/diary.js').catch(() => ({}));
+        if (destroyDiary) destroyDiary();
+      }
+      if (page !== 'polls') {
+        const { destroyPolls } = await import('./pages/polls.js').catch(() => ({}));
+        if (destroyPolls) destroyPolls();
+      }
+      if (page !== 'timecapsule') {
+        const { destroyTimeCapsule } = await import('./pages/timecapsule.js').catch(() => ({}));
+        if (destroyTimeCapsule) destroyTimeCapsule();
+      }
+      if (page !== 'chat') {
+        const { destroyChat } = await import('./pages/chat.js').catch(() => ({}));
+        if (destroyChat) destroyChat();
+      }
+    } catch(e) { /* non-critical cleanup */ }
+  };
+
   // PWA Install prompt
   setupPWAInstall();
 

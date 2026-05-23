@@ -1,10 +1,11 @@
 // Home page — Full-featured feed with comments, share, save, throwback, double-tap like
 import { db, collection, query, orderBy, limit, onSnapshot, doc, updateDoc, addDoc,
-  arrayUnion, arrayRemove, serverTimestamp, getDocs, where, startAfter, increment } from '../firebase-config.js';
+  arrayUnion, arrayRemove, serverTimestamp, getDocs, where, startAfter, increment, deleteDoc } from '../firebase-config.js';
 import { getTimeSinceSchool, EMOTIONAL_QUOTES, timeAgo, sanitizeHTML, isBirthdayToday, formatNumber } from '../utils.js';
 import { authManager } from '../auth.js';
 import { router } from '../router.js';
 import { createNotification } from '../notifications.js';
+import { showDeleteConfirmation, deleteDocFull } from '../delete-confirm.js';
 
 let timerInterval = null;
 let quoteInterval = null;
@@ -12,6 +13,7 @@ let unsubFeed = null;
 let lastDoc = null;
 let loadingMore = false;
 let allPostsLoaded = false;
+const deletedPostIds = new Set(); // Track locally deleted post IDs
 
 export function destroyHome() {
   if (timerInterval) clearInterval(timerInterval);
@@ -223,6 +225,8 @@ function loadFeed(container) {
       }
       feedEl.innerHTML = '';
       snap.forEach(d => {
+        // Skip locally deleted posts (optimistic filter)
+        if (deletedPostIds.has(d.id)) return;
         feedEl.appendChild(createPostCard({ id: d.id, ...d.data() }));
         lastDoc = d;
       });
@@ -295,6 +299,11 @@ function createPostCard(post) {
         <p class="text-xs text-gray-400">${location || time}</p>
       </div>
       ${post.category ? `<span class="text-[10px] px-2 py-1 rounded-full bg-cream-100 text-navy-500 font-medium">${sanitizeHTML(post.category)}</span>` : ''}
+      ${post.authorId === authManager.currentUser?.uid ? `
+        <button class="post-delete-btn p-1.5 rounded-full hover:bg-red-50 text-gray-300 hover:text-red-400 transition-colors" data-post-id="${post.id}" title="Delete post">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
+        </button>
+      ` : ''}
     </div>
 
     <!-- Media -->
@@ -489,6 +498,15 @@ function createPostCard(post) {
   // View author profile
   card.querySelector('.post-author-name')?.addEventListener('click', () => {
     router.navigate('profile', { userId: post.authorId });
+  });
+
+  // Delete post (with storage cleanup + instant UI removal)
+  card.querySelector('.post-delete-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    showDeleteConfirmation('this post', async () => {
+      deletedPostIds.add(post.id); // Prevent reappearing via onSnapshot
+      await deleteDocFull('posts', post.id, ['comments'], [post.imageUrl]);
+    }, { element: card });
   });
 
   return card;

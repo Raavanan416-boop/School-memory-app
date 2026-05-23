@@ -152,26 +152,7 @@ export async function renderProfile(container, data = null) {
         <button id="suggest-badge-btn" class="mt-3 w-full py-2 text-xs font-semibold text-navy-500 border border-navy-200 rounded-xl hover:bg-navy-50 transition-colors">🏷 Suggest a Badge</button>
       ` : ''}
 
-      <!-- Admin Controls (only visible to admin, completely hidden for normal users) -->
-      ${authManager.isAdmin && viewingOther ? `
-        <div class="admin-controls-panel" id="admin-controls">
-          <div class="admin-controls-header">
-            <span class="admin-controls-tag">🔒 Admin</span>
-          </div>
-          <div class="admin-controls-grid">
-            <div class="admin-field">
-              <span class="admin-field-label">Roll Number</span>
-              <span class="admin-field-value" id="admin-roll">${sanitizeHTML(user.rollNumber || 'Not Set')}</span>
-              <button class="admin-edit-btn" data-field="rollNumber" data-uid="${uid}">Edit</button>
-            </div>
-            <div class="admin-field">
-              <span class="admin-field-label">Date of Birth</span>
-              <span class="admin-field-value" id="admin-dob">${user.dateOfBirth || 'Not Set'}</span>
-              <button class="admin-edit-btn" data-field="dateOfBirth" data-uid="${uid}">Edit</button>
-            </div>
-          </div>
-        </div>
-      ` : ''}
+      <!-- Admin Controls removed from profile view — moved to settings drawer -->
     </div>
 
     <!-- Tabs -->
@@ -280,6 +261,13 @@ export async function renderProfile(container, data = null) {
                   <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
                 </div>
                 <span>Privacy Settings</span>
+                <svg class="w-4 h-4 text-gray-300 ml-auto" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+              </button>
+              <button class="settings-item" data-action="theme-settings">
+                <div class="settings-item-icon bg-gradient-to-br from-purple-50 to-pink-50 text-purple-500">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.098 19.902a3.75 3.75 0 005.304 0l6.401-6.402M6.75 21A3.75 3.75 0 013 17.25V4.125C3 3.504 3.504 3 4.125 3h5.25c.621 0 1.125.504 1.125 1.125v4.072M6.75 21a3.75 3.75 0 003.75-3.75V8.197M6.75 21h13.125c.621 0 1.125-.504 1.125-1.125v-5.25c0-.621-.504-1.125-1.125-1.125h-4.072M10.5 8.197l2.88-2.88c.438-.439 1.15-.439 1.59 0l3.712 3.713c.44.44.44 1.152 0 1.59l-2.879 2.88M6.75 17.25h.008v.008H6.75v-.008z"/></svg>
+                </div>
+                <span>Theme</span>
                 <svg class="w-4 h-4 text-gray-300 ml-auto" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
               </button>
             </div>
@@ -393,6 +381,7 @@ export async function renderProfile(container, data = null) {
           case 'notification-settings': showNotificationSettings(); break;
           case 'privacy-settings': showPrivacySettings(); break;
           case 'close-friends': showCloseFriendsModal(); break;
+          case 'theme-settings': showThemePickerModal(); break;
           case 'logout': showLogoutConfirmation(); break;
         }
       }, 200);
@@ -456,18 +445,7 @@ export async function renderProfile(container, data = null) {
   if (unsubBadges) { unsubBadges(); unsubBadges = null; }
   loadSuggestedBadgesRealtime(container.querySelector('#suggested-badges-area'), uid, viewingOther);
 
-  // === ADMIN CONTROLS ===
-  if (authManager.isAdmin && viewingOther) {
-    container.querySelectorAll('.admin-edit-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const field = btn.dataset.field;
-        const targetUid = btn.dataset.uid;
-        const currentValue = field === 'rollNumber' ? (user.rollNumber || '') : (user.dateOfBirth || '');
-        showAdminEditModal(field, targetUid, currentValue, user.fullName || 'User');
-      });
-    });
-  }
+  // Admin controls removed from profile view — handled in settings drawer
 
 }
 
@@ -1410,21 +1388,37 @@ function showEditProfileModal() {
         <input type="hidden" id="edit-theme-color" value="${user.themeColor || ''}" />
       </div>
 
+      <!-- Date of Birth — Set Once, Then Locked -->
+      <div class="pt-2">
+        <p class="text-[10px] text-gray-400 uppercase tracking-widest font-semibold mb-3">🎂 Date of Birth</p>
+        <div class="space-y-2">
+          ${user.dateOfBirth ? `
+            <div class="flex items-center gap-2 px-4 py-3 bg-gray-50 rounded-xl border border-gray-100">
+              <span class="text-lg">🔒</span>
+              <div class="flex-1">
+                <p class="text-sm font-semibold text-navy-800">${user.dateOfBirth}</p>
+                <p class="text-[10px] text-gray-400">Date of Birth is permanently set</p>
+              </div>
+            </div>
+          ` : `
+            <div>
+              <label class="text-xs font-semibold text-navy-600 mb-1 block">Set your Date of Birth (one-time only)</label>
+              <input type="date" id="edit-dob" class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-navy-800 focus:outline-none focus:border-navy-400 bg-white"/>
+              <p class="text-[10px] text-amber-500 mt-1">⚠️ This cannot be changed once saved</p>
+            </div>
+          `}
+        </div>
+      </div>
+
       <!-- Admin-only fields (read-only) -->
       <div class="pt-2">
         <p class="text-[10px] text-gray-400 uppercase tracking-widest font-semibold mb-3">🔒 Admin-Only Info</p>
         <div class="space-y-3">
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="text-xs font-semibold text-gray-400 mb-1 block">🔒 Roll Number</label>
-              <input type="text" value="${sanitizeHTML(user.rollNumber || 'Set by Admin')}" disabled class="w-full px-4 py-2.5 border border-gray-100 rounded-xl text-sm text-gray-400 bg-gray-50 cursor-not-allowed"/>
-            </div>
-            <div>
-              <label class="text-xs font-semibold text-gray-400 mb-1 block">🔒 Date of Birth</label>
-              <input type="text" value="${user.dateOfBirth || 'Set by Admin'}" disabled class="w-full px-4 py-2.5 border border-gray-100 rounded-xl text-sm text-gray-400 bg-gray-50 cursor-not-allowed"/>
-            </div>
+          <div>
+            <label class="text-xs font-semibold text-gray-400 mb-1 block">🔒 Roll Number</label>
+            <input type="text" value="${sanitizeHTML(user.rollNumber || 'Set by Admin')}" disabled class="w-full px-4 py-2.5 border border-gray-100 rounded-xl text-sm text-gray-400 bg-gray-50 cursor-not-allowed"/>
           </div>
-          <p class="text-[10px] text-gray-300 text-center">Roll Number & Date of Birth can only be changed by admin</p>
+          <p class="text-[10px] text-gray-300 text-center">Roll Number can only be changed by admin</p>
         </div>
       </div>
 
@@ -1509,6 +1503,11 @@ function showEditProfileModal() {
         joinedYear: modal.body.querySelector('#edit-joined')?.value.trim(),
         endYear: modal.body.querySelector('#edit-end')?.value.trim()
       };
+      // DOB: only save if not already set and user entered one
+      const dobInput = modal.body.querySelector('#edit-dob');
+      if (dobInput && dobInput.value && !user.dateOfBirth) {
+        updates.dateOfBirth = dobInput.value;
+      }
       const selectedTheme = modal.body.querySelector('#edit-theme-color')?.value;
       if (selectedTheme) updates.themeColor = selectedTheme;
       await authManager.updateProfile(updates);
@@ -1732,4 +1731,61 @@ async function showSavedPosts() {
   } catch (e) {
     modal.body.innerHTML = '<div class="p-8 text-center text-sm text-gray-400">Failed to load saved posts</div>';
   }
+}
+
+// ===== THEME PICKER MODAL =====
+function showThemePickerModal() {
+  const THEMES = [
+    { id: 'theme-cream', name: 'Classic Cream', icon: '☀️', colors: ['#fdf6e3', '#1e3a5f', '#d4a574'], desc: 'Default warm nostalgic' },
+    { id: 'theme-dark', name: 'Dark Mode', icon: '🌙', colors: ['#0f172a', '#e2e8f0', '#3b82f6'], desc: 'Easy on the eyes' },
+    { id: 'theme-ocean', name: 'Ocean Blue', icon: '🌊', colors: ['#0c4a6e', '#e0f2fe', '#38bdf8'], desc: 'Deep sea vibes' },
+    { id: 'theme-rose', name: 'Rose Gold', icon: '🌹', colors: ['#fdf2f8', '#831843', '#f472b6'], desc: 'Elegant and warm' },
+    { id: 'theme-forest', name: 'Forest Green', icon: '🌲', colors: ['#f0fdf4', '#14532d', '#4ade80'], desc: 'Nature inspired' },
+    { id: 'theme-midnight', name: 'Midnight Purple', icon: '🔮', colors: ['#1e1b4b', '#e0e7ff', '#a78bfa'], desc: 'Mystical night' }
+  ];
+
+  const currentTheme = localStorage.getItem('app_theme') || 'theme-cream';
+  const modal = router.openModal('', { title: '🎨 Choose Theme' });
+  modal.body.innerHTML = `
+    <div class="p-4 space-y-3">
+      <p class="text-xs text-gray-400 text-center mb-2">Theme applies instantly across the entire app</p>
+      ${THEMES.map(t => `
+        <button class="theme-option-card ${currentTheme === t.id ? 'theme-option-active' : ''}" data-theme="${t.id}">
+          <div class="flex items-center gap-3 w-full">
+            <div class="flex gap-1">
+              ${t.colors.map(c => `<div class="w-5 h-5 rounded-full border border-white/30" style="background:${c}"></div>`).join('')}
+            </div>
+            <div class="flex-1 text-left">
+              <p class="text-sm font-semibold">${t.icon} ${t.name}</p>
+              <p class="text-[10px] text-gray-400">${t.desc}</p>
+            </div>
+            ${currentTheme === t.id ? '<span class="text-green-500 text-xs font-bold">✓ Active</span>' : ''}
+          </div>
+        </button>
+      `).join('')}
+    </div>
+  `;
+
+  modal.body.querySelectorAll('.theme-option-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const themeId = card.dataset.theme;
+      // Apply theme instantly
+      document.body.className = document.body.className.replace(/theme-\w+/g, '').trim();
+      if (themeId !== 'theme-cream') {
+        document.body.classList.add(themeId);
+      }
+      localStorage.setItem('app_theme', themeId);
+
+      // Update active state in modal
+      modal.body.querySelectorAll('.theme-option-card').forEach(c => c.classList.remove('theme-option-active'));
+      card.classList.add('theme-option-active');
+
+      showToast(`${THEMES.find(t => t.id === themeId)?.name} theme applied! 🎨`, 'success');
+
+      // Save to Firebase (optional, for cross-device sync)
+      try {
+        authManager.updateProfile({ theme: themeId });
+      } catch (e) { /* non-critical */ }
+    });
+  });
 }

@@ -20,8 +20,12 @@ export function destroyChat() {
   currentChatId = null; chatViewOpen = false;
 }
 
+// Store container reference for reliable DOM access
+let chatContainer = null;
+
 export async function renderChat(container) {
   destroyChat();
+  chatContainer = container;
 
   container.innerHTML = `
     <section class="px-4 pt-4" id="chat-section">
@@ -55,32 +59,32 @@ export async function renderChat(container) {
         <h3 class="section-title mb-3">Direct Messages</h3>
         <div id="dm-list" class="space-y-1"></div>
       </div>
+    </section>
 
-      <!-- Chat View Overlay -->
-      <div id="chat-view" class="hidden fixed inset-0 z-[60] bg-cream-100 flex flex-col">
-        <div id="chat-header" class="flex items-center gap-3 p-3 bg-white border-b border-gray-100 shadow-sm"></div>
-        <div id="chat-messages" class="flex-1 overflow-y-auto p-4 space-y-2"></div>
-        <div id="typing-indicator" class="hidden px-4 py-1">
-          <span class="text-xs text-gray-400 flex items-center gap-1">
-            <span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>
-            <span class="typing-name">typing</span>
-          </span>
-        </div>
-        <div class="p-3 bg-white border-t border-gray-100">
-          <div class="flex items-center gap-2">
-            <button id="attach-btn" class="p-2 text-gray-400 hover:text-navy-500 transition-colors">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13"/></svg>
-            </button>
-            <input type="text" id="msg-input" placeholder="Type a message..."
-              class="flex-1 px-4 py-2.5 border border-gray-200 rounded-full text-sm text-navy-800 placeholder:text-gray-400 focus:outline-none focus:border-navy-500 bg-white"/>
-            <input type="file" id="chat-file-input" accept="image/*" class="hidden"/>
-            <button id="send-msg-btn" class="p-2.5 bg-navy-500 rounded-full text-white hover:bg-navy-600 transition-colors active:scale-95">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>
-            </button>
-          </div>
+    <!-- Chat View Overlay — placed OUTSIDE section for reliable z-index -->
+    <div id="chat-view" class="hidden fixed inset-0 z-[60] bg-cream-100 flex flex-col">
+      <div id="chat-header" class="flex items-center gap-3 p-3 bg-white border-b border-gray-100 shadow-sm"></div>
+      <div id="chat-messages" class="flex-1 overflow-y-auto p-4 space-y-2"></div>
+      <div id="typing-indicator" class="hidden px-4 py-1">
+        <span class="text-xs text-gray-400 flex items-center gap-1">
+          <span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>
+          <span class="typing-name">typing</span>
+        </span>
+      </div>
+      <div class="p-3 bg-white border-t border-gray-100">
+        <div class="flex items-center gap-2">
+          <button id="attach-btn" class="p-2 text-gray-400 hover:text-navy-500 transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13"/></svg>
+          </button>
+          <input type="text" id="msg-input" placeholder="Type a message..."
+            class="flex-1 px-4 py-2.5 border border-gray-200 rounded-full text-sm text-navy-800 placeholder:text-gray-400 focus:outline-none focus:border-navy-500 bg-white"/>
+          <input type="file" id="chat-file-input" accept="image/*" class="hidden"/>
+          <button id="send-msg-btn" class="p-2.5 bg-navy-500 rounded-full text-white hover:bg-navy-600 transition-colors active:scale-95">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>
+          </button>
         </div>
       </div>
-    </section>
+    </div>
   `;
 
   // New Chat button
@@ -284,8 +288,9 @@ async function openGroupChat(container) {
 function openChat(container, chatId, name, otherUid = null, isGroup = false) {
   currentChatId = chatId;
   chatViewOpen = true;
-  const chatView = document.querySelector('#chat-view');
-  if (!chatView) return;
+  // Use container reference first, fall back to global document
+  const chatView = (chatContainer || container)?.querySelector('#chat-view') || document.querySelector('#chat-view');
+  if (!chatView) { console.error('Chat view not found'); return; }
   chatView.classList.remove('hidden');
 
   const header = document.querySelector('#chat-header');
@@ -377,7 +382,10 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
             ${!isMine && isGroup ? `<p class="text-[10px] font-semibold ${isMine ? 'text-white/70' : 'text-navy-500'} mb-0.5">${sanitizeHTML(msg.senderName || '')}</p>` : ''}
             ${msg.imageUrl ? `<img src="${msg.imageUrl}" class="rounded-xl max-w-full max-h-60 mb-1" alt="Shared image" loading="lazy"/>` : ''}
             ${msg.text ? `<p class="text-sm">${sanitizeHTML(msg.text)}</p>` : ''}
-            <p class="text-[9px] mt-1 ${isMine ? 'text-white/50' : 'text-gray-400'} text-right">${msgTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+            <div class="flex items-center justify-end gap-1 mt-1">
+              <p class="text-[9px] ${isMine ? 'text-white/50' : 'text-gray-400'}">${msgTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+              ${isMine ? '<span class="text-[9px] text-white/40">✓✓</span>' : ''}
+            </div>
           </div>
         `;
 

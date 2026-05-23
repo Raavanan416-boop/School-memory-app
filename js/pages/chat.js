@@ -519,7 +519,7 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
         msgEl.className = `flex ${isMine ? 'justify-end' : 'justify-start'} ${sameSender ? 'mt-0.5' : 'mt-2'} msg-animate msg-wrapper`;
         msgEl.innerHTML = `
           <div class="relative msg-bubble-wrap">
-            <div class="${isMine ? 'msg-sent' : 'msg-received'} max-w-[75%] ${msg.imageUrl ? 'p-1' : ''}" data-msgid="${msgId}">
+            <div class="${isMine ? 'msg-sent' : 'msg-received'} ${msg.imageUrl ? 'p-1' : ''}" data-msgid="${msgId}">
               ${!isMine && isGroup && !sameSender ? `<p class="text-[10px] font-semibold text-navy-500 mb-0.5">${sanitizeHTML(msg.senderName || '')}</p>` : ''}
               ${forwardedHTML}
               ${replyHTML}
@@ -783,7 +783,7 @@ async function markMessagesAsRead(chatId, otherUid) {
   } catch (e) { /* non-critical */ }
 }
 
-function startCallUI(targetUid, targetName, type) {
+export function startCallUI(targetUid, targetName, type) {
   const callOverlay = document.getElementById('call-overlay');
   if (!callOverlay) return;
 
@@ -794,9 +794,13 @@ function startCallUI(targetUid, targetName, type) {
   callManager.onCallStateChange = (state) => {
     const statusEl = callOverlay.querySelector('#call-status-text');
     if (statusEl) {
-      if (state === 'ringing') statusEl.textContent = 'Ringing...';
+      if (state === 'dialing') statusEl.textContent = 'Calling...';
+      else if (state === 'ringing') statusEl.textContent = 'Ringing...';
       else if (state === 'connected') {
-        // Start call timer
+        // Immediately show connected, then start timer
+        statusEl.textContent = 'Connected · 00:00';
+        // Clear any previous timer
+        if (callTimer) clearInterval(callTimer);
         callSeconds = 0;
         callTimer = setInterval(() => {
           callSeconds++;

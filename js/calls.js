@@ -16,6 +16,7 @@ class CallManager {
     this.peerConnections = {};
     this.currentCallId = null;
     this.currentCallType = null; // 'voice' or 'video'
+    this.callStatus = 'idle'; // idle | dialing | ringing | connected | ended
     this.callListeners = [];
     this.incomingCallListener = null;
     this.isInCall = false;
@@ -26,6 +27,7 @@ class CallManager {
     this.onCallEnd = null;
     this.onIncomingCall = null;
     this._candidateListeners = {};
+    this._ringTimeout = null;
   }
 
   // Start listening for incoming calls
@@ -58,13 +60,15 @@ class CallManager {
 
   // Start an outgoing call
   async startCall(targetUserId, targetName, type = 'voice') {
-    if (this.isInCall) {
+    // Only block if we're actively connected — not just dialing
+    if (this.isInCall && this.callStatus === 'connected') {
       showToast('Already in a call', 'warning');
       return null;
     }
 
     try {
       this.currentCallType = type;
+      this.callStatus = 'dialing';
       this.isInCall = true;
       this.isMuted = false;
       this.isCameraOff = false;
@@ -108,6 +112,9 @@ class CallManager {
         offer: { type: offer.type, sdp: offer.sdp }
       });
 
+      // Transition to ringing state
+      this.callStatus = 'ringing';
+
       // Listen for answer
       this._listenForAnswer(targetUserId);
 
@@ -125,8 +132,9 @@ class CallManager {
       });
 
       // Auto-end if not answered in 30s
+      if (this._ringTimeout) clearTimeout(this._ringTimeout);
       this._ringTimeout = setTimeout(() => {
-        if (this.isInCall && this.currentCallId) {
+        if (this.isInCall && this.callStatus !== 'connected') {
           this.endCall('no_answer');
         }
       }, 30000);
@@ -134,6 +142,7 @@ class CallManager {
       return this.currentCallId;
     } catch (e) {
       console.error('Start call error:', e);
+      this.callStatus = 'idle';
       this.isInCall = false;
       showToast('Could not start call. Check microphone/camera permissions.', 'error');
       return null;
@@ -142,7 +151,8 @@ class CallManager {
 
   // Answer an incoming call
   async answerCall(callId) {
-    if (this.isInCall) {
+    // Allow answering if we're idle, or if we were just shown the incoming UI
+    if (this.isInCall && this.callStatus === 'connected') {
       showToast('Already in a call', 'warning');
       return;
     }
@@ -157,6 +167,7 @@ class CallManager {
       const callData = callSnap.data();
       this.currentCallId = callId;
       this.currentCallType = callData.type;
+      this.callStatus = 'ringing';
       this.isInCall = true;
       this.isMuted = false;
       this.isCameraOff = false;
@@ -186,7 +197,7 @@ class CallManager {
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
-      // Store answer in Firestore
+      // Store answer in Firestore — this triggers the caller's _listenForAnswer
       await updateDoc(doc(db, 'calls', callId), {
         answer: { type: answer.type, sdp: answer.sdp },
         status: 'connected'
@@ -195,10 +206,13 @@ class CallManager {
       // Listen for ICE candidates from remote
       this._listenForCandidates(callerId, 'offer-candidates');
 
+      // Immediately transition to connected
+      this.callStatus = 'connected';
       if (this.onCallStateChange) this.onCallStateChange('connected');
 
     } catch (e) {
       console.error('Answer call error:', e);
+      this.callStatus = 'idle';
       this.isInCall = false;
       showToast('Could not answer call. Check permissions.', 'error');
     }
@@ -246,6 +260,7 @@ class CallManager {
 
     this.currentCallId = null;
     this.currentCallType = null;
+    this.callStatus = 'idle';
     this.isInCall = false;
     this.isMuted = false;
     this.isCameraOff = false;
@@ -300,7 +315,13 @@ class CallManager {
 
     // Handle connection state changes
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+      const state = pc.connectionState;
+      if (state === 'connected' && this.callStatus !== 'connected') {
+        // ICE negotiation succeeded — force state to connected
+        this.callStatus = 'connected';
+        if (this.onCallStateChange) this.onCallStateChange('connected');
+        if (this._ringTimeout) { clearTimeout(this._ringTimeout); this._ringTimeout = null; }
+      } else if (state === 'disconnected' || state === 'failed') {
         this.endCall('disconnected');
       }
     };
@@ -308,23 +329,37 @@ class CallManager {
     return pc;
   }
 
-  // Private: Listen for SDP answer
+  // Private: Listen for SDP answer (caller-side)
   _listenForAnswer(remoteUserId) {
     if (!this.currentCallId) return;
     const unsub = onSnapshot(doc(db, 'calls', this.currentCallId), (snap) => {
       const data = snap.data();
       if (!data) return;
 
+      // When remote answers — set remote description and transition to connected
       if (data.answer && this.peerConnections[remoteUserId]) {
         const pc = this.peerConnections[remoteUserId];
         if (!pc.currentRemoteDescription) {
-          pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-          if (this.onCallStateChange) this.onCallStateChange('connected');
-          clearTimeout(this._ringTimeout);
+          pc.setRemoteDescription(new RTCSessionDescription(data.answer))
+            .then(() => {
+              // Strictly update state to connected
+              this.callStatus = 'connected';
+              if (this.onCallStateChange) this.onCallStateChange('connected');
+            })
+            .catch(err => console.error('setRemoteDescription error:', err));
+          // Clear ring timeout immediately — call was answered
+          if (this._ringTimeout) { clearTimeout(this._ringTimeout); this._ringTimeout = null; }
         }
       }
 
-      if (data.status === 'rejected' || data.status === 'ended') {
+      // Also check Firestore status field for connected transition
+      if (data.status === 'connected' && this.callStatus !== 'connected') {
+        this.callStatus = 'connected';
+        if (this.onCallStateChange) this.onCallStateChange('connected');
+        if (this._ringTimeout) { clearTimeout(this._ringTimeout); this._ringTimeout = null; }
+      }
+
+      if (data.status === 'rejected' || data.status === 'ended' || data.status === 'no_answer') {
         this.endCall(data.status);
         unsub();
       }

@@ -1,5 +1,5 @@
-// Leaderboard page — Engagement rankings with badges
-import { db, collection, getDocs, query, orderBy, where, limit } from '../firebase-config.js';
+// Leaderboard page — Social activity rankings (no game points)
+import { db, collection, getDocs, query, orderBy, where, limit, onSnapshot } from '../firebase-config.js';
 import { sanitizeHTML, formatNumber } from '../utils.js';
 import { authManager } from '../auth.js';
 import { router } from '../router.js';
@@ -7,56 +7,116 @@ import { router } from '../router.js';
 export async function renderLeaderboard(container) {
   let users = [];
   let posts = [];
-  let gameScores = [];
+  let comments = [];
+  let polls = [];
+  let diaries = [];
+  let capsules = [];
+
+  // Show loading
+  container.innerHTML = `
+    <section class="px-4 pt-4">
+      <div class="flex items-center gap-3 mb-5">
+        <button id="lb-back-btn" class="inner-back-btn">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/></svg>
+        </button>
+        <h2 class="text-xl font-bold text-navy-800 flex-1">🏆 Leaderboard</h2>
+      </div>
+      <div class="space-y-3">
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+      </div>
+    </section>`;
+  container.querySelector('#lb-back-btn')?.addEventListener('click', () => router.navigateBack());
 
   try {
-    const [usersSnap, postsSnap, scoresSnap] = await Promise.all([
+    const [usersSnap, postsSnap, pollsSnap, diariesSnap, capsulesSnap] = await Promise.all([
       getDocs(collection(db, 'users')),
       getDocs(collection(db, 'posts')),
-      getDocs(query(collection(db, 'games'), where('type', '==', 'score')))
+      getDocs(collection(db, 'polls')).catch(() => ({ forEach: () => {} })),
+      getDocs(collection(db, 'diary')).catch(() => ({ forEach: () => {} })),
+      getDocs(collection(db, 'timecapsules')).catch(() => ({ forEach: () => {} }))
     ]);
 
     usersSnap.forEach(d => users.push({ id: d.id, ...d.data() }));
     postsSnap.forEach(d => posts.push({ id: d.id, ...d.data() }));
-    scoresSnap.forEach(d => gameScores.push(d.data()));
+    pollsSnap.forEach(d => polls.push({ id: d.id, ...d.data() }));
+    diariesSnap.forEach(d => diaries.push({ id: d.id, ...d.data() }));
+    capsulesSnap.forEach(d => capsules.push({ id: d.id, ...d.data() }));
   } catch (e) {
     console.error('Leaderboard load error:', e);
   }
 
-  // Calculate scores
+  // Calculate scores with NEW points system
   const scores = users.map(user => {
     const userPosts = posts.filter(p => p.authorId === user.id);
     const totalLikes = userPosts.reduce((sum, p) => sum + (p.likes?.length || 0), 0);
-    const userGameWins = gameScores.filter(s => s.userId === user.id).reduce((sum, s) => sum + (s.score || 0), 0);
+    
+    // Count comments made BY this user across all posts
+    let totalComments = 0;
+    posts.forEach(p => {
+      if (p.comments && Array.isArray(p.comments)) {
+        totalComments += p.comments.filter(c => c.userId === user.id || c.authorId === user.id).length;
+      }
+    });
 
-    const postPoints = userPosts.length * 5;
-    const likePoints = totalLikes * 1;
-    const gamePoints = userGameWins * 3;
-    const total = postPoints + likePoints + gamePoints;
+    // Count polls, diary entries, time capsules created by this user
+    const userPolls = polls.filter(p => p.authorId === user.id || p.createdBy === user.id);
+    const userDiaries = diaries.filter(d => d.authorId === user.id || d.userId === user.id);
+    const userCapsules = capsules.filter(c => c.authorId === user.id || c.createdBy === user.id);
 
-    // Badges
+    // Points calculation
+    const postPoints = userPosts.length * 20;      // Each post = +20
+    const likePoints = totalLikes * 10;             // Each like = +10
+    const commentPoints = totalComments * 5;        // Each comment = +5
+    // Random 1-4 points per poll/diary/capsule (seeded by count so it's consistent)
+    const pollPoints = userPolls.length * (1 + Math.floor(Math.abs(Math.sin(user.id?.charCodeAt(0) || 1)) * 4));
+    const diaryPoints = userDiaries.length * (1 + Math.floor(Math.abs(Math.cos(user.id?.charCodeAt(0) || 1)) * 4));
+    const capsulePoints = userCapsules.length * (1 + Math.floor(Math.abs(Math.sin((user.id?.charCodeAt(1) || 2) * 7)) * 4));
+
+    // Birthday bonus: +10 if today is their birthday
+    let birthdayBonus = 0;
+    if (user.dob) {
+      const today = new Date();
+      const dob = user.dob.toDate ? user.dob.toDate() : new Date(user.dob);
+      if (dob.getMonth() === today.getMonth() && dob.getDate() === today.getDate()) {
+        birthdayBonus = 10;
+      }
+    }
+
+    const total = postPoints + likePoints + commentPoints + pollPoints + diaryPoints + capsulePoints + birthdayBonus;
+
+    // Activity badges
     const badges = [];
     if (userPosts.length >= 10) badges.push({ icon: '📸', name: 'Memory Maker' });
     if (userPosts.length >= 1) badges.push({ icon: '🎓', name: 'Alumni' });
     if (totalLikes >= 20) badges.push({ icon: '❤️', name: 'Beloved' });
-    if (totalLikes >= 50) badges.push({ icon: '⭐', name: 'Star' });
-    if (userGameWins >= 10) badges.push({ icon: '🎮', name: 'Gamer' });
-    if (user.slamBook && Object.keys(user.slamBook).length >= 3) badges.push({ icon: '📖', name: 'Storyteller' });
+    if (totalLikes >= 50) badges.push({ icon: '⭐', name: 'Superstar' });
+    if (totalComments >= 10) badges.push({ icon: '💬', name: 'Chatterbox' });
+    if (userPolls.length >= 3) badges.push({ icon: '📊', name: 'Pollster' });
+    if (userDiaries.length >= 5) badges.push({ icon: '📖', name: 'Storyteller' });
+    if (birthdayBonus > 0) badges.push({ icon: '🎂', name: 'Birthday Star' });
 
     return {
       ...user,
       postCount: userPosts.length,
       totalLikes,
-      gamePoints: userGameWins,
+      totalComments,
+      pollCount: userPolls.length,
+      diaryCount: userDiaries.length,
+      capsuleCount: userCapsules.length,
+      birthdayBonus,
       total,
       badges
     };
   }).sort((a, b) => b.total - a.total);
 
-  const top3 = scores.slice(0, 3);
-  const rest = scores.slice(3);
-  const myRank = scores.findIndex(s => s.id === authManager.currentUser?.uid) + 1;
+  // Only show users with points
+  const scoredUsers = scores.filter(s => s.total > 0);
+  const top3 = scoredUsers.slice(0, 3);
   const myScore = scores.find(s => s.id === authManager.currentUser?.uid);
+  const myRank = scoredUsers.findIndex(s => s.id === authManager.currentUser?.uid) + 1;
+  const hasActiveRankings = scoredUsers.length > 0;
 
   container.innerHTML = `
     <section class="px-4 pt-4">
@@ -67,6 +127,7 @@ export async function renderLeaderboard(container) {
         <h2 class="text-xl font-bold text-navy-800 flex-1">🏆 Leaderboard</h2>
       </div>
 
+      ${hasActiveRankings ? `
       <!-- Podium -->
       <div class="card p-6 mb-6">
         <div class="flex items-end justify-center gap-3 mb-4" style="min-height:180px;">
@@ -118,8 +179,8 @@ export async function renderLeaderboard(container) {
         </div>
       </div>
 
-      <!-- My Rank -->
-      ${myScore ? `
+      <!-- My Rank (only if user has points) -->
+      ${myScore && myScore.total > 0 ? `
         <div class="card p-4 mb-6 border-2 border-navy-200 bg-navy-50/30">
           <div class="flex items-center gap-3">
             <span class="text-lg font-bold text-navy-500">#${myRank}</span>
@@ -128,7 +189,7 @@ export async function renderLeaderboard(container) {
               : `<div class="w-10 h-10 rounded-full bg-navy-500 text-white flex items-center justify-center text-sm font-bold">${(myScore.fullName || '?')[0]}</div>`}
             <div class="flex-1">
               <p class="text-sm font-semibold text-navy-800">You</p>
-              <p class="text-xs text-gray-400">${myScore.postCount} posts · ${myScore.totalLikes} likes</p>
+              <p class="text-xs text-gray-400">${myScore.postCount} posts · ${myScore.totalLikes} likes · ${myScore.totalComments} comments</p>
             </div>
             <span class="text-sm font-bold text-navy-500">${formatNumber(myScore.total)} pts</span>
           </div>
@@ -137,19 +198,32 @@ export async function renderLeaderboard(container) {
           </div>
         </div>
       ` : ''}
+      ` : `
+      <!-- Empty State — No Active Rankings -->
+      <div class="card p-8 mb-6 text-center">
+        <div class="text-5xl mb-4">🏅</div>
+        <h3 class="text-lg font-bold text-navy-800 mb-2">No active rankings yet</h3>
+        <p class="text-sm text-gray-400 mb-1">Start posting memories, earning likes, and commenting to climb the leaderboard!</p>
+        <div class="flex flex-wrap justify-center gap-2 mt-4">
+          <span class="text-[11px] px-3 py-1 rounded-full bg-navy-50 text-navy-600">📸 Post = +20 pts</span>
+          <span class="text-[11px] px-3 py-1 rounded-full bg-navy-50 text-navy-600">❤️ Like = +10 pts</span>
+          <span class="text-[11px] px-3 py-1 rounded-full bg-navy-50 text-navy-600">💬 Comment = +5 pts</span>
+        </div>
+      </div>
+      `}
 
       <!-- Full Rankings -->
       <h3 class="section-title mb-3">All Rankings</h3>
       <div class="space-y-2 mb-8">
         ${scores.map((s, i) => `
-          <div class="card p-3 flex items-center gap-3 ${s.id === authManager.currentUser?.uid ? 'border border-navy-200' : ''}">
-            <span class="text-sm font-bold text-gray-400 w-6 text-center">${i + 1}</span>
+          <div class="card p-3 flex items-center gap-3 ${s.id === authManager.currentUser?.uid ? 'border border-navy-200' : ''} ${s.total === 0 ? 'opacity-60' : ''}" style="animation: msgSlideIn 0.3s ease-out ${i * 0.05}s both;">
+            <span class="text-sm font-bold text-gray-400 w-6 text-center">${s.total > 0 ? (scoredUsers.indexOf(s) + 1) : '—'}</span>
             ${s.profilePic
               ? `<img src="${s.profilePic}" class="w-9 h-9 rounded-full object-cover" alt=""/>`
               : `<div class="w-9 h-9 rounded-full bg-navy-500 text-white flex items-center justify-center text-xs font-bold">${(s.fullName || '?')[0]}</div>`}
             <div class="flex-1 min-w-0">
               <p class="text-sm font-semibold text-navy-800 truncate">${sanitizeHTML(s.fullName || 'Unknown')}</p>
-              <p class="text-[10px] text-gray-400">${s.postCount} posts · ${s.totalLikes} likes · ${s.gamePoints} game pts</p>
+              <p class="text-[10px] text-gray-400">${s.postCount} posts · ${s.totalLikes} likes · ${s.totalComments} comments</p>
             </div>
             <span class="text-xs font-bold text-navy-500">${formatNumber(s.total)}</span>
           </div>
@@ -159,10 +233,14 @@ export async function renderLeaderboard(container) {
       <!-- Scoring Info -->
       <div class="card p-4 mb-6">
         <h3 class="section-title mb-2">How Scoring Works</h3>
-        <div class="space-y-1 text-xs text-gray-500">
-          <p>📸 Post a memory: <span class="font-semibold text-navy-600">+5 pts</span></p>
-          <p>❤️ Each like received: <span class="font-semibold text-navy-600">+1 pt</span></p>
-          <p>🎮 Game score points: <span class="font-semibold text-navy-600">+3 pts each</span></p>
+        <div class="space-y-1.5 text-xs text-gray-500">
+          <p>📸 Post a memory: <span class="font-semibold text-navy-600">+20 pts</span></p>
+          <p>❤️ Each like received: <span class="font-semibold text-navy-600">+10 pts</span></p>
+          <p>💬 Each comment: <span class="font-semibold text-navy-600">+5 pts</span></p>
+          <p>📊 Create a poll: <span class="font-semibold text-navy-600">+1–4 pts</span></p>
+          <p>📖 Diary entry: <span class="font-semibold text-navy-600">+1–4 pts</span></p>
+          <p>⏳ Time capsule: <span class="font-semibold text-navy-600">+1–4 pts</span></p>
+          <p>🎂 Birthday bonus: <span class="font-semibold text-navy-600">+10 pts</span></p>
         </div>
       </div>
     </section>

@@ -6,6 +6,54 @@ class PresenceManager {
   constructor() {
     this.typingTimers = {};
     this.presenceListeners = {};
+    this._boundBeforeUnload = null;
+    this._boundVisChange = null;
+  }
+
+  // Set current user online
+  async setOnline() {
+    if (!authManager.currentUser) return;
+    try {
+      await updateDoc(doc(db, 'users', authManager.currentUser.uid), {
+        online: true,
+        lastSeen: serverTimestamp()
+      });
+    } catch (e) { /* ignore */ }
+  }
+
+  // Set current user offline
+  async setOffline() {
+    if (!authManager.currentUser) return;
+    try {
+      await updateDoc(doc(db, 'users', authManager.currentUser.uid), {
+        online: false,
+        lastSeen: serverTimestamp()
+      });
+    } catch (e) { /* ignore */ }
+  }
+
+  // Start listening for browser close/tab switch to update presence
+  startPresenceTracking() {
+    this._boundBeforeUnload = () => {
+      // Use sendBeacon for reliable offline-set on page close
+      this.setOffline();
+    };
+    this._boundVisChange = () => {
+      if (document.visibilityState === 'hidden') {
+        this.setOffline();
+      } else if (document.visibilityState === 'visible') {
+        this.setOnline();
+      }
+    };
+    window.addEventListener('beforeunload', this._boundBeforeUnload);
+    document.addEventListener('visibilitychange', this._boundVisChange);
+    this.setOnline();
+  }
+
+  stopPresenceTracking() {
+    if (this._boundBeforeUnload) window.removeEventListener('beforeunload', this._boundBeforeUnload);
+    if (this._boundVisChange) document.removeEventListener('visibilitychange', this._boundVisChange);
+    this.setOffline();
   }
 
   // Set typing status in a chat

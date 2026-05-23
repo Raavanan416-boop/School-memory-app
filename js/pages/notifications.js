@@ -62,7 +62,12 @@ function loadNotifications(container) {
       });
     });
   } catch (e) {
-    notifsEl.innerHTML = '<p class="text-center text-gray-400 py-8 text-sm">Configure Firebase</p>';
+    notifsEl.innerHTML = `
+      <div class="card p-8 text-center">
+        <div class="text-4xl mb-3">🔔</div>
+        <h3 class="font-semibold text-navy-700 mb-1">No notifications yet</h3>
+        <p class="text-sm text-gray-400">We'll let you know when something happens!</p>
+      </div>`;
   }
 }
 
@@ -77,7 +82,10 @@ function createNotifCard(notif) {
     diary_entry: { icon: '📖', text: 'wrote in the diary', color: 'bg-warm-50' },
     call_incoming: { icon: '📞', text: 'is calling you', color: 'bg-green-50' },
     game_challenge: { icon: '🎮', text: 'challenged you', color: 'bg-orange-50' },
-    tag: { icon: '🏷️', text: 'tagged you in a memory', color: 'bg-blue-50' }
+    tag: { icon: '🏷️', text: 'tagged you in a memory', color: 'bg-blue-50' },
+    badge_suggestion: { icon: '🏅', text: 'suggested a title for you', color: 'bg-amber-50' },
+    birthday_bonus: { icon: '🎂', text: 'You got birthday bonus points!', color: 'bg-yellow-50' },
+    friend_bonus: { icon: '🎁', text: 'sent you birthday bonus points!', color: 'bg-pink-50' }
   };
 
   const config = typeConfig[notif.type] || { icon: '🔔', text: 'notification', color: 'bg-gray-50' };

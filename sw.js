@@ -1,4 +1,4 @@
-const CACHE_NAME = 'class-memories-v2';
+const CACHE_NAME = 'class-memories-v3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -12,6 +12,7 @@ const STATIC_ASSETS = [
   '/js/notifications.js',
   '/js/presence.js',
   '/js/calls.js',
+  '/js/security.js',
   '/js/pages/home.js',
   '/js/pages/upload.js',
   '/js/pages/search.js',
@@ -64,7 +65,7 @@ self.addEventListener('fetch', (e) => {
   );
 });
 
-// Push notification handler
+// Push notification handler (from FCM or server)
 self.addEventListener('push', (event) => {
   const data = event.data ? event.data.json() : {};
   const title = data.title || 'Class Memories';
@@ -73,6 +74,8 @@ self.addEventListener('push', (event) => {
     icon: '/icons/icon-192.svg',
     badge: '/icons/icon-192.svg',
     vibrate: [100, 50, 100],
+    tag: data.tag || 'cm-notification-' + Date.now(),
+    renotify: true,
     data: {
       url: data.url || '/',
       type: data.type || 'general'
@@ -86,6 +89,22 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(title, options)
   );
+});
+
+// Message handler — show notifications from main thread
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SHOW_NOTIFICATION') {
+    const { title, body, data } = event.data;
+    self.registration.showNotification(title || 'Class Memories', {
+      body: body || 'New notification',
+      icon: '/icons/icon-192.svg',
+      badge: '/icons/icon-192.svg',
+      vibrate: [100, 50, 100],
+      tag: 'cm-' + Date.now(),
+      renotify: true,
+      data: data || {}
+    });
+  }
 });
 
 // Notification click handler

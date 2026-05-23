@@ -1,6 +1,7 @@
-// Chat page — Full featured with typing, presence, images, voice msgs, call buttons
-import { db, collection, doc, query, orderBy, onSnapshot, addDoc, getDocs, updateDoc,
-  serverTimestamp, where, setDoc, arrayUnion, limit, deleteDoc } from '../firebase-config.js';
+// Chat page — WhatsApp-style with typing, presence, images, voice msgs, call buttons
+import { db, storage, collection, doc, query, orderBy, onSnapshot, addDoc, getDocs, updateDoc,
+  serverTimestamp, where, setDoc, arrayUnion, limit, deleteDoc, getDoc, increment, deleteField,
+  storageRef, uploadBytes, getDownloadURL } from '../firebase-config.js';
 import { showToast, timeAgo, sanitizeHTML, debounce } from '../utils.js';
 import { authManager } from '../auth.js';
 import { presenceManager } from '../presence.js';
@@ -10,14 +11,22 @@ import { createNotification } from '../notifications.js';
 
 let unsubChats = null;
 let unsubMessages = null;
+let unsubTyping = null;
 let currentChatId = null;
 let chatViewOpen = false;
 
 export function destroyChat() {
   if (unsubChats) unsubChats();
   if (unsubMessages) unsubMessages();
-  unsubChats = null; unsubMessages = null;
+  if (unsubTyping) unsubTyping();
+  unsubChats = null; unsubMessages = null; unsubTyping = null;
   currentChatId = null; chatViewOpen = false;
+  // Hide the chat view overlay
+  const cv = document.getElementById('chat-view');
+  if (cv) cv.style.display = 'none';
+  // Restore bottom nav
+  const bn = document.getElementById('bottom-nav');
+  if (bn) bn.style.display = '';
 }
 
 // Store container reference for reliable DOM access
@@ -60,32 +69,40 @@ export async function renderChat(container) {
         <div id="dm-list" class="space-y-1"></div>
       </div>
     </section>
+  `;
 
-    <!-- Chat View Overlay — placed OUTSIDE section for reliable z-index -->
-    <div id="chat-view" class="hidden fixed inset-0 z-[60] bg-cream-100 flex flex-col">
-      <div id="chat-header" class="flex items-center gap-3 p-3 bg-white border-b border-gray-100 shadow-sm"></div>
-      <div id="chat-messages" class="flex-1 overflow-y-auto p-4 space-y-2"></div>
-      <div id="typing-indicator" class="hidden px-4 py-1">
+  // Create chat-view as a DIRECT CHILD of document.body (not inside #app)
+  // This prevents any parent container's overflow/transform from breaking position:fixed
+  let chatView = document.getElementById('chat-view');
+  if (!chatView) {
+    chatView = document.createElement('div');
+    chatView.id = 'chat-view';
+    chatView.innerHTML = `
+      <div id="chat-header" class="chat-view-header"></div>
+      <div id="chat-messages" class="chat-messages-container"></div>
+      <div id="typing-indicator" class="typing-indicator-bar">
         <span class="text-xs text-gray-400 flex items-center gap-1">
           <span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>
           <span class="typing-name">typing</span>
         </span>
       </div>
-      <div class="p-3 bg-white border-t border-gray-100">
-        <div class="flex items-center gap-2">
-          <button id="attach-btn" class="p-2 text-gray-400 hover:text-navy-500 transition-colors">
+      <div class="chat-input-bar">
+        <div class="chat-input-row">
+          <button id="attach-btn" class="chat-attach-btn">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13"/></svg>
           </button>
-          <input type="text" id="msg-input" placeholder="Type a message..."
-            class="flex-1 px-4 py-2.5 border border-gray-200 rounded-full text-sm text-navy-800 placeholder:text-gray-400 focus:outline-none focus:border-navy-500 bg-white"/>
+          <input type="text" id="msg-input" class="chat-msg-input" placeholder="Type a message..." autocomplete="off"/>
           <input type="file" id="chat-file-input" accept="image/*" class="hidden"/>
-          <button id="send-msg-btn" class="p-2.5 bg-navy-500 rounded-full text-white hover:bg-navy-600 transition-colors active:scale-95">
+          <button id="send-msg-btn" class="chat-send-btn">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>
           </button>
         </div>
       </div>
-    </div>
-  `;
+    `;
+    document.body.appendChild(chatView);
+  }
+  // Ensure it starts hidden
+  chatView.style.display = 'none';
 
   // New Chat button
   container.querySelector('#new-chat-btn')?.addEventListener('click', () => showNewChatModal());
@@ -198,30 +215,51 @@ function loadChatList(container) {
     return;
   }
 
+  // Show loading state
+  dmList.innerHTML = `
+    <div class="space-y-3">
+      <div class="skeleton-card"></div>
+      <div class="skeleton-card"></div>
+    </div>`;
+
   try {
+    // Simple query WITHOUT orderBy to avoid composite index requirement
+    // We'll sort client-side after receiving data
     const q = query(
       collection(db, 'chats'),
-      where('participants', 'array-contains', authManager.currentUser.uid),
-      orderBy('lastMessageAt', 'desc')
+      where('participants', 'array-contains', authManager.currentUser.uid)
     );
     unsubChats = onSnapshot(q, (snap) => {
       if (snap.empty) {
         dmList.innerHTML = `
-          <div class="text-center py-10">
-            <div class="text-3xl mb-2">💬</div>
-            <p class="text-sm text-gray-400">No conversations yet</p>
-            <p class="text-xs text-gray-300 mt-1">Start chatting with classmates!</p>
+          <div class="text-center py-12">
+            <div class="text-4xl mb-3">💬</div>
+            <p class="text-sm font-semibold text-navy-800 mb-1">Start chatting with your friends</p>
+            <p class="text-xs text-gray-400">Tap the ✏️ button above to start a new conversation</p>
           </div>`;
         return;
       }
-      dmList.innerHTML = '';
+
+      // Collect all chats and sort client-side by lastMessageAt (newest first)
+      const chats = [];
       snap.forEach(d => {
         const chat = { id: d.id, ...d.data() };
-        if (chat.type === 'group' && chat.id === 'core37') return; // Skip group in DM list
+        if (chat.type === 'group' && chat.id === 'core37') return; // Skip group
+        chats.push(chat);
+      });
 
+      // Sort by lastMessageAt descending (newest first — like WhatsApp)
+      chats.sort((a, b) => {
+        const aTime = a.lastMessageAt?.toDate ? a.lastMessageAt.toDate().getTime() : 0;
+        const bTime = b.lastMessageAt?.toDate ? b.lastMessageAt.toDate().getTime() : 0;
+        return bTime - aTime;
+      });
+
+      dmList.innerHTML = '';
+      chats.forEach(chat => {
         const otherIdx = chat.participants.findIndex(p => p !== authManager.currentUser?.uid);
         const otherName = chat.participantNames?.[otherIdx] || 'Classmate';
-        const otherUid = chat.participants[otherIdx];
+        const otherUid = chat.participants?.[otherIdx];
         const unread = chat.unreadCount?.[authManager.currentUser.uid] || 0;
         const lastMsg = chat.lastMessage || 'Start a conversation';
         const time = chat.lastMessageAt?.toDate ? timeAgo(chat.lastMessageAt.toDate()) : '';
@@ -232,7 +270,7 @@ function loadChatList(container) {
           <div class="relative">
             ${chat.participantPhotos?.[otherIdx]
               ? `<img src="${chat.participantPhotos[otherIdx]}" class="avatar" alt="${sanitizeHTML(otherName)}"/>`
-              : `<div class="avatar avatar-placeholder text-sm">${otherName[0]}</div>`}
+              : `<div class="avatar avatar-placeholder text-sm">${(otherName || '?')[0]}</div>`}
             <div class="presence-dot-mini" id="presence-${otherUid}"></div>
           </div>
           <div class="flex-1 min-w-0">
@@ -246,12 +284,33 @@ function loadChatList(container) {
         `;
         item.addEventListener('click', () => openChat(container, chat.id, otherName, otherUid));
         dmList.appendChild(item);
+
+        // Watch online status for each user in list
+        if (otherUid) {
+          presenceManager.watchUser(otherUid, (status) => {
+            const dot = dmList.querySelector(`#presence-${otherUid}`);
+            if (dot) {
+              dot.classList.toggle('online', status.online);
+            }
+          });
+        }
       });
-    }, () => {
-      dmList.innerHTML = '<p class="text-center text-gray-400 py-8 text-sm">Configure Firebase for chat</p>';
+    }, (err) => {
+      console.error('Chat list error:', err);
+      dmList.innerHTML = `
+        <div class="text-center py-12">
+          <div class="text-4xl mb-3">💬</div>
+          <p class="text-sm font-semibold text-navy-800 mb-1">Start chatting with your friends</p>
+          <p class="text-xs text-gray-400">Tap the ✏️ button above to start a new conversation</p>
+        </div>`;
     });
   } catch (e) {
-    dmList.innerHTML = '<p class="text-center text-gray-400 py-8 text-sm">Set up Firebase for chat</p>';
+    dmList.innerHTML = `
+      <div class="text-center py-12">
+        <div class="text-4xl mb-3">💬</div>
+        <p class="text-sm font-semibold text-navy-800 mb-1">Start chatting with your friends</p>
+        <p class="text-xs text-gray-400">Tap the ✏️ button to begin!</p>
+      </div>`;
   }
 }
 
@@ -259,7 +318,6 @@ async function openGroupChat(container) {
   const groupId = 'core37';
   // Ensure group chat doc exists
   try {
-    const { getDoc } = await import('../firebase-config.js');
     const snap = await getDoc(doc(db, 'chats', groupId));
     if (!snap.exists()) {
       await setDoc(doc(db, 'chats', groupId), {
@@ -288,12 +346,21 @@ async function openGroupChat(container) {
 function openChat(container, chatId, name, otherUid = null, isGroup = false) {
   currentChatId = chatId;
   chatViewOpen = true;
-  // Use container reference first, fall back to global document
-  const chatView = (chatContainer || container)?.querySelector('#chat-view') || document.querySelector('#chat-view');
+  
+  // Clean up previous message listener
+  if (unsubMessages) { unsubMessages(); unsubMessages = null; }
+  if (unsubTyping) { unsubTyping(); unsubTyping = null; }
+  
+  // Chat-view is now a direct child of body, show it via display
+  const chatView = document.getElementById('chat-view');
   if (!chatView) { console.error('Chat view not found'); return; }
-  chatView.classList.remove('hidden');
+  chatView.style.display = 'flex';
 
-  const header = document.querySelector('#chat-header');
+  // Hide bottom nav for full-screen chat experience
+  const bottomNav = document.getElementById('bottom-nav');
+  if (bottomNav) bottomNav.style.display = 'none';
+
+  const header = chatView.querySelector('#chat-header') || document.querySelector('#chat-header');
   header.innerHTML = `
     <button id="back-chat-btn" class="p-2 -ml-2 text-navy-500 hover:text-navy-700 transition-colors">
       <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/></svg>
@@ -316,13 +383,17 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
   `;
 
   // Back button
-  header.querySelector('#back-chat-btn').addEventListener('click', () => {
-    chatView.classList.add('hidden');
-    if (unsubMessages) unsubMessages();
+  const closeChat = () => {
+    chatView.style.display = 'none';
+    if (unsubMessages) { unsubMessages(); unsubMessages = null; }
+    if (unsubTyping) { unsubTyping(); unsubTyping = null; }
     currentChatId = null;
     chatViewOpen = false;
     presenceManager.setTyping(chatId, false);
-  });
+    // Restore bottom nav
+    if (bottomNav) bottomNav.style.display = '';
+  };
+  header.querySelector('#back-chat-btn').addEventListener('click', closeChat);
 
   // Call buttons
   header.querySelector('#voice-call-btn')?.addEventListener('click', () => {
@@ -335,7 +406,7 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
   // Watch presence for DMs
   if (otherUid) {
     presenceManager.watchUser(otherUid, (status) => {
-      const el = document.querySelector('#chat-status');
+      const el = chatView.querySelector('#chat-status') || document.querySelector('#chat-status');
       if (el) {
         el.textContent = status.online ? 'Online' : (status.lastSeen ? `Last seen ${timeAgo(status.lastSeen)}` : 'Offline');
         el.className = `text-[10px] ${status.online ? 'text-green-500' : 'text-gray-400'}`;
@@ -343,8 +414,10 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
     });
   }
 
-  // Load messages
-  const msgContainer = document.querySelector('#chat-messages');
+  // Load messages with auto-scroll
+  const msgContainer = chatView.querySelector('#chat-messages') || document.querySelector('#chat-messages');
+  let isFirstLoad = true;
+  
   try {
     const q = query(collection(db, 'chats', chatId, 'messages'), orderBy('createdAt', 'asc'), limit(100));
     unsubMessages = onSnapshot(q, (snap) => {
@@ -360,10 +433,17 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
         return;
       }
       let lastDate = '';
+      let lastSender = '';
       snap.forEach(d => {
         const msg = d.data();
+        const msgId = d.id;
         const isMine = msg.senderId === authManager.currentUser?.uid;
         const msgTime = msg.createdAt?.toDate ? msg.createdAt.toDate() : new Date();
+
+        // Skip messages hidden for current user (delete for me)
+        // Check both hiddenFor (new) and deletedFor (old) for backwards compatibility
+        const myUid = authManager.currentUser?.uid;
+        if (msg.hiddenFor?.includes(myUid) || msg.deletedFor?.includes(myUid)) return;
 
         // Date separator
         const dateStr = msgTime.toLocaleDateString();
@@ -371,62 +451,190 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
           lastDate = dateStr;
           msgContainer.innerHTML += `
             <div class="flex items-center justify-center my-3">
-              <span class="text-[10px] text-gray-400 bg-cream-100 px-3 py-1 rounded-full">${dateStr === new Date().toLocaleDateString() ? 'Today' : dateStr}</span>
+              <span class="text-[10px] text-gray-400 bg-cream-200/80 px-3 py-1 rounded-full backdrop-blur-sm">${dateStr === new Date().toLocaleDateString() ? 'Today' : dateStr}</span>
             </div>`;
         }
 
+        // Consecutive same-sender: tighter spacing
+        const sameSender = msg.senderId === lastSender;
+        lastSender = msg.senderId;
+
+        // Message status ticks
+        const status = msg.status || 'sent';
+        let tickHTML = '';
+        if (isMine) {
+          if (status === 'read') tickHTML = '<span class="msg-tick msg-tick-read">✓✓</span>';
+          else if (status === 'delivered') tickHTML = '<span class="msg-tick">✓✓</span>';
+          else tickHTML = '<span class="msg-tick">✓</span>';
+        }
+
+        // Reactions display
+        const reactions = msg.reactions || {};
+        const reactionEntries = Object.entries(reactions);
+        let reactionsHTML = '';
+        if (reactionEntries.length > 0) {
+          const grouped = {};
+          reactionEntries.forEach(([uid, emoji]) => {
+            grouped[emoji] = (grouped[emoji] || 0) + 1;
+          });
+          reactionsHTML = `<div class="msg-reactions">${Object.entries(grouped).map(([emoji, count]) => 
+            `<span class="msg-reaction-pill">${emoji}${count > 1 ? ` ${count}` : ''}</span>`
+          ).join('')}</div>`;
+        }
+
+        // Reply preview
+        let replyHTML = '';
+        if (msg.replyTo) {
+          replyHTML = `
+            <div class="msg-reply-preview">
+              <div class="msg-reply-bar"></div>
+              <div>
+                <p class="text-[10px] font-semibold">${sanitizeHTML(msg.replyTo.senderName || '')}</p>
+                <p class="text-[10px] truncate max-w-[200px]">${sanitizeHTML(msg.replyTo.text || '📷 Image')}</p>
+              </div>
+            </div>`;
+        }
+
+        // WhatsApp-style "deleted for everyone" placeholder
+        if (msg.deletedForEveryone) {
+          const delText = isMine ? '🗑 You deleted this message' : '🗑 This message was deleted';
+          const msgEl = document.createElement('div');
+          msgEl.className = `flex ${isMine ? 'justify-end' : 'justify-start'} ${sameSender ? 'mt-0.5' : 'mt-2'} msg-animate`;
+          msgEl.innerHTML = `
+            <div class="${isMine ? 'msg-sent' : 'msg-received'} msg-deleted-bubble">
+              <p class="text-xs">${delText}</p>
+              <p class="text-[9px] ${isMine ? 'text-white/40' : 'text-gray-400'} text-right mt-0.5">${msgTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+            </div>`;
+          msgContainer.appendChild(msgEl);
+          return; // Skip normal rendering
+        }
+
+        // Forwarded label
+        let forwardedHTML = '';
+        if (msg.forwarded) {
+          forwardedHTML = `<p class="text-[10px] italic ${isMine ? 'text-white/60' : 'text-gray-400'} mb-0.5">↗️ Forwarded</p>`;
+        }
+
         const msgEl = document.createElement('div');
-        msgEl.className = `flex ${isMine ? 'justify-end' : 'justify-start'} msg-animate`;
+        msgEl.className = `flex ${isMine ? 'justify-end' : 'justify-start'} ${sameSender ? 'mt-0.5' : 'mt-2'} msg-animate msg-wrapper`;
         msgEl.innerHTML = `
-          <div class="${isMine ? 'msg-sent' : 'msg-received'} max-w-[75%] ${msg.imageUrl ? 'p-1' : ''}">
-            ${!isMine && isGroup ? `<p class="text-[10px] font-semibold ${isMine ? 'text-white/70' : 'text-navy-500'} mb-0.5">${sanitizeHTML(msg.senderName || '')}</p>` : ''}
-            ${msg.imageUrl ? `<img src="${msg.imageUrl}" class="rounded-xl max-w-full max-h-60 mb-1" alt="Shared image" loading="lazy"/>` : ''}
-            ${msg.text ? `<p class="text-sm">${sanitizeHTML(msg.text)}</p>` : ''}
-            <div class="flex items-center justify-end gap-1 mt-1">
-              <p class="text-[9px] ${isMine ? 'text-white/50' : 'text-gray-400'}">${msgTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
-              ${isMine ? '<span class="text-[9px] text-white/40">✓✓</span>' : ''}
+          <div class="relative msg-bubble-wrap">
+            <div class="${isMine ? 'msg-sent' : 'msg-received'} max-w-[75%] ${msg.imageUrl ? 'p-1' : ''}" data-msgid="${msgId}">
+              ${!isMine && isGroup && !sameSender ? `<p class="text-[10px] font-semibold text-navy-500 mb-0.5">${sanitizeHTML(msg.senderName || '')}</p>` : ''}
+              ${forwardedHTML}
+              ${replyHTML}
+              ${msg.imageUrl ? `<img src="${msg.imageUrl}" class="rounded-xl max-w-full max-h-60 mb-1" alt="Shared image" loading="lazy"/>` : ''}
+              ${msg.text ? `<p class="text-sm leading-relaxed msg-text-content">${sanitizeHTML(msg.text)}</p>` : ''}
+              <div class="flex items-center justify-end gap-1 mt-0.5">
+                <p class="text-[9px] ${isMine ? 'text-white/50' : 'text-gray-400'}">${msgTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                ${tickHTML}
+              </div>
             </div>
+            ${reactionsHTML}
+            <!-- Desktop hover menu trigger -->
+            <button class="msg-hover-menu-btn" data-msgid="${msgId}">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/></svg>
+            </button>
           </div>
         `;
 
-        // Long press for delete (own messages only)
-        if (isMine) {
-          let pressTimer;
-          const bubble = msgEl.querySelector('.msg-sent');
-          bubble?.addEventListener('touchstart', () => {
-            pressTimer = setTimeout(() => {
-              if (confirm('Delete this message?')) {
-                deleteDoc(doc(db, 'chats', chatId, 'messages', d.id)).catch(console.error);
-              }
-            }, 600);
-          });
-          bubble?.addEventListener('touchend', () => clearTimeout(pressTimer));
-          bubble?.addEventListener('contextmenu', (e) => {
-            e.preventDefault();
-            if (confirm('Delete this message?')) {
-              deleteDoc(doc(db, 'chats', chatId, 'messages', d.id)).catch(console.error);
-            }
-          });
-        }
+        // Bind context menu for this message
+        const bubble = msgEl.querySelector('.msg-sent, .msg-received');
+        const hoverBtn = msgEl.querySelector('.msg-hover-menu-btn');
+        
+        const openMenu = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          showMsgContextMenu(chatId, msgId, msg, isMine, bubble, msgTime);
+        };
+
+        // Long press (mobile)
+        let pressTimer;
+        bubble?.addEventListener('touchstart', (e) => {
+          pressTimer = setTimeout(() => openMenu(e), 500);
+        }, { passive: true });
+        bubble?.addEventListener('touchend', () => clearTimeout(pressTimer));
+        bubble?.addEventListener('touchmove', () => clearTimeout(pressTimer));
+        
+        // Right click (desktop)
+        bubble?.addEventListener('contextmenu', openMenu);
+        
+        // Hover menu button (desktop)
+        hoverBtn?.addEventListener('click', openMenu);
 
         msgContainer.appendChild(msgEl);
       });
-      msgContainer.scrollTop = msgContainer.scrollHeight;
+
+      // Auto-scroll to bottom
+      requestAnimationFrame(() => {
+        msgContainer.scrollTop = msgContainer.scrollHeight;
+      });
+      
+      // Mark messages as read when viewing
+      if (otherUid && !isFirstLoad) {
+        markMessagesAsRead(chatId, otherUid);
+      }
+      isFirstLoad = false;
     });
   } catch (e) { console.error(e); }
 
-  // Typing indicator - watch the chat document for typing field
-  onSnapshot(doc(db, 'chats', chatId), (snap) => {
+  // Typing indicator + Pinned message bar - watch the chat document
+  unsubTyping = onSnapshot(doc(db, 'chats', chatId), (snap) => {
     const data = snap.data();
     if (!data) return;
+    
+    // Typing indicator
     const typingUsers = presenceManager.getTypingUsers(data);
-    const indicator = document.querySelector('#typing-indicator');
+    const indicator = chatView.querySelector('#typing-indicator') || document.querySelector('#typing-indicator');
     if (indicator) {
       if (typingUsers.length > 0) {
-        indicator.classList.remove('hidden');
+        indicator.classList.add('visible');
+        msgContainer.scrollTop = msgContainer.scrollHeight;
       } else {
-        indicator.classList.add('hidden');
+        indicator.classList.remove('visible');
       }
+    }
+
+    // Pinned message bar
+    let pinBar = chatView.querySelector('.pinned-msg-bar');
+    if (data.pinnedMessage) {
+      if (!pinBar) {
+        pinBar = document.createElement('div');
+        pinBar.className = 'pinned-msg-bar';
+        const headerEl = chatView.querySelector('.chat-view-header');
+        if (headerEl) headerEl.after(pinBar);
+      }
+      pinBar.innerHTML = `
+        <span class="pinned-icon">📌</span>
+        <div class="pinned-text">
+          <p class="pinned-sender">${sanitizeHTML(data.pinnedMessage.senderName || '')}</p>
+          <p class="pinned-preview">${sanitizeHTML(data.pinnedMessage.text || '')}</p>
+        </div>
+        <button class="pinned-close">✕</button>
+      `;
+      // Replace element to clear stale event listeners
+      const freshBar = pinBar.cloneNode(true);
+      pinBar.replaceWith(freshBar);
+      pinBar = freshBar;
+      // Capture pinnedMessage data for this snapshot
+      const pinnedData = { ...data.pinnedMessage };
+      freshBar.addEventListener('click', (e) => {
+        if (e.target.closest('.pinned-close')) {
+          updateDoc(doc(db, 'chats', chatId), { pinnedMessage: deleteField() }).catch(err => console.error('Unpin error:', err));
+          if (pinnedData.id) {
+            updateDoc(doc(db, 'chats', chatId, 'messages', pinnedData.id), { pinned: false }).catch(() => {});
+          }
+          return;
+        }
+        const pinnedEl = msgContainer.querySelector(`[data-msgid="${pinnedData.id}"]`);
+        if (pinnedEl) {
+          pinnedEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          pinnedEl.classList.add('msg-highlight');
+          setTimeout(() => pinnedEl.classList.remove('msg-highlight'), 2000);
+        }
+      });
+    } else if (pinBar) {
+      pinBar.remove();
     }
   });
 
@@ -438,8 +646,40 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
   }
 
   // Send message
-  const sendBtn = document.querySelector('#send-msg-btn');
-  const msgInput = document.querySelector('#msg-input');
+  const sendBtn = chatView.querySelector('#send-msg-btn') || document.querySelector('#send-msg-btn');
+  const msgInput = chatView.querySelector('#msg-input') || document.querySelector('#msg-input');
+
+  // Focus input
+  setTimeout(() => msgInput?.focus(), 300);
+
+  // Mobile keyboard handler — keep input visible above keyboard
+  if (window.visualViewport) {
+    const onViewportResize = () => {
+      const vv = window.visualViewport;
+      chatView.style.height = `${vv.height}px`;
+      // Scroll to bottom when keyboard opens
+      requestAnimationFrame(() => {
+        msgContainer.scrollTop = msgContainer.scrollHeight;
+      });
+    };
+    window.visualViewport.addEventListener('resize', onViewportResize);
+    // Clean up when chat is closed
+    const origClose = closeChat;
+    const closeChatWithCleanup = () => {
+      window.visualViewport?.removeEventListener('resize', onViewportResize);
+      chatView.style.height = '';
+      origClose();
+    };
+    header.querySelector('#back-chat-btn')?.removeEventListener('click', origClose);
+    header.querySelector('#back-chat-btn')?.addEventListener('click', closeChatWithCleanup);
+  }
+
+  // Auto-scroll when input is focused (keyboard appears)
+  msgInput?.addEventListener('focus', () => {
+    setTimeout(() => {
+      msgContainer.scrollTop = msgContainer.scrollHeight;
+    }, 300);
+  });
 
   // Typing indicator on input
   msgInput?.addEventListener('input', debounce(() => {
@@ -452,12 +692,28 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
     msgInput.value = '';
     presenceManager.setTyping(chatId, false);
 
+    // Build message data
+    const msgData = {
+      text, senderId: authManager.currentUser.uid,
+      senderName: authManager.userData?.fullName || 'Unknown',
+      createdAt: serverTimestamp(),
+      status: 'sent'
+    };
+
+    // Attach reply reference if replying
+    if (replyToMsg) {
+      msgData.replyTo = {
+        id: replyToMsg.id,
+        text: replyToMsg.text,
+        senderName: replyToMsg.senderName,
+        senderId: replyToMsg.senderId
+      };
+      replyToMsg = null;
+      document.querySelector('.reply-preview-bar')?.remove();
+    }
+
     try {
-      await addDoc(collection(db, 'chats', currentChatId, 'messages'), {
-        text, senderId: authManager.currentUser.uid,
-        senderName: authManager.userData?.fullName || 'Unknown',
-        createdAt: serverTimestamp()
-      });
+      await addDoc(collection(db, 'chats', currentChatId, 'messages'), msgData);
       await updateDoc(doc(db, 'chats', currentChatId), {
         lastMessage: text,
         lastMessageAt: serverTimestamp()
@@ -466,7 +722,7 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
       // Increment unread for other participants
       if (otherUid) {
         await updateDoc(doc(db, 'chats', currentChatId), {
-          [`unreadCount.${otherUid}`]: (await import('../firebase-config.js')).increment(1)
+          [`unreadCount.${otherUid}`]: increment(1)
         });
         createNotification('chat_message', otherUid, { chatId: currentChatId, message: text });
       }
@@ -477,8 +733,8 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
   msgInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMessage(); });
 
   // Image attachment
-  const attachBtn = document.querySelector('#attach-btn');
-  const fileInput = document.querySelector('#chat-file-input');
+  const attachBtn = chatView.querySelector('#attach-btn') || document.querySelector('#attach-btn');
+  const fileInput = chatView.querySelector('#chat-file-input') || document.querySelector('#chat-file-input');
   attachBtn?.addEventListener('click', () => fileInput?.click());
   fileInput?.addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
@@ -486,8 +742,6 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
 
     try {
       showToast('Sending image...', 'info');
-      const { storageRef, uploadBytes, getDownloadURL } = await import('../firebase-config.js');
-      const { storage } = await import('../firebase-config.js');
       const path = `chat-images/${currentChatId}/${Date.now()}_${file.name}`;
       const sRef = storageRef(storage, path);
       await uploadBytes(sRef, file);
@@ -498,7 +752,8 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
         imageUrl,
         senderId: authManager.currentUser.uid,
         senderName: authManager.userData?.fullName || 'Unknown',
-        createdAt: serverTimestamp()
+        createdAt: serverTimestamp(),
+        status: 'sent'
       });
       await updateDoc(doc(db, 'chats', currentChatId), {
         lastMessage: '📷 Image',
@@ -513,10 +768,83 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
   });
 }
 
+// Mark messages as read
+async function markMessagesAsRead(chatId, otherUid) {
+  try {
+    const q = query(
+      collection(db, 'chats', chatId, 'messages'),
+      where('senderId', '==', otherUid),
+      where('status', 'in', ['sent', 'delivered'])
+    );
+    const snap = await getDocs(q);
+    snap.forEach(async (d) => {
+      await updateDoc(doc(db, 'chats', chatId, 'messages', d.id), { status: 'read' });
+    });
+  } catch (e) { /* non-critical */ }
+}
+
 function startCallUI(targetUid, targetName, type) {
   const callOverlay = document.getElementById('call-overlay');
   if (!callOverlay) return;
 
+  // Set up callbacks BEFORE starting the call
+  let callTimer = null;
+  let callSeconds = 0;
+
+  callManager.onCallStateChange = (state) => {
+    const statusEl = callOverlay.querySelector('#call-status-text');
+    if (statusEl) {
+      if (state === 'ringing') statusEl.textContent = 'Ringing...';
+      else if (state === 'connected') {
+        // Start call timer
+        callSeconds = 0;
+        callTimer = setInterval(() => {
+          callSeconds++;
+          const mins = Math.floor(callSeconds / 60).toString().padStart(2, '0');
+          const secs = (callSeconds % 60).toString().padStart(2, '0');
+          statusEl.textContent = `Connected · ${mins}:${secs}`;
+        }, 1000);
+      }
+    }
+    // Hide avatar info for video when connected
+    if (state === 'connected' && type === 'video') {
+      const callInfo = callOverlay.querySelector('.call-info');
+      if (callInfo) callInfo.style.display = 'none';
+    }
+  };
+
+  callManager.onRemoteStream = (userId, stream) => {
+    const container = callOverlay.querySelector('#remote-video-container');
+    if (container && type === 'video') {
+      container.innerHTML = ''; // Clear any previous
+      const video = document.createElement('video');
+      video.srcObject = stream;
+      video.autoplay = true;
+      video.playsInline = true;
+      video.className = 'w-full h-full object-cover';
+      container.appendChild(video);
+    }
+    // For audio-only calls, create an audio element
+    if (type === 'voice') {
+      const existingAudio = callOverlay.querySelector('audio');
+      if (!existingAudio) {
+        const audio = document.createElement('audio');
+        audio.srcObject = stream;
+        audio.autoplay = true;
+        audio.play().catch(console.error);
+        callOverlay.appendChild(audio);
+      }
+    }
+  };
+
+  callManager.onCallEnd = () => {
+    if (callTimer) clearInterval(callTimer);
+    callOverlay.classList.add('hidden');
+    callOverlay.innerHTML = '';
+    showToast('Call ended', 'info');
+  };
+
+  // Now show the call UI
   callOverlay.classList.remove('hidden');
   callOverlay.innerHTML = `
     <div class="call-screen ${type === 'video' ? 'call-video' : 'call-voice'}">
@@ -539,7 +867,12 @@ function startCallUI(targetUid, targetName, type) {
             <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9.75a2.25 2.25 0 002.25-2.25V7.5a2.25 2.25 0 00-2.25-2.25H4.5A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z"/></svg>
             <span class="text-[10px] mt-1">Camera</span>
           </button>
-        ` : ''}
+        ` : `
+          <button class="call-control-btn" id="toggle-speaker">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z"/></svg>
+            <span class="text-[10px] mt-1">Speaker</span>
+          </button>
+        `}
         <button class="call-control-btn call-end-btn" id="end-call-btn">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15.536a5 5 0 010-7.072m-2.828 9.9a9 9 0 010-12.728"/></svg>
           <span class="text-[10px] mt-1">End</span>
@@ -548,73 +881,494 @@ function startCallUI(targetUid, targetName, type) {
     </div>
   `;
 
-  // Setup call callbacks
-  callManager.onCallStateChange = (state) => {
-    const statusEl = callOverlay.querySelector('#call-status-text');
-    if (statusEl) {
-      if (state === 'ringing') statusEl.textContent = 'Ringing...';
-      else if (state === 'connected') statusEl.textContent = 'Connected';
+  // Start the call (async - local video will be available after)
+  (async () => {
+    await callManager.startCall(targetUid, targetName, type);
+    
+    // Show local video preview after stream is ready
+    if (type === 'video' && callManager.localStream) {
+      const localContainer = callOverlay.querySelector('#local-video-container');
+      if (localContainer) {
+        const video = document.createElement('video');
+        video.srcObject = callManager.localStream;
+        video.autoplay = true;
+        video.playsInline = true;
+        video.muted = true;
+        video.className = 'w-full h-full object-cover rounded-xl';
+        localContainer.appendChild(video);
+      }
     }
-  };
-
-  callManager.onRemoteStream = (userId, stream) => {
-    const container = callOverlay.querySelector('#remote-video-container');
-    if (container && type === 'video') {
-      const video = document.createElement('video');
-      video.srcObject = stream;
-      video.autoplay = true;
-      video.playsInline = true;
-      video.className = 'w-full h-full object-cover';
-      container.appendChild(video);
-    }
-    // For audio-only calls, the audio plays automatically via the stream
-    if (type === 'voice') {
-      const audio = document.createElement('audio');
-      audio.srcObject = stream;
-      audio.autoplay = true;
-      callOverlay.appendChild(audio);
-    }
-  };
-
-  callManager.onCallEnd = () => {
-    callOverlay.classList.add('hidden');
-    callOverlay.innerHTML = '';
-    showToast('Call ended', 'info');
-  };
-
-  // Start the call
-  callManager.startCall(targetUid, targetName, type);
-
-  // Show local video
-  if (type === 'video' && callManager.localStream) {
-    const localContainer = callOverlay.querySelector('#local-video-container');
-    if (localContainer) {
-      const video = document.createElement('video');
-      video.srcObject = callManager.localStream;
-      video.autoplay = true;
-      video.playsInline = true;
-      video.muted = true;
-      video.className = 'w-full h-full object-cover rounded-xl';
-      localContainer.appendChild(video);
-    }
-  }
+  })();
 
   // Controls
   callOverlay.querySelector('#toggle-mute')?.addEventListener('click', () => {
     const muted = callManager.toggleMute();
     const btn = callOverlay.querySelector('#toggle-mute');
-    if (btn) btn.classList.toggle('call-control-active', muted);
+    if (btn) {
+      btn.classList.toggle('call-control-active', muted);
+      btn.querySelector('span').textContent = muted ? 'Unmute' : 'Mute';
+    }
   });
 
   callOverlay.querySelector('#toggle-camera')?.addEventListener('click', () => {
     const off = callManager.toggleCamera();
     const btn = callOverlay.querySelector('#toggle-camera');
-    if (btn) btn.classList.toggle('call-control-active', off);
+    if (btn) {
+      btn.classList.toggle('call-control-active', off);
+      btn.querySelector('span').textContent = off ? 'Cam On' : 'Camera';
+    }
+    // Show/hide local video
+    const localContainer = callOverlay.querySelector('#local-video-container');
+    if (localContainer) {
+      localContainer.style.opacity = off ? '0.3' : '1';
+    }
+  });
+
+  callOverlay.querySelector('#toggle-speaker')?.addEventListener('click', () => {
+    const btn = callOverlay.querySelector('#toggle-speaker');
+    const audio = callOverlay.querySelector('audio');
+    if (audio && btn) {
+      const isLoud = btn.classList.toggle('call-control-active');
+      // Try to increase volume
+      audio.volume = isLoud ? 1.0 : 0.5;
+      btn.querySelector('span').textContent = isLoud ? 'Earpiece' : 'Speaker';
+    }
   });
 
   callOverlay.querySelector('#end-call-btn')?.addEventListener('click', () => {
+    if (callTimer) clearInterval(callTimer);
     callManager.endCall();
   });
+}
+
+// Global reply-to state
+let replyToMsg = null;
+
+function showMsgContextMenu(chatId, msgId, msg, isMine, bubbleEl, msgTime) {
+  // Remove any existing menu
+  document.querySelector('.msg-context-menu')?.remove();
+  document.querySelector('.msg-context-backdrop')?.remove();
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'msg-context-backdrop';
+  
+  const menu = document.createElement('div');
+  menu.className = 'msg-context-menu';
+
+  // Emoji reactions bar
+  const emojis = ['❤️', '😂', '😮', '😢', '👍', '🔥', '😎'];
+  menu.innerHTML = `
+    <div class="msg-ctx-reactions">
+      ${emojis.map(e => `<button class="msg-ctx-emoji" data-emoji="${e}">${e}</button>`).join('')}
+    </div>
+    <div class="msg-ctx-actions">
+      <button class="msg-ctx-action" data-action="reply">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3"/></svg>
+        Reply
+      </button>
+      <button class="msg-ctx-action" data-action="copy">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184"/></svg>
+        Copy
+      </button>
+      <button class="msg-ctx-action" data-action="forward">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 15l6-6m0 0l-6-6m6 6H9a6 6 0 000 12h3"/></svg>
+        Forward
+      </button>
+      <button class="msg-ctx-action" data-action="pin">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 3.75V16.5L12 14.25 7.5 16.5V3.75"/></svg>
+        ${msg.pinned ? 'Unpin' : 'Pin'}
+      </button>
+      ${isMine ? `
+        <button class="msg-ctx-action" data-action="info">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z"/></svg>
+          Info
+        </button>
+      ` : ''}
+      <div class="msg-ctx-divider"></div>
+      <button class="msg-ctx-action" data-action="delete-me">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
+        Delete for Me
+      </button>
+      ${isMine ? `
+        <button class="msg-ctx-action msg-ctx-danger" data-action="delete-all">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
+          Delete for Everyone
+        </button>
+      ` : ''}
+    </div>
+  `;
+
+  const closeMenu = () => {
+    menu.classList.add('msg-ctx-closing');
+    backdrop.remove();
+    setTimeout(() => menu.remove(), 200);
+  };
+
+  backdrop.addEventListener('click', closeMenu);
+
+  // Handle emoji reactions
+  menu.querySelectorAll('.msg-ctx-emoji').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      closeMenu();
+      try {
+        const uid = authManager.currentUser?.uid;
+        if (uid) {
+          await updateDoc(doc(db, 'chats', chatId, 'messages', msgId), {
+            [`reactions.${uid}`]: btn.dataset.emoji
+          });
+        }
+      } catch (e) { console.error('Reaction error:', e); }
+    });
+  });
+
+  // Handle action buttons
+  menu.querySelectorAll('.msg-ctx-action').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const action = btn.dataset.action;
+      closeMenu();
+
+      switch (action) {
+        case 'reply':
+          replyToMsg = { id: msgId, text: msg.text, senderName: msg.senderName, senderId: msg.senderId };
+          showReplyPreview();
+          break;
+
+        case 'copy':
+          if (msg.text) {
+            navigator.clipboard?.writeText(msg.text)
+              .then(() => showToast('Copied!', 'success'))
+              .catch(() => {});
+          }
+          break;
+
+        case 'forward':
+          showForwardModal(chatId, msg);
+          break;
+
+        case 'pin': {
+          try {
+            if (msg.pinned) {
+              // Unpin
+              await updateDoc(doc(db, 'chats', chatId, 'messages', msgId), { pinned: false });
+              await updateDoc(doc(db, 'chats', chatId), { pinnedMessage: deleteField() });
+              showToast('Unpinned', 'success');
+            } else {
+              // Pin
+              await updateDoc(doc(db, 'chats', chatId, 'messages', msgId), { pinned: true });
+              await updateDoc(doc(db, 'chats', chatId), {
+                pinnedMessage: {
+                  id: msgId,
+                  text: msg.text || '📷 Image',
+                  senderName: msg.senderName || 'Unknown'
+                }
+              });
+              showToast('Pinned 📌', 'success');
+            }
+          } catch (e) {
+            console.error('Pin error:', e);
+            showToast('Could not pin message', 'error');
+          }
+          break;
+        }
+
+        case 'info':
+          showMessageInfoPage(msg, msgTime);
+          break;
+
+        case 'delete-me': {
+          try {
+            const uid = authManager.currentUser?.uid;
+            if (uid) {
+              // Immediately hide from DOM for instant feedback
+              const msgEl = bubbleEl.closest('.msg-wrapper') || bubbleEl.closest('.flex');
+              if (msgEl) msgEl.style.display = 'none';
+              // Persist to Firestore
+              await updateDoc(doc(db, 'chats', chatId, 'messages', msgId), {
+                hiddenFor: arrayUnion(uid)
+              });
+              showToast('Deleted for you', 'success');
+            }
+          } catch (e) {
+            console.error('Delete for me error:', e);
+            showToast('Could not delete', 'error');
+            // Restore visibility on error
+            const msgEl = bubbleEl.closest('.msg-wrapper') || bubbleEl.closest('.flex');
+            if (msgEl) msgEl.style.display = '';
+          }
+          break;
+        }
+
+        case 'delete-all': {
+          try {
+            // WhatsApp-style: wipe content, keep placeholder
+            await updateDoc(doc(db, 'chats', chatId, 'messages', msgId), {
+              deletedForEveryone: true,
+              text: '',
+              imageUrl: '',
+              reactions: {},
+              replyTo: null,
+              forwarded: false
+            });
+            // Update last message preview
+            await updateDoc(doc(db, 'chats', chatId), {
+              lastMessage: '🗑 This message was deleted'
+            });
+            showToast('Deleted for everyone', 'success');
+          } catch (e) { console.error(e); }
+          break;
+        }
+      }
+    });
+  });
+
+  document.body.appendChild(backdrop);
+  document.body.appendChild(menu);
+
+  // Position near the bubble
+  requestAnimationFrame(() => {
+    const rect = bubbleEl.getBoundingClientRect();
+    const menuH = menu.offsetHeight;
+    const menuW = menu.offsetWidth;
+    let top = rect.top - menuH - 8;
+    if (top < 10) top = rect.bottom + 8;
+    let left = rect.left;
+    if (left + menuW > window.innerWidth - 10) left = window.innerWidth - menuW - 10;
+    if (left < 10) left = 10;
+    menu.style.top = `${top}px`;
+    menu.style.left = `${left}px`;
+  });
+}
+
+// ========== FORWARD MESSAGE MODAL ==========
+async function showForwardModal(chatId, msg) {
+  // Remove existing
+  document.querySelector('.forward-modal')?.remove();
+
+  const modal = document.createElement('div');
+  modal.className = 'forward-modal';
+  modal.innerHTML = `
+    <div class="forward-modal-content">
+      <div class="forward-modal-header">
+        <button class="forward-close-btn">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+        <h3>Forward to...</h3>
+        <button class="forward-send-btn" disabled>Send</button>
+      </div>
+      <div class="forward-search-wrap">
+        <input type="text" class="forward-search-input" placeholder="Search friends..." autocomplete="off"/>
+      </div>
+      <div class="forward-msg-preview">
+        <div class="msg-reply-bar"></div>
+        <p class="text-xs text-gray-500 truncate">${sanitizeHTML(msg.text || '📷 Image')}</p>
+      </div>
+      <div class="forward-user-list"></div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  requestAnimationFrame(() => modal.classList.add('forward-modal-open'));
+
+  const userList = modal.querySelector('.forward-user-list');
+  const searchInput = modal.querySelector('.forward-search-input');
+  const sendBtn = modal.querySelector('.forward-send-btn');
+  const selected = new Set();
+
+  // Load user's existing chats
+  let chatUsers = [];
+  try {
+    const chatsQ = query(
+      collection(db, 'chats'),
+      where('participants', 'array-contains', authManager.currentUser.uid)
+    );
+    const chatsSnap = await getDocs(chatsQ);
+    chatsSnap.forEach(d => {
+      const chat = d.data();
+      if (chat.type === 'group') return;
+      const otherIdx = chat.participants.findIndex(p => p !== authManager.currentUser?.uid);
+      const otherName = chat.participantNames?.[otherIdx] || 'Classmate';
+      const otherUid = chat.participants?.[otherIdx];
+      const otherPhoto = chat.participantPhotos?.[otherIdx] || '';
+      if (otherUid) {
+        chatUsers.push({ uid: otherUid, name: otherName, photo: otherPhoto, chatId: d.id });
+      }
+    });
+  } catch (e) { console.error(e); }
+
+  function renderUsers(filter = '') {
+    const filtered = filter
+      ? chatUsers.filter(u => u.name.toLowerCase().includes(filter.toLowerCase()))
+      : chatUsers;
+    
+    if (filtered.length === 0) {
+      userList.innerHTML = '<p class="text-center text-gray-400 text-sm py-8">No friends found</p>';
+      return;
+    }
+
+    userList.innerHTML = filtered.map(u => `
+      <label class="forward-user-item ${selected.has(u.uid) ? 'forward-user-selected' : ''}" data-uid="${u.uid}">
+        ${u.photo
+          ? `<img src="${u.photo}" class="forward-user-avatar" alt=""/>`
+          : `<div class="forward-user-avatar forward-user-placeholder">${u.name[0]}</div>`}
+        <span class="forward-user-name">${sanitizeHTML(u.name)}</span>
+        <div class="forward-checkbox ${selected.has(u.uid) ? 'forward-checked' : ''}">
+          ${selected.has(u.uid) ? '✓' : ''}
+        </div>
+      </label>
+    `).join('');
+
+    userList.querySelectorAll('.forward-user-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const uid = item.dataset.uid;
+        if (selected.has(uid)) selected.delete(uid);
+        else selected.add(uid);
+        sendBtn.disabled = selected.size === 0;
+        renderUsers(searchInput.value);
+      });
+    });
+  }
+
+  renderUsers();
+
+  searchInput.addEventListener('input', () => renderUsers(searchInput.value));
+
+  // Close
+  modal.querySelector('.forward-close-btn').addEventListener('click', () => {
+    modal.classList.remove('forward-modal-open');
+    setTimeout(() => modal.remove(), 200);
+  });
+
+  // Send forward
+  sendBtn.addEventListener('click', async () => {
+    if (selected.size === 0) return;
+    sendBtn.disabled = true;
+    sendBtn.textContent = 'Sending...';
+
+    for (const uid of selected) {
+      const targetChat = chatUsers.find(u => u.uid === uid);
+      if (!targetChat) continue;
+
+      try {
+        await addDoc(collection(db, 'chats', targetChat.chatId, 'messages'), {
+          text: msg.text || '',
+          imageUrl: msg.imageUrl || '',
+          senderId: authManager.currentUser.uid,
+          senderName: authManager.userData?.fullName || 'Unknown',
+          createdAt: serverTimestamp(),
+          status: 'sent',
+          forwarded: true
+        });
+        await updateDoc(doc(db, 'chats', targetChat.chatId), {
+          lastMessage: `↗️ ${msg.text || '📷 Image'}`,
+          lastMessageAt: serverTimestamp(),
+          [`unreadCount.${uid}`]: increment(1)
+        });
+      } catch (e) { console.error('Forward error:', e); }
+    }
+
+    showToast(`Forwarded to ${selected.size} friend${selected.size > 1 ? 's' : ''}`, 'success');
+    modal.classList.remove('forward-modal-open');
+    setTimeout(() => modal.remove(), 200);
+  });
+}
+
+// ========== MESSAGE INFO PAGE ==========
+function showMessageInfoPage(msg, msgTime) {
+  document.querySelector('.msg-info-page')?.remove();
+
+  const sentTime = msgTime.toLocaleString();
+  const statusLabel = msg.status === 'read' ? 'Read' : msg.status === 'delivered' ? 'Delivered' : 'Sent';
+  const statusIcon = msg.status === 'read' ? '✅' : msg.status === 'delivered' ? '📬' : '📤';
+  const readTime = msg.readAt?.toDate ? msg.readAt.toDate().toLocaleString() : (msg.status === 'read' ? sentTime : '—');
+  const deliveredTime = msg.deliveredAt?.toDate ? msg.deliveredAt.toDate().toLocaleString() : (msg.status !== 'sent' ? sentTime : '—');
+
+  const page = document.createElement('div');
+  page.className = 'msg-info-page';
+  page.innerHTML = `
+    <div class="msg-info-header">
+      <button class="msg-info-back">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/></svg>
+      </button>
+      <h3>Message Info</h3>
+    </div>
+    <div class="msg-info-body">
+      <div class="msg-info-preview">
+        <div class="msg-sent" style="display:inline-block;">
+          ${msg.imageUrl ? `<img src="${msg.imageUrl}" style="max-width:200px;border-radius:12px;margin-bottom:4px;" alt=""/>` : ''}
+          ${msg.text ? `<p class="text-sm">${sanitizeHTML(msg.text)}</p>` : ''}
+          <p class="text-[9px] text-white/50 text-right mt-1">${msgTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+        </div>
+      </div>
+
+      <div class="msg-info-section">
+        <div class="msg-info-row">
+          <div class="msg-info-icon">📤</div>
+          <div class="msg-info-detail">
+            <p class="msg-info-label">Sent</p>
+            <p class="msg-info-value">${sentTime}</p>
+          </div>
+        </div>
+        <div class="msg-info-row">
+          <div class="msg-info-icon">📬</div>
+          <div class="msg-info-detail">
+            <p class="msg-info-label">Delivered</p>
+            <p class="msg-info-value">${deliveredTime}</p>
+          </div>
+        </div>
+        <div class="msg-info-row">
+          <div class="msg-info-icon">✅</div>
+          <div class="msg-info-detail">
+            <p class="msg-info-label">Read</p>
+            <p class="msg-info-value">${readTime}</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="msg-info-section">
+        <p class="msg-info-section-title">Status</p>
+        <div class="msg-info-status-badge">
+          <span>${statusIcon}</span>
+          <span>${statusLabel}</span>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(page);
+  requestAnimationFrame(() => page.classList.add('msg-info-open'));
+
+  page.querySelector('.msg-info-back').addEventListener('click', () => {
+    page.classList.remove('msg-info-open');
+    setTimeout(() => page.remove(), 250);
+  });
+}
+
+// ========== REPLY PREVIEW ==========
+function showReplyPreview() {
+  if (!replyToMsg) return;
+  let preview = document.querySelector('.reply-preview-bar');
+  if (preview) preview.remove();
+
+  preview = document.createElement('div');
+  preview.className = 'reply-preview-bar';
+  preview.innerHTML = `
+    <div class="msg-reply-bar"></div>
+    <div class="flex-1 min-w-0">
+      <p class="text-[10px] font-semibold text-navy-500">${sanitizeHTML(replyToMsg.senderName || '')}</p>
+      <p class="text-xs text-gray-500 truncate">${sanitizeHTML(replyToMsg.text || '📷 Image')}</p>
+    </div>
+    <button class="reply-close-btn">✕</button>
+  `;
+
+  const inputBar = document.querySelector('.chat-input-bar');
+  if (inputBar) inputBar.insertBefore(preview, inputBar.firstChild);
+
+  preview.querySelector('.reply-close-btn')?.addEventListener('click', () => {
+    replyToMsg = null;
+    preview.remove();
+  });
+
+  document.querySelector('#msg-input')?.focus();
 }
 
 // Export for use in incoming call handler

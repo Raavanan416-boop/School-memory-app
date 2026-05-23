@@ -1,7 +1,11 @@
 // Main App Entry — Resilient app shell with lazy page loading + auto-login
 import { authManager } from './auth.js';
 import { router } from './router.js';
-import { showToast } from './utils.js';
+import { showToast, sanitizeHTML } from './utils.js';
+import { presenceManager } from './presence.js';
+
+// Expose router globally for notification click routing
+window.__appRouter = { router };
 
 // Lazy-load modules to prevent one broken module from killing the whole app
 let notificationManager = null;
@@ -229,13 +233,26 @@ function buildAppShell() {
     callManager.onIncomingCall = (call) => showIncomingCallUI(call);
   }
 
+  // Start presence tracking (online/offline status)
+  presenceManager.startPresenceTracking();
+
   router.navigate('home');
 
-  // Apply saved theme
+  // Apply saved theme from localStorage (instant) and sync from Firestore
   const savedTheme = localStorage.getItem('app_theme');
   if (savedTheme && savedTheme !== 'theme-cream') {
+    document.body.className = document.body.className.replace(/theme-\w+/g, '').trim();
     document.body.classList.add(savedTheme);
   }
+  // Sync theme from Firestore (in case user changed on another device)
+  try {
+    const userTheme = authManager.userData?.theme;
+    if (userTheme && userTheme !== savedTheme) {
+      localStorage.setItem('app_theme', userTheme);
+      document.body.className = document.body.className.replace(/theme-\w+/g, '').trim();
+      if (userTheme !== 'theme-cream') document.body.classList.add(userTheme);
+    }
+  } catch(e) { /* non-critical */ }
 
   // Page cleanup on navigation
   router.onNavigate = async (page) => {
@@ -453,29 +470,38 @@ function showIncomingCallUI(call) {
 
   callOverlay.classList.remove('hidden');
   callOverlay.innerHTML = `
-    <div class="incoming-call-screen">
-      <div class="call-avatar-ring">
-        <div class="avatar avatar-placeholder text-3xl w-24 h-24">${(call.callerName || '?')[0]}</div>
+    <div class="call-screen">
+      <div class="call-info">
+        <div class="call-avatar-ring">
+          <div class="avatar avatar-placeholder text-2xl w-20 h-20">${(call.callerName || '?')[0]}</div>
+        </div>
+        <h3 class="text-lg font-bold text-white mt-4">${sanitizeHTML(call.callerName || 'Unknown')}</h3>
+        <p class="text-sm text-white/70 mt-1">Incoming ${call.type} call...</p>
       </div>
-      <h3 class="text-xl font-bold text-white mt-6">${call.callerName || 'Unknown'}</h3>
-      <p class="text-sm text-white/70 mt-1">Incoming ${call.type} call...</p>
-      <div class="flex items-center gap-8 mt-10">
-        <button class="call-action-btn call-reject" id="reject-call">
-          <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+      <div class="call-controls">
+        <button class="call-control-btn call-end-btn" id="reject-call" style="background:#ef4444">
+          <svg class="w-7 h-7" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
-        <button class="call-action-btn call-accept" id="accept-call">
-          <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"/></svg>
+        <button class="call-control-btn" id="accept-call" style="background:#22c55e;box-shadow:0 4px 20px rgba(34,197,94,0.4)">
+          <svg class="w-7 h-7" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"/></svg>
         </button>
       </div>
     </div>
   `;
 
   callOverlay.querySelector('#accept-call')?.addEventListener('click', async () => {
-    callOverlay.innerHTML = '';
-    const { startCallUI } = await import('./pages/chat.js');
-    callOverlay.classList.add('hidden');
-    await callManager.answerCall(call.id);
-    startCallUI(call.callerId, call.callerName, call.type);
+    // Don't hide overlay — transition directly to call UI
+    try {
+      await callManager.answerCall(call.id);
+      // Now import and start the call UI in the same overlay
+      const { startCallUI } = await import('./pages/chat.js');
+      startCallUI(call.callerId, call.callerName, call.type);
+    } catch (e) {
+      console.error('Accept call error:', e);
+      callOverlay.classList.add('hidden');
+      callOverlay.innerHTML = '';
+      showToast('Could not accept call', 'error');
+    }
   });
 
   callOverlay.querySelector('#reject-call')?.addEventListener('click', () => {
@@ -484,6 +510,7 @@ function showIncomingCallUI(call) {
     callOverlay.innerHTML = '';
   });
 
+  // Auto-dismiss after 30s
   setTimeout(() => {
     if (callOverlay.querySelector('#accept-call')) {
       callOverlay.classList.add('hidden');

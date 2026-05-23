@@ -183,103 +183,120 @@ export async function renderProfile(container, data = null) {
       <button id="settings-menu-btn" class="profile-settings-btn">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg>
       </button>
-      <div id="settings-overlay" class="settings-overlay hidden">
+      <div id="settings-overlay" class="settings-overlay">
         <div class="settings-backdrop" id="settings-backdrop"></div>
-        <div class="settings-drawer" id="settings-drawer">
-          <button class="settings-close-btn" id="settings-close-btn" aria-label="Close menu">✕</button>
-          <div class="settings-drawer-accent"></div>
-          <div class="p-5 pb-8 pt-14">
-            <!-- User Header -->
-            <div class="flex items-center gap-3 mb-5 pb-4" style="border-bottom: 1px solid rgba(255,255,255,0.08);">
+        <div class="settings-drawer" id="settings-drawer" style="width:100%;max-width:100%;border-radius:0;">
+          <div class="menu-page" style="background:var(--bg, #f5e8d0);min-height:100vh;">
+            <!-- Menu Header -->
+            <div class="menu-header">
+              <button id="settings-close-btn" class="p-2 -ml-1 text-navy-500 hover:text-navy-700 transition-colors" aria-label="Close menu">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/></svg>
+              </button>
+              <h2 class="text-lg font-bold text-navy-800">Settings</h2>
+            </div>
+
+            <!-- Profile Card -->
+            <div class="menu-profile-section" id="menu-go-profile">
               ${user.profilePic
-                ? `<img src="${user.profilePic}" class="w-14 h-14 rounded-full object-cover border-2 border-white/10 shadow-sm" alt=""/>`
-                : `<div class="w-14 h-14 rounded-full bg-gradient-to-br from-navy-400 to-navy-600 flex items-center justify-center text-white text-xl font-bold shadow-sm">${(user.fullName || '?')[0]}</div>`}
-              <div class="flex-1">
-                <p class="font-bold text-white text-base">${sanitizeHTML(user.fullName || 'Your Name')}</p>
-                <p class="text-xs text-gray-400">${user.email || ''}</p>
+                ? `<img src="${user.profilePic}" class="w-16 h-16 rounded-full object-cover border-2 border-white shadow-sm" alt=""/>`
+                : `<div class="w-16 h-16 rounded-full bg-gradient-to-br from-navy-400 to-navy-600 flex items-center justify-center text-white text-xl font-bold shadow-sm">${(user.fullName || '?')[0]}</div>`}
+              <div class="flex-1 min-w-0">
+                <p class="font-bold text-navy-800 text-base">${sanitizeHTML(user.fullName || 'Your Name')}</p>
+                <p class="text-xs text-gray-400 truncate">${user.email || ''}</p>
+                <p class="text-xs text-green-500 mt-0.5">● Online</p>
               </div>
+              <svg class="w-5 h-5 text-gray-300" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
             </div>
 
-            <!-- Account Section -->
-            <p class="text-[10px] text-gray-500 uppercase tracking-widest font-semibold mb-2 px-2">Account</p>
-            <div class="space-y-0.5 mb-4">
-              <button class="settings-item" data-action="edit-profile">
-                <div class="settings-item-icon bg-blue-50 text-blue-500">
-                  <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z"/></svg>
+            <!-- Account Group -->
+            <div class="menu-items-group">
+              <button class="menu-item" data-action="edit-profile">
+                <div class="menu-item-icon" style="background:#eff6ff;">✏️</div>
+                <div class="menu-item-text">
+                  <div class="menu-item-title">Edit Profile</div>
+                  <div class="menu-item-subtitle">Update your photo, name, bio</div>
                 </div>
-                <span>Edit Profile</span>
-                <svg class="w-4 h-4 text-gray-300 ml-auto" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+                <svg class="menu-item-arrow w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
               </button>
-              <button class="settings-item" data-action="change-password">
-                <div class="settings-item-icon bg-purple-50 text-purple-500">
-                  <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>
+              <button class="menu-item" data-action="change-password">
+                <div class="menu-item-icon" style="background:#f3e8ff;">🔒</div>
+                <div class="menu-item-text">
+                  <div class="menu-item-title">Change Password</div>
+                  <div class="menu-item-subtitle">Update your login credentials</div>
                 </div>
-                <span>Change Password</span>
-                <svg class="w-4 h-4 text-gray-300 ml-auto" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
-              </button>
-            </div>
-
-            <!-- App Section -->
-            <p class="text-[10px] text-gray-500 uppercase tracking-widest font-semibold mb-2 px-2">App</p>
-            <div class="space-y-0.5 mb-4">
-              <button class="settings-item" data-action="saved-memories">
-                <div class="settings-item-icon bg-amber-50 text-amber-500">
-                  <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z"/></svg>
-                </div>
-                <span>Saved Memories</span>
-                <span class="text-xs text-gray-500 ml-auto mr-2">${(user.savedPosts?.length || 0)}</span>
-                <svg class="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
-              </button>
-              <button class="settings-item" data-action="leaderboard">
-                <div class="settings-item-icon bg-yellow-50 text-yellow-500">
-                  <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 18.75h-9m9 0a3 3 0 013 3h-15a3 3 0 013-3m9 0v-3.375c0-.621-.503-1.125-1.125-1.125h-.871M7.5 18.75v-3.375c0-.621.504-1.125 1.125-1.125h.872m5.007 0H9.497m5.007 0a7.454 7.454 0 01-.982-3.172M9.497 14.25a7.454 7.454 0 00.981-3.172M5.25 4.236c-.982.143-1.954.317-2.916.52A6.003 6.003 0 007.73 9.728M5.25 4.236V4.5c0 2.108.966 3.99 2.48 5.228M5.25 4.236V2.721C7.456 2.41 9.71 2.25 12 2.25c2.291 0 4.545.16 6.75.47v1.516M18.75 4.236c.982.143 1.954.317 2.916.52A6.003 6.003 0 0016.27 9.728M18.75 4.236V4.5c0 2.108-.966 3.99-2.48 5.228m0 0a6.003 6.003 0 01-5.54 0"/></svg>
-                </div>
-                <span>Leaderboard</span>
-                <svg class="w-4 h-4 text-gray-300 ml-auto" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
-              </button>
-              <button class="settings-item" data-action="close-friends">
-                <div class="settings-item-icon bg-pink-50 text-pink-500">
-                  <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z"/></svg>
-                </div>
-                <span>Close Friends</span>
-                <svg class="w-4 h-4 text-gray-300 ml-auto" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+                <svg class="menu-item-arrow w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
               </button>
             </div>
 
-            <!-- Preferences Section -->
-            <p class="text-[10px] text-gray-500 uppercase tracking-widest font-semibold mb-2 px-2">Preferences</p>
-            <div class="space-y-0.5 mb-4">
-              <button class="settings-item" data-action="notification-settings">
-                <div class="settings-item-icon bg-green-50 text-green-500">
-                  <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
+            <!-- App Group -->
+            <div class="menu-items-group">
+              <button class="menu-item" data-action="saved-memories">
+                <div class="menu-item-icon" style="background:#fef3c7;">🔖</div>
+                <div class="menu-item-text">
+                  <div class="menu-item-title">Saved Memories</div>
+                  <div class="menu-item-subtitle">${(user.savedPosts?.length || 0)} saved items</div>
                 </div>
-                <span>Notification Settings</span>
-                <svg class="w-4 h-4 text-gray-300 ml-auto" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+                <svg class="menu-item-arrow w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
               </button>
-              <button class="settings-item" data-action="privacy-settings">
-                <div class="settings-item-icon bg-indigo-50 text-indigo-500">
-                  <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
+              <button class="menu-item" data-action="leaderboard">
+                <div class="menu-item-icon" style="background:#fef9c3;">🏆</div>
+                <div class="menu-item-text">
+                  <div class="menu-item-title">Leaderboard</div>
+                  <div class="menu-item-subtitle">See class rankings</div>
                 </div>
-                <span>Privacy Settings</span>
-                <svg class="w-4 h-4 text-gray-300 ml-auto" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+                <svg class="menu-item-arrow w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
               </button>
-              <button class="settings-item" data-action="theme-settings">
-                <div class="settings-item-icon bg-gradient-to-br from-purple-50 to-pink-50 text-purple-500">
-                  <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.098 19.902a3.75 3.75 0 005.304 0l6.401-6.402M6.75 21A3.75 3.75 0 013 17.25V4.125C3 3.504 3.504 3 4.125 3h5.25c.621 0 1.125.504 1.125 1.125v4.072M6.75 21a3.75 3.75 0 003.75-3.75V8.197M6.75 21h13.125c.621 0 1.125-.504 1.125-1.125v-5.25c0-.621-.504-1.125-1.125-1.125h-4.072M10.5 8.197l2.88-2.88c.438-.439 1.15-.439 1.59 0l3.712 3.713c.44.44.44 1.152 0 1.59l-2.879 2.88M6.75 17.25h.008v.008H6.75v-.008z"/></svg>
+              <button class="menu-item" data-action="close-friends">
+                <div class="menu-item-icon" style="background:#fce7f3;">💕</div>
+                <div class="menu-item-text">
+                  <div class="menu-item-title">Close Friends</div>
+                  <div class="menu-item-subtitle">Manage your inner circle</div>
                 </div>
-                <span>Theme</span>
-                <svg class="w-4 h-4 text-gray-300 ml-auto" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+                <svg class="menu-item-arrow w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
               </button>
             </div>
 
-            <!-- Logout -->
-            <div class="pt-2" style="border-top: 1px solid rgba(255,255,255,0.06);">
-              <button class="settings-item text-red-500" data-action="logout">
-                <div class="settings-item-icon bg-red-50 text-red-500">
-                  <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/></svg>
+            <!-- Preferences Group -->
+            <div class="menu-items-group">
+              <button class="menu-item" data-action="theme-settings">
+                <div class="menu-item-icon" style="background:linear-gradient(135deg,#f3e8ff,#fce7f3);">🎨</div>
+                <div class="menu-item-text">
+                  <div class="menu-item-title">Theme</div>
+                  <div class="menu-item-subtitle">Customize app appearance</div>
                 </div>
-                <span>Logout</span>
+                <svg class="menu-item-arrow w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
               </button>
+              <button class="menu-item" data-action="notification-settings">
+                <div class="menu-item-icon" style="background:#dcfce7;">🔔</div>
+                <div class="menu-item-text">
+                  <div class="menu-item-title">Notifications</div>
+                  <div class="menu-item-subtitle">Manage alerts & sounds</div>
+                </div>
+                <svg class="menu-item-arrow w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+              </button>
+              <button class="menu-item" data-action="privacy-settings">
+                <div class="menu-item-icon" style="background:#e0e7ff;">🛡️</div>
+                <div class="menu-item-text">
+                  <div class="menu-item-title">Privacy</div>
+                  <div class="menu-item-subtitle">Control who sees your content</div>
+                </div>
+                <svg class="menu-item-arrow w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+              </button>
+            </div>
+
+            <!-- Logout Group -->
+            <div class="menu-items-group" style="margin-top:24px;">
+              <button class="menu-item menu-danger" data-action="logout">
+                <div class="menu-item-icon" style="background:#fee2e2;">🚪</div>
+                <div class="menu-item-text">
+                  <div class="menu-item-title">Logout</div>
+                  <div class="menu-item-subtitle">Sign out of your account</div>
+                </div>
+              </button>
+            </div>
+
+            <div class="text-center py-6">
+              <p class="text-[10px] text-gray-300">ClassMemories v2.0 · Made with ❤️</p>
             </div>
           </div>
         </div>
@@ -317,20 +334,17 @@ export async function renderProfile(container, data = null) {
   const settingsCloseBtn = container.querySelector('#settings-close-btn');
 
   function openSettings() {
-    settingsOverlay?.classList.remove('hidden');
-    // Double-rAF ensures the 'hidden' removal is painted before the transition class is added
+    // Use only CSS class for transitions - no 'hidden' class conflict
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        settingsOverlay?.classList.add('settings-active');
-      });
+      settingsOverlay?.classList.add('settings-active');
     });
+    // Prevent body scroll while menu is open
+    document.body.style.overflow = 'hidden';
   }
 
   function closeSettings() {
     settingsOverlay?.classList.remove('settings-active');
-    setTimeout(() => {
-      settingsOverlay?.classList.add('hidden');
-    }, 400); // match the 0.38s CSS transition
+    document.body.style.overflow = '';
   }
 
   settingsBtn?.addEventListener('click', openSettings);
@@ -367,11 +381,12 @@ export async function renderProfile(container, data = null) {
     settingsDrawer.style.transform = '';
   });
 
-  // Settings actions
-  container.querySelectorAll('.settings-item').forEach(item => {
+  // Settings actions — works with both .settings-item and .menu-item
+  container.querySelectorAll('.menu-item, .settings-item').forEach(item => {
     item.addEventListener('click', () => {
       closeSettings();
       const action = item.dataset.action;
+      if (!action) return;
       setTimeout(() => {
         switch (action) {
           case 'edit-profile': showEditProfileModal(); break;
@@ -386,6 +401,11 @@ export async function renderProfile(container, data = null) {
         }
       }, 200);
     });
+  });
+
+  // Menu profile card → go to profile
+  container.querySelector('#menu-go-profile')?.addEventListener('click', () => {
+    closeSettings();
   });
 
   // Back button for other profiles

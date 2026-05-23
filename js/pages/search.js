@@ -1,4 +1,4 @@
-// Search page — Enhanced with DM start, profile view, real-time presence
+// Search page — Empty initial state, live search with results only after typing
 import { db, collection, getDocs, query, where, orderBy, limit } from '../firebase-config.js';
 import { sanitizeHTML, debounce } from '../utils.js';
 import { authManager } from '../auth.js';
@@ -6,6 +6,7 @@ import { router } from '../router.js';
 
 let allUsers = [];
 let allPosts = [];
+let dataLoaded = false;
 
 export async function renderSearch(container) {
   container.innerHTML = `
@@ -15,25 +16,69 @@ export async function renderSearch(container) {
       <div class="relative mb-5">
         <svg class="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
         <input type="text" id="search-input" placeholder="Search people, memories, categories..."
-          class="w-full pl-11 pr-4 py-3 border border-gray-200 rounded-2xl text-sm text-navy-800 placeholder:text-gray-400 focus:outline-none focus:border-navy-500 bg-white"/>
+          class="w-full pl-11 pr-10 py-3 border border-gray-200 rounded-2xl text-sm text-navy-800 placeholder:text-gray-400 focus:outline-none focus:border-navy-500 bg-white"/>
+        <button id="clear-search-btn" class="hidden absolute right-3 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-navy-500 transition-colors rounded-full">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
       </div>
 
       <!-- Search Tabs -->
-      <div class="flex gap-2 mb-4">
+      <div class="flex gap-2 mb-4" id="search-tabs-bar">
         <button class="search-tab active" data-tab="people">👥 People</button>
         <button class="search-tab" data-tab="memories">📸 Memories</button>
       </div>
 
-      <div id="search-results" class="space-y-1"></div>
+      <!-- Search Results (hidden initially) -->
+      <div id="search-results" class="space-y-1 hidden"></div>
 
-      <div id="all-classmates" class="mt-4">
-        <h3 class="section-title mb-3">All Classmates</h3>
-        <div id="classmates-grid" class="space-y-1"></div>
+      <!-- Empty Initial State -->
+      <div id="search-empty-state" class="text-center py-16">
+        <div class="text-5xl mb-4">🔍</div>
+        <h3 class="text-base font-semibold text-navy-800 mb-2">Discover ClassMemories</h3>
+        <p class="text-sm text-gray-400 max-w-xs mx-auto">Search for classmates, memories, photos, and more. Start typing to explore!</p>
+        <div class="flex flex-wrap justify-center gap-2 mt-6" id="search-suggestions">
+          <button class="search-suggest-chip" data-q="photos">📸 Photos</button>
+          <button class="search-suggest-chip" data-q="funny">😂 Funny</button>
+          <button class="search-suggest-chip" data-q="farewell">🎓 Farewell</button>
+        </div>
+      </div>
+
+      <!-- Recent Searches -->
+      <div id="recent-searches" class="hidden mt-2">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="section-title">Recent Searches</h3>
+          <button id="clear-recent-btn" class="text-xs text-gray-400 hover:text-red-400 transition-colors">Clear all</button>
+        </div>
+        <div id="recent-list" class="space-y-1"></div>
+      </div>
+
+      <!-- Loading Skeleton -->
+      <div id="search-loading" class="hidden space-y-3">
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
       </div>
     </section>
   `;
 
   let activeTab = 'people';
+  const searchInput = container.querySelector('#search-input');
+  const clearBtn = container.querySelector('#clear-search-btn');
+  const emptyState = container.querySelector('#search-empty-state');
+  const resultsEl = container.querySelector('#search-results');
+  const recentEl = container.querySelector('#recent-searches');
+  const loadingEl = container.querySelector('#search-loading');
+
+  // Load recent searches from localStorage
+  loadRecentSearches(container);
+
+  // Show recent searches when input is focused but empty
+  searchInput?.addEventListener('focus', () => {
+    const recents = JSON.parse(localStorage.getItem('search_recents') || '[]');
+    if (!searchInput.value.trim() && recents.length > 0) {
+      recentEl.classList.remove('hidden');
+    }
+  });
 
   // Tabs
   container.querySelectorAll('.search-tab').forEach(tab => {
@@ -41,40 +86,100 @@ export async function renderSearch(container) {
       container.querySelectorAll('.search-tab').forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
       activeTab = tab.dataset.tab;
-      performSearch(container, container.querySelector('#search-input')?.value || '', activeTab);
+      const q = searchInput?.value || '';
+      if (q.trim()) performSearch(container, q, activeTab);
     });
   });
 
-  try {
-    const [usersSnap, postsSnap] = await Promise.all([
-      getDocs(collection(db, 'users')),
-      getDocs(query(collection(db, 'posts'), orderBy('createdAt', 'desc'), limit(50)))
-    ]);
-    allUsers = [];
-    allPosts = [];
-    usersSnap.forEach(d => allUsers.push({ id: d.id, ...d.data() }));
-    postsSnap.forEach(d => allPosts.push({ id: d.id, ...d.data() }));
-    renderAllClassmates(container);
-  } catch (e) {
-    container.querySelector('#classmates-grid').innerHTML = `<div class="card p-6 text-center text-sm text-gray-400">Connect Firebase to see classmates</div>`;
+  // Suggestion chips
+  container.querySelectorAll('.search-suggest-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const q = chip.dataset.q;
+      searchInput.value = q;
+      clearBtn.classList.remove('hidden');
+      performSearch(container, q, activeTab);
+    });
+  });
+
+  // Clear button
+  clearBtn?.addEventListener('click', () => {
+    searchInput.value = '';
+    clearBtn.classList.add('hidden');
+    resultsEl.classList.add('hidden');
+    resultsEl.innerHTML = '';
+    emptyState.classList.remove('hidden');
+    recentEl.classList.add('hidden');
+  });
+
+  // Clear recent searches
+  container.querySelector('#clear-recent-btn')?.addEventListener('click', () => {
+    localStorage.removeItem('search_recents');
+    recentEl.classList.add('hidden');
+  });
+
+  // Lazy-load data on first search
+  async function ensureDataLoaded() {
+    if (dataLoaded) return;
+    try {
+      const [usersSnap, postsSnap] = await Promise.all([
+        getDocs(collection(db, 'users')),
+        getDocs(query(collection(db, 'posts'), orderBy('createdAt', 'desc'), limit(50)))
+      ]);
+      allUsers = [];
+      allPosts = [];
+      usersSnap.forEach(d => allUsers.push({ id: d.id, ...d.data() }));
+      postsSnap.forEach(d => allPosts.push({ id: d.id, ...d.data() }));
+      dataLoaded = true;
+    } catch (e) {
+      console.error('Search data load error:', e);
+    }
   }
 
-  container.querySelector('#search-input').addEventListener('input', debounce((e) => {
-    performSearch(container, e.target.value, activeTab);
+  // Live search
+  searchInput?.addEventListener('input', debounce(async (e) => {
+    const q = e.target.value.trim();
+    clearBtn.classList.toggle('hidden', !q);
+    
+    if (!q) {
+      resultsEl.classList.add('hidden');
+      resultsEl.innerHTML = '';
+      emptyState.classList.remove('hidden');
+      const recents = JSON.parse(localStorage.getItem('search_recents') || '[]');
+      if (recents.length > 0) recentEl.classList.remove('hidden');
+      return;
+    }
+
+    // Hide empty state, show loading
+    emptyState.classList.add('hidden');
+    recentEl.classList.add('hidden');
+    loadingEl.classList.remove('hidden');
+    resultsEl.classList.add('hidden');
+
+    await ensureDataLoaded();
+
+    loadingEl.classList.add('hidden');
+    performSearch(container, q, activeTab);
+
+    // Save to recent searches
+    saveRecentSearch(q);
+    loadRecentSearches(container);
   }, 300));
 }
 
 function performSearch(container, searchQuery, tab) {
   const q = searchQuery.toLowerCase().trim();
   const results = container.querySelector('#search-results');
-  const allSection = container.querySelector('#all-classmates');
+  const emptyState = container.querySelector('#search-empty-state');
 
   if (!q) {
+    results.classList.add('hidden');
     results.innerHTML = '';
-    allSection.classList.remove('hidden');
+    emptyState.classList.remove('hidden');
     return;
   }
-  allSection.classList.add('hidden');
+
+  emptyState.classList.add('hidden');
+  results.classList.remove('hidden');
 
   if (tab === 'people') {
     const filtered = allUsers.filter(u =>
@@ -84,7 +189,7 @@ function performSearch(container, searchQuery, tab) {
     );
     results.innerHTML = filtered.length
       ? filtered.map(u => userCard(u)).join('')
-      : '<p class="text-center text-gray-400 py-8 text-sm">No classmates found</p>';
+      : '<div class="text-center py-10"><div class="text-3xl mb-2">🤷</div><p class="text-sm text-gray-400">No classmates found for "' + sanitizeHTML(searchQuery) + '"</p></div>';
   } else {
     const filtered = allPosts.filter(p =>
       p.caption?.toLowerCase().includes(q) ||
@@ -94,19 +199,10 @@ function performSearch(container, searchQuery, tab) {
     );
     results.innerHTML = filtered.length
       ? filtered.map(p => postSearchCard(p)).join('')
-      : '<p class="text-center text-gray-400 py-8 text-sm">No memories found</p>';
+      : '<div class="text-center py-10"><div class="text-3xl mb-2">📭</div><p class="text-sm text-gray-400">No memories found for "' + sanitizeHTML(searchQuery) + '"</p></div>';
   }
 
-  // Bind events
   bindUserCardEvents(results);
-}
-
-function renderAllClassmates(container) {
-  const grid = container.querySelector('#classmates-grid');
-  grid.innerHTML = allUsers.length
-    ? allUsers.map(u => userCard(u)).join('')
-    : '<p class="text-center text-gray-400 py-4 text-sm">No users loaded</p>';
-  bindUserCardEvents(grid);
 }
 
 function userCard(u) {
@@ -118,7 +214,7 @@ function userCard(u) {
     <div class="chat-item user-search-card" data-uid="${u.id}" data-name="${sanitizeHTML(u.fullName || '')}">
       <div class="relative">
         ${avatar}
-        <div class="presence-dot-mini ${u.online ? 'presence-online' : 'presence-offline'}"></div>
+        <div class="presence-dot-mini ${u.online ? 'online' : ''}"></div>
       </div>
       <div class="flex-1 min-w-0">
         <p class="font-semibold text-sm text-navy-800">${sanitizeHTML(u.fullName || 'Unknown')}</p>
@@ -146,7 +242,6 @@ function postSearchCard(p) {
 function bindUserCardEvents(container) {
   container.querySelectorAll('.user-search-card').forEach(card => {
     card.addEventListener('click', (e) => {
-      // Don't navigate if clicking DM button
       if (e.target.closest('.dm-btn')) return;
       const uid = card.dataset.uid;
       router.navigate('profile', { userId: uid });
@@ -156,7 +251,48 @@ function bindUserCardEvents(container) {
   container.querySelectorAll('.dm-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      router.navigate('chat');
+      router.navigate('chat', { userId: btn.dataset.uid, userName: btn.dataset.name });
     });
   });
+}
+
+function saveRecentSearch(q) {
+  const key = 'search_recents';
+  let recents = JSON.parse(localStorage.getItem(key) || '[]');
+  recents = recents.filter(r => r !== q);
+  recents.unshift(q);
+  if (recents.length > 8) recents = recents.slice(0, 8);
+  localStorage.setItem(key, JSON.stringify(recents));
+}
+
+function loadRecentSearches(container) {
+  const recentEl = container.querySelector('#recent-searches');
+  const recentList = container.querySelector('#recent-list');
+  const recents = JSON.parse(localStorage.getItem('search_recents') || '[]');
+  
+  if (recents.length === 0) {
+    recentEl?.classList.add('hidden');
+    return;
+  }
+
+  if (recentList) {
+    recentList.innerHTML = recents.map(r => `
+      <div class="recent-search-item flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-cream-100 cursor-pointer transition-colors" data-q="${sanitizeHTML(r)}">
+        <svg class="w-4 h-4 text-gray-300 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <span class="text-sm text-navy-800 flex-1">${sanitizeHTML(r)}</span>
+        <svg class="w-3 h-3 text-gray-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25"/></svg>
+      </div>
+    `).join('');
+
+    recentList.querySelectorAll('.recent-search-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const q = item.dataset.q;
+        const input = container.querySelector('#search-input');
+        if (input) {
+          input.value = q;
+          input.dispatchEvent(new Event('input'));
+        }
+      });
+    });
+  }
 }

@@ -180,123 +180,152 @@ export async function renderProfile(container, data = null) {
 
     <!-- Settings Menu (own profile only) -->
     ${!viewingOther ? `
-      <button id="settings-menu-btn" class="profile-settings-btn">
+      <button id="settings-menu-btn" class="profile-settings-btn" aria-label="Open settings">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg>
       </button>
       <div id="settings-overlay" class="settings-overlay">
         <div class="settings-backdrop" id="settings-backdrop"></div>
-        <div class="settings-drawer" id="settings-drawer" style="width:100%;max-width:100%;border-radius:0;">
-          <div class="menu-page" style="background:var(--bg, #f5e8d0);min-height:100vh;">
+        <div class="settings-drawer" id="settings-drawer">
+          <div class="menu-page">
             <!-- Menu Header -->
             <div class="menu-header">
-              <button id="settings-close-btn" class="p-2 -ml-1 text-navy-500 hover:text-navy-700 transition-colors" aria-label="Close menu">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/></svg>
+              <button id="settings-close-btn" class="menu-back-btn" aria-label="Close menu">
+                <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/></svg>
               </button>
-              <h2 class="text-lg font-bold text-navy-800">Settings</h2>
+              <h2 class="menu-header-title">Settings</h2>
+              <div class="menu-header-spacer"></div>
             </div>
 
-            <!-- Profile Card -->
-            <div class="menu-profile-section" id="menu-go-profile">
-              ${user.profilePic
-                ? `<img src="${user.profilePic}" class="w-16 h-16 rounded-full object-cover border-2 border-white shadow-sm" alt=""/>`
-                : `<div class="w-16 h-16 rounded-full bg-gradient-to-br from-navy-400 to-navy-600 flex items-center justify-center text-white text-xl font-bold shadow-sm">${(user.fullName || '?')[0]}</div>`}
-              <div class="flex-1 min-w-0">
-                <p class="font-bold text-navy-800 text-base">${sanitizeHTML(user.fullName || 'Your Name')}</p>
-                <p class="text-xs text-gray-400 truncate">${user.email || ''}</p>
-                <p class="text-xs text-green-500 mt-0.5">● Online</p>
+            <!-- Scrollable Menu Content -->
+            <div class="menu-scroll-container">
+
+              <!-- Profile Card -->
+              <div class="menu-profile-card" id="menu-go-profile">
+                <div class="menu-profile-avatar-wrap">
+                  ${user.profilePic
+                    ? `<img src="${user.profilePic}" class="menu-profile-avatar" alt=""/>`
+                    : `<div class="menu-profile-avatar menu-profile-avatar-placeholder">${(user.fullName || '?')[0]}</div>`}
+                  <span class="menu-profile-online-dot"></span>
+                </div>
+                <div class="menu-profile-info">
+                  <p class="menu-profile-name">${sanitizeHTML(user.fullName || 'Your Name')}</p>
+                  <p class="menu-profile-email">${user.email || ''}</p>
+                </div>
+                <svg class="menu-profile-arrow" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
               </div>
-              <svg class="w-5 h-5 text-gray-300" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
-            </div>
 
-            <!-- Account Group -->
-            <div class="menu-items-group">
-              <button class="menu-item" data-action="edit-profile">
-                <div class="menu-item-icon" style="background:#eff6ff;">✏️</div>
-                <div class="menu-item-text">
-                  <div class="menu-item-title">Edit Profile</div>
-                  <div class="menu-item-subtitle">Update your photo, name, bio</div>
+              <!-- 👤 Account Section -->
+              <div class="menu-section">
+                <div class="menu-section-label">👤 Account</div>
+                <div class="menu-items-group">
+                  <button class="menu-item" data-action="edit-profile">
+                    <div class="menu-item-icon" style="background:linear-gradient(135deg,#dbeafe,#eff6ff);">✏️</div>
+                    <div class="menu-item-text">
+                      <div class="menu-item-title">Edit Profile</div>
+                      <div class="menu-item-subtitle">Update your photo, name, bio</div>
+                    </div>
+                    <svg class="menu-item-arrow" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+                  </button>
+                  <button class="menu-item" data-action="change-password">
+                    <div class="menu-item-icon" style="background:linear-gradient(135deg,#ede9fe,#f3e8ff);">🔒</div>
+                    <div class="menu-item-text">
+                      <div class="menu-item-title">Change Password</div>
+                      <div class="menu-item-subtitle">Update your login credentials</div>
+                    </div>
+                    <svg class="menu-item-arrow" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+                  </button>
+                  <button class="menu-item" data-action="privacy-settings">
+                    <div class="menu-item-icon" style="background:linear-gradient(135deg,#c7d2fe,#e0e7ff);">🛡️</div>
+                    <div class="menu-item-text">
+                      <div class="menu-item-title">Privacy</div>
+                      <div class="menu-item-subtitle">Control who sees your content</div>
+                    </div>
+                    <svg class="menu-item-arrow" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+                  </button>
+                  <button class="menu-item" data-action="close-friends">
+                    <div class="menu-item-icon" style="background:linear-gradient(135deg,#fce7f3,#fdf2f8);">💕</div>
+                    <div class="menu-item-text">
+                      <div class="menu-item-title">Close Friends</div>
+                      <div class="menu-item-subtitle">Manage your inner circle</div>
+                    </div>
+                    <svg class="menu-item-arrow" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+                  </button>
+                  <button class="menu-item" data-action="saved-memories">
+                    <div class="menu-item-icon" style="background:linear-gradient(135deg,#fef3c7,#fef9c3);">🔖</div>
+                    <div class="menu-item-text">
+                      <div class="menu-item-title">Saved Memories</div>
+                      <div class="menu-item-subtitle">${(user.savedPosts?.length || 0)} saved items</div>
+                    </div>
+                    <svg class="menu-item-arrow" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+                  </button>
                 </div>
-                <svg class="menu-item-arrow w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
-              </button>
-              <button class="menu-item" data-action="change-password">
-                <div class="menu-item-icon" style="background:#f3e8ff;">🔒</div>
-                <div class="menu-item-text">
-                  <div class="menu-item-title">Change Password</div>
-                  <div class="menu-item-subtitle">Update your login credentials</div>
-                </div>
-                <svg class="menu-item-arrow w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
-              </button>
-            </div>
+              </div>
 
-            <!-- App Group -->
-            <div class="menu-items-group">
-              <button class="menu-item" data-action="saved-memories">
-                <div class="menu-item-icon" style="background:#fef3c7;">🔖</div>
-                <div class="menu-item-text">
-                  <div class="menu-item-title">Saved Memories</div>
-                  <div class="menu-item-subtitle">${(user.savedPosts?.length || 0)} saved items</div>
+              <!-- 🎨 Appearance Section -->
+              <div class="menu-section">
+                <div class="menu-section-label">🎨 Appearance</div>
+                <div class="menu-items-group">
+                  <button class="menu-item" data-action="theme-settings">
+                    <div class="menu-item-icon" style="background:linear-gradient(135deg,#f3e8ff,#fce7f3);">🎨</div>
+                    <div class="menu-item-text">
+                      <div class="menu-item-title">Theme Settings</div>
+                      <div class="menu-item-subtitle">Dark mode, colors & style</div>
+                    </div>
+                    <svg class="menu-item-arrow" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+                  </button>
                 </div>
-                <svg class="menu-item-arrow w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
-              </button>
-              <button class="menu-item" data-action="leaderboard">
-                <div class="menu-item-icon" style="background:#fef9c3;">🏆</div>
-                <div class="menu-item-text">
-                  <div class="menu-item-title">Leaderboard</div>
-                  <div class="menu-item-subtitle">See class rankings</div>
-                </div>
-                <svg class="menu-item-arrow w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
-              </button>
-              <button class="menu-item" data-action="close-friends">
-                <div class="menu-item-icon" style="background:#fce7f3;">💕</div>
-                <div class="menu-item-text">
-                  <div class="menu-item-title">Close Friends</div>
-                  <div class="menu-item-subtitle">Manage your inner circle</div>
-                </div>
-                <svg class="menu-item-arrow w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
-              </button>
-            </div>
+              </div>
 
-            <!-- Preferences Group -->
-            <div class="menu-items-group">
-              <button class="menu-item" data-action="theme-settings">
-                <div class="menu-item-icon" style="background:linear-gradient(135deg,#f3e8ff,#fce7f3);">🎨</div>
-                <div class="menu-item-text">
-                  <div class="menu-item-title">Theme</div>
-                  <div class="menu-item-subtitle">Customize app appearance</div>
+              <!-- 🔔 Notifications Section -->
+              <div class="menu-section">
+                <div class="menu-section-label">🔔 Notifications</div>
+                <div class="menu-items-group">
+                  <button class="menu-item" data-action="notification-settings">
+                    <div class="menu-item-icon" style="background:linear-gradient(135deg,#dcfce7,#bbf7d0);">🔔</div>
+                    <div class="menu-item-text">
+                      <div class="menu-item-title">Push Notifications</div>
+                      <div class="menu-item-subtitle">Manage alerts, sounds & badges</div>
+                    </div>
+                    <svg class="menu-item-arrow" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+                  </button>
                 </div>
-                <svg class="menu-item-arrow w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
-              </button>
-              <button class="menu-item" data-action="notification-settings">
-                <div class="menu-item-icon" style="background:#dcfce7;">🔔</div>
-                <div class="menu-item-text">
-                  <div class="menu-item-title">Notifications</div>
-                  <div class="menu-item-subtitle">Manage alerts & sounds</div>
-                </div>
-                <svg class="menu-item-arrow w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
-              </button>
-              <button class="menu-item" data-action="privacy-settings">
-                <div class="menu-item-icon" style="background:#e0e7ff;">🛡️</div>
-                <div class="menu-item-text">
-                  <div class="menu-item-title">Privacy</div>
-                  <div class="menu-item-subtitle">Control who sees your content</div>
-                </div>
-                <svg class="menu-item-arrow w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
-              </button>
-            </div>
+              </div>
 
-            <!-- Logout Group -->
-            <div class="menu-items-group" style="margin-top:24px;">
-              <button class="menu-item menu-danger" data-action="logout">
-                <div class="menu-item-icon" style="background:#fee2e2;">🚪</div>
-                <div class="menu-item-text">
-                  <div class="menu-item-title">Logout</div>
-                  <div class="menu-item-subtitle">Sign out of your account</div>
+              <!-- 🏆 Activity Section -->
+              <div class="menu-section">
+                <div class="menu-section-label">🏆 Activity</div>
+                <div class="menu-items-group">
+                  <button class="menu-item" data-action="leaderboard">
+                    <div class="menu-item-icon" style="background:linear-gradient(135deg,#fef9c3,#fde68a);">🏆</div>
+                    <div class="menu-item-text">
+                      <div class="menu-item-title">Leaderboard</div>
+                      <div class="menu-item-subtitle">See class rankings</div>
+                    </div>
+                    <svg class="menu-item-arrow" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+                  </button>
                 </div>
-              </button>
-            </div>
+              </div>
 
-            <div class="text-center py-6">
-              <p class="text-[10px] text-gray-300">ClassMemories v2.0 · Made with ❤️</p>
+              <!-- ⚙ App Section -->
+              <div class="menu-section">
+                <div class="menu-section-label">⚙ App</div>
+                <div class="menu-items-group">
+                  <button class="menu-item menu-danger" data-action="logout">
+                    <div class="menu-item-icon" style="background:linear-gradient(135deg,#fee2e2,#fecaca);">🚪</div>
+                    <div class="menu-item-text">
+                      <div class="menu-item-title">Logout</div>
+                      <div class="menu-item-subtitle">Sign out of your account</div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Footer -->
+              <div class="menu-footer">
+                <p class="menu-footer-text">ClassMemories v2.0</p>
+                <p class="menu-footer-subtext">Made with ❤️ for our batch</p>
+              </div>
+
             </div>
           </div>
         </div>

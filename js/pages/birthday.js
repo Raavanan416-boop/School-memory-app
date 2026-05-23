@@ -1,8 +1,41 @@
-// Birthday page — Birthday calendar, today's birthdays, wishes
+// Birthday page — Birthday calendar with 10-day upcoming filter + month grid click filter
 import { db, collection, getDocs, addDoc, query, where, orderBy, onSnapshot, serverTimestamp } from '../firebase-config.js';
 import { showToast, sanitizeHTML, isBirthdayToday, getDaysUntil, formatDate } from '../utils.js';
 import { authManager } from '../auth.js';
 import { router } from '../router.js';
+
+// ===== CORE FILTER FUNCTIONS =====
+
+/**
+ * Filter users whose next birthday is within the next N days (default 10).
+ * Returns sorted array with `daysUntil` field attached.
+ */
+function filterUpcomingTenDays(users, maxDays = 10) {
+  return users
+    .filter(u => u.dateOfBirth && !isBirthdayToday(u.dateOfBirth))
+    .map(u => ({ ...u, daysUntil: getDaysUntil(u.dateOfBirth) }))
+    .filter(u => u.daysUntil <= maxDays)
+    .sort((a, b) => a.daysUntil - b.daysUntil);
+}
+
+/**
+ * Filter users whose birthday falls in a specific month (0-indexed).
+ * Returns sorted by day-of-month.
+ */
+function filterBySelectedMonth(users, monthIndex) {
+  return users
+    .filter(u => {
+      if (!u.dateOfBirth) return false;
+      return new Date(u.dateOfBirth).getMonth() === monthIndex;
+    })
+    .map(u => {
+      const bd = new Date(u.dateOfBirth);
+      return { ...u, birthDay: bd.getDate(), daysUntil: getDaysUntil(u.dateOfBirth) };
+    })
+    .sort((a, b) => a.birthDay - b.birthDay);
+}
+
+// ===== MAIN RENDER =====
 
 export async function renderBirthday(container) {
   let users = [];
@@ -12,17 +45,17 @@ export async function renderBirthday(container) {
   } catch (e) { }
 
   const todayBirthdays = users.filter(u => isBirthdayToday(u.dateOfBirth));
-  const upcoming = users
-    .filter(u => u.dateOfBirth && !isBirthdayToday(u.dateOfBirth))
-    .map(u => ({ ...u, daysUntil: getDaysUntil(u.dateOfBirth) }))
-    .sort((a, b) => a.daysUntil - b.daysUntil)
-    .slice(0, 10);
+  const upcomingTen = filterUpcomingTenDays(users, 10);
 
   const months = ['January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'];
+  const monthAbbr = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+
+  // Track which month is currently selected
+  let selectedMonth = -1;
 
   container.innerHTML = `
-    <section class="px-4 pt-4">
+    <section class="px-4 pt-4 pb-24">
       <div class="flex items-center gap-3 mb-5">
         <button id="bday-back-btn" class="inner-back-btn">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/></svg>
@@ -30,6 +63,7 @@ export async function renderBirthday(container) {
         <h2 class="text-xl font-bold text-navy-800 flex-1">🎂 Birthdays</h2>
       </div>
 
+      <!-- ====== TODAY'S BIRTHDAYS ====== -->
       ${todayBirthdays.length > 0 ? `
         <div class="mb-6">
           ${todayBirthdays.map(u => `
@@ -56,53 +90,52 @@ export async function renderBirthday(container) {
         </div>
       `}
 
-      <!-- Upcoming -->
+      <!-- ====== UPCOMING (NEXT 10 DAYS ONLY) ====== -->
       <div class="mb-6">
-        <h3 class="section-title mb-3">Upcoming Birthdays</h3>
-        <div class="space-y-2">
-          ${upcoming.length > 0 ? upcoming.map(u => `
-            <div class="card p-3 flex items-center gap-3">
-              ${u.profilePic
-                ? `<img src="${u.profilePic}" class="w-10 h-10 rounded-full object-cover" alt=""/>`
-                : `<div class="w-10 h-10 rounded-full bg-navy-500 text-white flex items-center justify-center text-sm font-bold">${(u.fullName || '?')[0]}</div>`}
-              <div class="flex-1 min-w-0">
-                <p class="text-sm font-semibold text-navy-800">${sanitizeHTML(u.fullName || 'Unknown')}</p>
-                <p class="text-xs text-gray-400">${u.dateOfBirth ? new Date(u.dateOfBirth).toLocaleDateString('en-IN', { day: 'numeric', month: 'long' }) : ''}</p>
-              </div>
-              <span class="text-xs px-2 py-1 rounded-full ${u.daysUntil <= 7 ? 'bg-warm-100 text-warm-600 font-semibold' : 'bg-cream-100 text-gray-500'}">
-                ${u.daysUntil === 0 ? 'Today!' : u.daysUntil === 1 ? 'Tomorrow!' : `${u.daysUntil} days`}
-              </span>
+        <div class="flex items-center gap-2 mb-3">
+          <h3 class="section-title">Upcoming Birthdays</h3>
+          <span class="text-[10px] px-2 py-0.5 rounded-full bg-warm-100 text-warm-600 font-semibold">Next 10 days</span>
+        </div>
+        <div class="space-y-2" id="upcoming-list">
+          ${upcomingTen.length > 0 ? upcomingTen.map(u => renderBirthdayCard(u)).join('') : `
+            <div class="card p-5 text-center">
+              <div class="text-2xl mb-2">🗓️</div>
+              <p class="text-sm font-medium text-navy-700">No birthdays in the next 10 days</p>
+              <p class="text-xs text-gray-400 mt-1">Check the calendar below to find your classmates' birthdays</p>
             </div>
-          `).join('') : '<p class="text-center text-gray-400 text-sm py-4">No upcoming birthdays found. Ask classmates to set their birthday!</p>'}
+          `}
         </div>
       </div>
 
-      <!-- Calendar grid -->
-      <div>
+      <!-- ====== BIRTHDAY CALENDAR GRID ====== -->
+      <div class="mb-4">
         <h3 class="section-title mb-3">Birthday Calendar</h3>
-        <div class="grid grid-cols-3 gap-2">
+        <div class="grid grid-cols-3 gap-2" id="month-grid">
           ${months.map((month, idx) => {
-            const monthUsers = users.filter(u => {
-              if (!u.dateOfBirth) return false;
-              return new Date(u.dateOfBirth).getMonth() === idx;
-            });
+            const monthUsers = users.filter(u => u.dateOfBirth && new Date(u.dateOfBirth).getMonth() === idx);
+            const currentMonth = new Date().getMonth();
+            const isCurrentMonth = idx === currentMonth;
             return `
-              <div class="card p-3 text-center ${monthUsers.length > 0 ? 'border-warm-200' : ''}">
-                <p class="text-[10px] text-gray-400 uppercase tracking-wider">${month.slice(0, 3)}</p>
+              <button class="bday-month-card card p-3 text-center transition-all duration-200 ${isCurrentMonth ? 'ring-2 ring-navy-300' : ''} ${monthUsers.length > 0 ? 'cursor-pointer hover:shadow-md active:scale-[0.97]' : 'opacity-50 cursor-default'}" data-month="${idx}" ${monthUsers.length === 0 ? 'disabled' : ''}>
+                <p class="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">${monthAbbr[idx]}</p>
                 <p class="text-lg font-bold text-navy-500">${monthUsers.length}</p>
                 <div class="flex justify-center gap-0.5 mt-1">
                   ${monthUsers.slice(0, 4).map(u =>
-                    `<div class="w-5 h-5 rounded-full bg-navy-100 text-navy-600 flex items-center justify-center text-[8px] font-bold">${(u.fullName || '?')[0]}</div>`
+                    u.profilePic
+                      ? `<img src="${u.profilePic}" class="w-5 h-5 rounded-full object-cover border border-white" alt=""/>`
+                      : `<div class="w-5 h-5 rounded-full bg-navy-100 text-navy-600 flex items-center justify-center text-[8px] font-bold">${(u.fullName || '?')[0]}</div>`
                   ).join('')}
                   ${monthUsers.length > 4 ? `<div class="w-5 h-5 rounded-full bg-cream-200 text-gray-500 flex items-center justify-center text-[8px]">+${monthUsers.length - 4}</div>` : ''}
                 </div>
-              </div>
+              </button>
             `;
           }).join('')}
         </div>
       </div>
     </section>
   `;
+
+  // ===== EVENT HANDLERS =====
 
   // Back button
   container.querySelector('#bday-back-btn')?.addEventListener('click', () => router.navigateBack());
@@ -117,11 +150,157 @@ export async function renderBirthday(container) {
   // Load wishes for today's birthdays
   todayBirthdays.forEach(u => {
     loadWishes(container, u.id);
-    // Spawn confetti
     const confettiBox = container.querySelector(`#bday-confetti-${u.id}`);
     if (confettiBox) spawnConfetti(confettiBox);
   });
+
+  // ===== MONTH GRID CLICK → MODAL =====
+  const monthGrid = container.querySelector('#month-grid');
+  let activeModal = null; // track current open modal
+
+  monthGrid?.addEventListener('click', (e) => {
+    const card = e.target.closest('.bday-month-card');
+    if (!card || card.disabled) return;
+
+    const monthIdx = parseInt(card.dataset.month, 10);
+    if (isNaN(monthIdx)) return;
+
+    // Close existing modal if open
+    if (activeModal) {
+      closeBdayModal();
+      if (selectedMonth === monthIdx) return; // toggle off same month
+    }
+
+    selectedMonth = monthIdx;
+
+    // Highlight the clicked card
+    monthGrid.querySelectorAll('.bday-month-card').forEach(c => {
+      c.classList.remove('ring-2', 'ring-navy-500', 'bg-navy-50');
+    });
+    card.classList.add('ring-2', 'ring-navy-500', 'bg-navy-50');
+
+    // Filter data
+    const filtered = filterBySelectedMonth(users, monthIdx);
+
+    // Build modal overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'bday-modal-overlay';
+    overlay.innerHTML = `
+      <div class="bday-modal-backdrop"></div>
+      <div class="bday-modal-card">
+        <div class="bday-modal-header">
+          <div class="bday-modal-header-left">
+            <span class="bday-modal-emoji">🎂</span>
+            <div>
+              <h3 class="bday-modal-title">${months[monthIdx]} Birthdays</h3>
+              <p class="bday-modal-subtitle">${filtered.length} classmate${filtered.length !== 1 ? 's' : ''}</p>
+            </div>
+          </div>
+          <button class="bday-modal-close" id="bday-modal-close-btn" aria-label="Close">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="bday-modal-body">
+          ${filtered.length > 0 ? `
+            <div class="bday-modal-list">
+              ${filtered.map(u => renderBirthdayCard(u, true)).join('')}
+            </div>
+          ` : `
+            <div class="bday-modal-empty">
+              <div class="text-3xl mb-2">📭</div>
+              <p class="text-sm font-medium text-navy-700">No birthdays in ${months[monthIdx]}</p>
+              <p class="text-xs text-gray-400 mt-1">Try another month!</p>
+            </div>
+          `}
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+    activeModal = overlay;
+
+    // Trigger entrance animation
+    requestAnimationFrame(() => overlay.classList.add('bday-modal-active'));
+
+    // Close handlers
+    overlay.querySelector('#bday-modal-close-btn')?.addEventListener('click', closeBdayModal);
+    overlay.querySelector('.bday-modal-backdrop')?.addEventListener('click', closeBdayModal);
+
+    // Close on Escape key
+    const onEsc = (ev) => { if (ev.key === 'Escape') closeBdayModal(); };
+    document.addEventListener('keydown', onEsc);
+    overlay._escHandler = onEsc;
+  });
+
+  function closeBdayModal() {
+    if (!activeModal) return;
+
+    // Remove ESC listener
+    if (activeModal._escHandler) document.removeEventListener('keydown', activeModal._escHandler);
+
+    // Exit animation
+    activeModal.classList.add('bday-modal-closing');
+    activeModal.classList.remove('bday-modal-active');
+    setTimeout(() => {
+      activeModal?.remove();
+      activeModal = null;
+    }, 250);
+
+    selectedMonth = -1;
+
+    // Reset grid highlights
+    const currentMonth = new Date().getMonth();
+    monthGrid?.querySelectorAll('.bday-month-card').forEach(c => {
+      c.classList.remove('ring-2', 'ring-navy-500', 'bg-navy-50');
+      if (parseInt(c.dataset.month) === currentMonth) {
+        c.classList.add('ring-2', 'ring-navy-300');
+      }
+    });
+  }
 }
+
+// ===== REUSABLE BIRTHDAY CARD RENDERER =====
+
+function renderBirthdayCard(u, showFullDate = false) {
+  const dateStr = u.dateOfBirth
+    ? new Date(u.dateOfBirth).toLocaleDateString('en-IN', { day: 'numeric', month: 'long' })
+    : '';
+
+  // Badge logic
+  let badgeClass = 'bg-cream-100 text-gray-500';
+  let badgeText = `${u.daysUntil} days`;
+
+  if (u.daysUntil === 0) {
+    badgeClass = 'bg-green-100 text-green-600 font-bold';
+    badgeText = '🎂 Today!';
+  } else if (u.daysUntil === 1) {
+    badgeClass = 'bg-warm-100 text-warm-600 font-bold';
+    badgeText = '⏰ Tomorrow!';
+  } else if (u.daysUntil <= 3) {
+    badgeClass = 'bg-warm-100 text-warm-600 font-semibold';
+    badgeText = `${u.daysUntil} days`;
+  } else if (u.daysUntil <= 7) {
+    badgeClass = 'bg-amber-50 text-amber-600 font-semibold';
+    badgeText = `${u.daysUntil} days`;
+  }
+
+  return `
+    <div class="card p-3 flex items-center gap-3 hover:shadow-sm transition-shadow">
+      ${u.profilePic
+        ? `<img src="${u.profilePic}" class="w-10 h-10 rounded-full object-cover border-2 border-white shadow-sm" alt=""/>`
+        : `<div class="w-10 h-10 rounded-full bg-navy-500 text-white flex items-center justify-center text-sm font-bold shadow-sm">${(u.fullName || '?')[0]}</div>`}
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-semibold text-navy-800">${sanitizeHTML(u.fullName || 'Unknown')}</p>
+        <p class="text-xs text-gray-400">${dateStr}</p>
+      </div>
+      <span class="text-xs px-2.5 py-1 rounded-full ${badgeClass} whitespace-nowrap">
+        ${badgeText}
+      </span>
+    </div>
+  `;
+}
+
+// ===== WISH MODAL =====
 
 function showWishModal(userId, userName) {
   const modal = router.openModal('', { title: `🎈 Wish ${userName}` });
@@ -156,6 +335,8 @@ function showWishModal(userId, userName) {
   });
 }
 
+// ===== LOAD WISHES =====
+
 async function loadWishes(container, userId) {
   const wishesEl = container.querySelector(`#wishes-${userId}`);
   if (!wishesEl) return;
@@ -180,6 +361,8 @@ async function loadWishes(container, userId) {
     });
   } catch (e) { }
 }
+
+// ===== CONFETTI =====
 
 function spawnConfetti(container) {
   if (!container) return;

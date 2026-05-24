@@ -83,7 +83,7 @@ function showLogin() {
       <div class="school-crest mb-6 animate-scaleIn">
         <span class="text-4xl mb-1">📖</span>
         <span class="text-[11px] font-bold text-navy-500 tracking-wide">ClassMemories</span>
-        <div class="ribbon">EST. 2024</div>
+        <div class="ribbon">2024 & 2025</div>
       </div>
 
       <!-- Welcome text -->

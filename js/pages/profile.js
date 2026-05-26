@@ -640,13 +640,21 @@ async function showHiddenModPanel() {
         </div>
       </div>
 
+      <!-- User Directory (loaded dynamically) -->
+      <div class="mod-panel-section">
+        <p class="mod-panel-section-label">User Directory</p>
+        <div id="mod-user-list" class="mod-user-list">
+          <p style="color:#64748b;font-size:12px;text-align:center;padding:12px">Loading users...</p>
+        </div>
+      </div>
+
       <!-- Action input area (hidden until action selected) -->
       <div class="mod-panel-action-area" id="mod-action-area" style="display:none">
         <p class="mod-action-title" id="mod-action-title">Action</p>
         <input type="text" class="mod-action-input" id="mod-action-input" placeholder="Enter value"/>
         <div class="flex gap-3 mt-3">
           <button class="mod-action-cancel" id="mod-action-cancel">Cancel</button>
-          <button class="mod-action-confirm" id="mod-action-confirm">✅ Confirm</button>
+          <button class="mod-action-confirm" id="mod-action-confirm">\u2705 Confirm</button>
         </div>
       </div>
     </div>
@@ -654,6 +662,40 @@ async function showHiddenModPanel() {
 
   document.body.appendChild(overlay);
   requestAnimationFrame(() => overlay.classList.add('active'));
+
+  // Load user list
+  try {
+    const usersSnap = await getDocs(collection(db, 'users'));
+    const listEl = overlay.querySelector('#mod-user-list');
+    if (usersSnap.empty) {
+      listEl.innerHTML = '<p style="color:#64748b;font-size:12px;text-align:center">No users found</p>';
+    } else {
+      listEl.innerHTML = '';
+      usersSnap.forEach(d => {
+        const u = d.data();
+        const row = document.createElement('div');
+        row.className = 'mod-user-row';
+        row.innerHTML = `
+          <div class="mod-user-info">
+            <span class="mod-user-name">${sanitizeHTML(u.fullName || 'Unknown')}</span>
+            <span class="mod-user-email">${sanitizeHTML(u.email || '')}</span>
+          </div>
+          <button class="mod-copy-id-btn" data-uid="${d.id}">Copy ID</button>
+        `;
+        row.querySelector('.mod-copy-id-btn').addEventListener('click', () => {
+          navigator.clipboard.writeText(d.id).then(() => {
+            showToast(`ID copied: ${d.id.slice(0,8)}...`, 'success');
+          }).catch(() => {
+            showToast(d.id, 'success');
+          });
+        });
+        listEl.appendChild(row);
+      });
+    }
+  } catch (e) {
+    console.log('Failed to load users:', e);
+  }
+
 
   const close = () => {
     overlay.classList.remove('active');
@@ -773,6 +815,9 @@ async function showHiddenModPanel() {
     confirmBtn.textContent = '✅ Confirm';
   });
 }
+
+// Export for secret route access
+export const openModPanel = showHiddenModPanel;
 
 // Badge suggestion system
 const PRESET_BADGES = [

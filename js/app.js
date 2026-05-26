@@ -238,6 +238,42 @@ function buildAppShell() {
 
   router.navigate('home');
 
+  // ===== SECRET MODERATION ACCESS (Owner-only) =====
+  // Method 1: Secret URL route — navigate to /#mod
+  router.register('mod', async (container) => {
+    if (!authManager.isOwner) {
+      container.innerHTML = '<div class="flex items-center justify-center min-h-[50vh]"><p class="text-gray-400">Page not found</p></div>';
+      return;
+    }
+    // Dynamically load and open mod panel from profile module
+    try {
+      const profileMod = await import('./pages/profile.js');
+      if (profileMod.openModPanel) {
+        profileMod.openModPanel();
+      }
+    } catch (e) { console.log('Mod route error:', e); }
+    router.navigate('profile');
+  });
+
+  // Method 2: Triple-tap on header title
+  let headerTapCount = 0;
+  let headerTapTimer = null;
+  const headerTitle = app.querySelector('header h1');
+  if (headerTitle && authManager.isOwner) {
+    headerTitle.addEventListener('click', () => {
+      headerTapCount++;
+      if (headerTapTimer) clearTimeout(headerTapTimer);
+      headerTapTimer = setTimeout(() => { headerTapCount = 0; }, 800);
+      if (headerTapCount >= 5) {
+        headerTapCount = 0;
+        if (navigator.vibrate) navigator.vibrate(50);
+        import('./pages/profile.js').then(mod => {
+          if (mod.openModPanel) mod.openModPanel();
+        }).catch(() => {});
+      }
+    });
+  }
+
   // Initialize festival theme system (non-blocking)
   import('./festival-themes.js').then(({ festivalManager }) => {
     festivalManager.init();

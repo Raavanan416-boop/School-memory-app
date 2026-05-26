@@ -4,7 +4,7 @@ import { auth, db, signInWithEmailAndPassword, signOut, onAuthStateChanged, send
   doc, getDoc, updateDoc, setDoc, serverTimestamp, Timestamp,
   storage, storageRef, uploadBytes, getDownloadURL } from './firebase-config.js';
 
-const OWNER_EMAIL = 'raavanan@admin.com';
+const OWNER_EMAIL = 'kaviraj@school.com';
 
 class AuthManager {
   constructor() {

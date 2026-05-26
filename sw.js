@@ -1,4 +1,4 @@
-const CACHE_NAME = 'class-memories-v4';
+const CACHE_NAME = 'class-memories-v5';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

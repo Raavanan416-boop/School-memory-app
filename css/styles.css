@@ -2208,6 +2208,30 @@ img { -webkit-user-drag: none; user-drag: none; }
 }
 .mod-panel-btn:active { transform: scale(0.97); }
 .mod-panel-btn span:first-child { font-size: 16px; }
+/* Mod panel user directory */
+.mod-user-list {
+  max-height: 200px; overflow-y: auto;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 12px;
+  background: rgba(0,0,0,0.2);
+}
+.mod-user-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.mod-user-row:last-child { border-bottom: none; }
+.mod-user-info { display: flex; flex-direction: column; gap: 1px; }
+.mod-user-name { font-size: 12px; font-weight: 600; color: #e2e8f0; }
+.mod-user-email { font-size: 10px; color: #64748b; }
+.mod-copy-id-btn {
+  padding: 4px 10px; font-size: 10px; font-weight: 600;
+  background: rgba(255,255,255,0.06); color: #94a3b8;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px; cursor: pointer;
+  transition: all 0.2s; white-space: nowrap;
+}
+.mod-copy-id-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
 
 /* Mod panel action area */
 .mod-panel-action-area {

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'class-memories-v3';
+const CACHE_NAME = 'class-memories-v4';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -12,6 +12,8 @@ const STATIC_ASSETS = [
   '/js/notifications.js',
   '/js/presence.js',
   '/js/calls.js',
+  '/js/cinematic-intro.js',
+  '/js/festival-themes.js',
   '/js/security.js',
   '/js/pages/home.js',
   '/js/pages/upload.js',

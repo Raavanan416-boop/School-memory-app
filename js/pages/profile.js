@@ -134,6 +134,9 @@ export async function renderProfile(container, data = null) {
       <div class="flex items-center gap-3 mt-4">
         ${viewingOther ? `
           <button class="flex-1 py-2.5 bg-navy-500 text-white rounded-xl text-sm font-semibold hover:bg-navy-600 transition-colors active:scale-[0.98]" id="dm-from-profile" data-uid="${data.userId}" data-name="${sanitizeHTML(user.fullName || '')}">Message 💬</button>
+          <button class="miss-you-btn" id="miss-you-btn" data-uid="${data.userId}" data-name="${sanitizeHTML(user.fullName || '')}">
+            <span class="miss-you-icon">❤️</span> Miss You
+          </button>
         ` : `
           <button class="flex-1 py-2.5 bg-navy-500 text-white rounded-xl text-sm font-semibold hover:bg-navy-600 transition-colors active:scale-[0.98]" id="edit-profile-quick">Edit Profile</button>
         `}
@@ -153,7 +156,7 @@ export async function renderProfile(container, data = null) {
         <button id="suggest-badge-btn" class="mt-3 w-full py-2 text-xs font-semibold text-navy-500 border border-navy-200 rounded-xl hover:bg-navy-50 transition-colors">🏷 Suggest a Badge</button>
       ` : ''}
 
-      <!-- Admin Controls removed from profile view — moved to settings drawer -->
+
     </div>
 
     <!-- Tabs -->
@@ -496,35 +499,159 @@ export async function renderProfile(container, data = null) {
   if (unsubBadges) { unsubBadges(); unsubBadges = null; }
   loadSuggestedBadgesRealtime(container.querySelector('#suggested-badges-area'), uid, viewingOther);
 
-  // Admin controls removed from profile view — handled in settings drawer
+  // ===== MISS YOU BUTTON =====
+  const missYouBtn = container.querySelector('#miss-you-btn');
+  if (missYouBtn) {
+    const targetUidMY = missYouBtn.dataset.uid;
+    const targetNameMY = missYouBtn.dataset.name;
+    const cooldownKey = `miss_you_cooldown_${targetUidMY}`;
+    const cooldownMs = 24 * 60 * 60 * 1000; // 24 hours
+
+    // Check initial cooldown state
+    const lastSent = localStorage.getItem(cooldownKey);
+    if (lastSent && (Date.now() - parseInt(lastSent)) < cooldownMs) {
+      missYouBtn.classList.add('cooldown');
+      missYouBtn.innerHTML = '<span class="miss-you-icon">💕</span> Sent';
+    }
+
+    missYouBtn.addEventListener('click', async () => {
+      // Check cooldown
+      const last = localStorage.getItem(cooldownKey);
+      if (last && (Date.now() - parseInt(last)) < cooldownMs) {
+        showToast('You already sent a miss you recently 💕', 'info');
+        return;
+      }
+      if (!authManager.currentUser) return;
+
+      // Vibration feedback
+      if (navigator.vibrate) navigator.vibrate(200);
+
+      // Heart burst animation
+      const burstContainer = document.createElement('div');
+      burstContainer.className = 'miss-you-heart-burst';
+      missYouBtn.appendChild(burstContainer);
+      const hearts = ['❤️', '💕', '💗', '💖', '🥺', '💘', '✨', '💝'];
+      for (let i = 0; i < 8; i++) {
+        const heart = document.createElement('span');
+        heart.className = 'miss-you-heart';
+        heart.textContent = hearts[i % hearts.length];
+        const angle = (i / 8) * Math.PI * 2;
+        const dist = 40 + Math.random() * 40;
+        heart.style.setProperty('--hx', `${Math.cos(angle) * dist}px`);
+        heart.style.setProperty('--hy', `${Math.sin(angle) * dist - 30}px`);
+        heart.style.setProperty('--hr', `${Math.random() * 360}deg`);
+        heart.style.left = '50%';
+        heart.style.top = '50%';
+        burstContainer.appendChild(heart);
+      }
+      setTimeout(() => burstContainer.remove(), 1500);
+
+      // Button pulse
+      missYouBtn.classList.add('sending');
+      setTimeout(() => missYouBtn.classList.remove('sending'), 600);
+
+      // Send notification
+      try {
+        await createNotification('miss_you', targetUidMY, {
+          message: `${authManager.userData?.fullName || 'Someone'} misses you ❤️`
+        });
+
+        // Set cooldown
+        localStorage.setItem(cooldownKey, Date.now().toString());
+        missYouBtn.classList.add('cooldown');
+        missYouBtn.innerHTML = '<span class="miss-you-icon">💕</span> Sent';
+        showToast(`Miss you sent to ${targetNameMY} ❤️`, 'success');
+      } catch (e) {
+        console.error('Miss you error:', e);
+        showToast('Could not send miss you', 'error');
+      }
+    });
+  }
+
+
+
+  // ===== HIDDEN MODERATION TRIGGER (Owner-only) =====
+  // Long-press on own profile avatar for 3 seconds opens hidden mod panel
+  if (!viewingOther && authManager.isOwner) {
+    const avatarEl = container.querySelector('#profile-pic-view');
+    if (avatarEl) {
+      let pressTimer = null;
+      const startPress = () => {
+        pressTimer = setTimeout(() => {
+          if (navigator.vibrate) navigator.vibrate(50);
+          showHiddenModPanel();
+        }, 3000);
+      };
+      const cancelPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } };
+      avatarEl.addEventListener('mousedown', startPress);
+      avatarEl.addEventListener('mouseup', cancelPress);
+      avatarEl.addEventListener('mouseleave', cancelPress);
+      avatarEl.addEventListener('touchstart', startPress, { passive: true });
+      avatarEl.addEventListener('touchend', cancelPress);
+      avatarEl.addEventListener('touchcancel', cancelPress);
+    }
+  }
+
 
 }
 
-// ===== ADMIN EDIT MODAL =====
-function showAdminEditModal(field, targetUid, currentValue, userName) {
-  const fieldLabels = { rollNumber: 'Roll Number', dateOfBirth: 'Date of Birth' };
-  const fieldTypes = { rollNumber: 'text', dateOfBirth: 'date' };
+// ===== HIDDEN MODERATION PANEL (Owner-only) =====
+async function showHiddenModPanel() {
+  if (!authManager.isOwner) return;
 
   const overlay = document.createElement('div');
-  overlay.className = 'admin-modal-overlay';
+  overlay.className = 'mod-panel-overlay';
   overlay.innerHTML = `
-    <div class="admin-modal-backdrop"></div>
-    <div class="admin-modal-card">
-      <div class="admin-modal-header">
-        <span class="admin-controls-tag">🔒 Admin Edit</span>
-        <button class="admin-modal-close">✕</button>
+    <div class="mod-panel-backdrop"></div>
+    <div class="mod-panel-sheet">
+      <div class="mod-panel-handle"></div>
+      <div class="mod-panel-header">
+        <span class="mod-panel-tag">🛡 Tools</span>
+        <button class="mod-panel-close">✕</button>
       </div>
-      <p class="text-sm text-gray-300 mb-4">Editing <strong class="text-white">${fieldLabels[field]}</strong> for <strong class="text-white">${sanitizeHTML(userName)}</strong></p>
-      <div class="admin-input-group">
-        <label class="admin-input-label">${fieldLabels[field]}</label>
-        <input type="${fieldTypes[field]}" id="admin-field-input" value="${currentValue}" class="admin-input" placeholder="Enter ${fieldLabels[field].toLowerCase()}"/>
+
+      <div class="mod-panel-section">
+        <p class="mod-panel-section-label">User Corrections</p>
+        <div class="mod-panel-grid">
+          <button class="mod-panel-btn" data-action="fix-dob">
+            <span>📅</span><span>Fix DOB</span>
+          </button>
+          <button class="mod-panel-btn" data-action="fix-roll">
+            <span>🔢</span><span>Fix Roll No.</span>
+          </button>
+          <button class="mod-panel-btn" data-action="reset-pic">
+            <span>🖼</span><span>Reset Photo</span>
+          </button>
+          <button class="mod-panel-btn" data-action="flag-account">
+            <span>⚠️</span><span>Flag Account</span>
+          </button>
+        </div>
       </div>
-      <div class="flex gap-3 mt-5">
-        <button class="admin-cancel-btn flex-1">Cancel</button>
-        <button class="admin-save-btn flex-1" id="admin-save">💾 Save</button>
+
+      <div class="mod-panel-section">
+        <p class="mod-panel-section-label">Content Moderation</p>
+        <div class="mod-panel-grid">
+          <button class="mod-panel-btn" data-action="remove-post">
+            <span>🗑</span><span>Remove Post</span>
+          </button>
+          <button class="mod-panel-btn" data-action="remove-comment">
+            <span>💬</span><span>Remove Comment</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Action input area (hidden until action selected) -->
+      <div class="mod-panel-action-area" id="mod-action-area" style="display:none">
+        <p class="mod-action-title" id="mod-action-title">Action</p>
+        <input type="text" class="mod-action-input" id="mod-action-input" placeholder="Enter value"/>
+        <div class="flex gap-3 mt-3">
+          <button class="mod-action-cancel" id="mod-action-cancel">Cancel</button>
+          <button class="mod-action-confirm" id="mod-action-confirm">✅ Confirm</button>
+        </div>
       </div>
     </div>
   `;
+
   document.body.appendChild(overlay);
   requestAnimationFrame(() => overlay.classList.add('active'));
 
@@ -533,36 +660,117 @@ function showAdminEditModal(field, targetUid, currentValue, userName) {
     setTimeout(() => overlay.remove(), 300);
   };
 
-  overlay.querySelector('.admin-modal-backdrop').addEventListener('click', close);
-  overlay.querySelector('.admin-modal-close').addEventListener('click', close);
-  overlay.querySelector('.admin-cancel-btn').addEventListener('click', close);
+  overlay.querySelector('.mod-panel-backdrop').addEventListener('click', close);
+  overlay.querySelector('.mod-panel-close').addEventListener('click', close);
 
-  overlay.querySelector('#admin-save').addEventListener('click', async () => {
-    const btn = overlay.querySelector('#admin-save');
-    const newValue = overlay.querySelector('#admin-field-input').value.trim();
-    if (!newValue) { showToast('Value cannot be empty', 'error'); return; }
+  // Current action state
+  let currentAction = null;
+  const actionArea = overlay.querySelector('#mod-action-area');
+  const actionTitle = overlay.querySelector('#mod-action-title');
+  const actionInput = overlay.querySelector('#mod-action-input');
+  const cancelBtn = overlay.querySelector('#mod-action-cancel');
+  const confirmBtn = overlay.querySelector('#mod-action-confirm');
 
-    btn.disabled = true;
-    btn.innerHTML = '⏳ Saving...';
-    try {
-      await authManager.adminUpdateUser(targetUid, { [field]: newValue });
-      showToast(`${fieldLabels[field]} updated! ✅`, 'success');
+  const showActionInput = (title, placeholder, type = 'text') => {
+    actionArea.style.display = 'block';
+    actionTitle.textContent = title;
+    actionInput.placeholder = placeholder;
+    actionInput.type = type;
+    actionInput.value = '';
+    actionInput.focus();
+  };
 
-      // Update the display on current page
-      if (field === 'rollNumber') {
-        const el = document.querySelector('#admin-roll');
-        if (el) el.textContent = newValue;
-      } else if (field === 'dateOfBirth') {
-        const el = document.querySelector('#admin-dob');
-        if (el) el.textContent = newValue;
+  cancelBtn.addEventListener('click', () => {
+    actionArea.style.display = 'none';
+    currentAction = null;
+  });
+
+  // Handle action button clicks
+  overlay.querySelectorAll('.mod-panel-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const action = btn.dataset.action;
+      currentAction = action;
+
+      switch (action) {
+        case 'fix-dob':
+          showActionInput('Fix Date of Birth', 'Enter user ID, then new DOB', 'text');
+          actionInput.placeholder = 'userId:YYYY-MM-DD';
+          break;
+        case 'fix-roll':
+          showActionInput('Fix Roll Number', 'userId:newRollNumber', 'text');
+          break;
+        case 'reset-pic':
+          showActionInput('Reset Profile Photo', 'Enter user ID to reset', 'text');
+          break;
+        case 'flag-account':
+          showActionInput('Flag Account for Review', 'Enter user ID to flag', 'text');
+          break;
+        case 'remove-post':
+          showActionInput('Remove Post', 'Enter post ID to remove', 'text');
+          break;
+        case 'remove-comment':
+          showActionInput('Remove Comment', 'postId:commentId', 'text');
+          break;
       }
-      close();
+    });
+  });
+
+  // Handle confirm
+  confirmBtn.addEventListener('click', async () => {
+    const val = actionInput.value.trim();
+    if (!val) { showToast('Please enter a value', 'error'); return; }
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = '⏳...';
+
+    try {
+      switch (currentAction) {
+        case 'fix-dob': {
+          const [uid, dob] = val.split(':');
+          if (!uid || !dob) throw new Error('Format: userId:YYYY-MM-DD');
+          await authManager.ownerUpdateUser(uid.trim(), { dateOfBirth: dob.trim() });
+          showToast('DOB updated', 'success');
+          break;
+        }
+        case 'fix-roll': {
+          const [uid, roll] = val.split(':');
+          if (!uid || !roll) throw new Error('Format: userId:rollNumber');
+          await authManager.ownerUpdateUser(uid.trim(), { rollNumber: roll.trim() });
+          showToast('Roll number updated', 'success');
+          break;
+        }
+        case 'reset-pic': {
+          await authManager.ownerUpdateUser(val, { profilePic: '' });
+          showToast('Profile photo reset', 'success');
+          break;
+        }
+        case 'flag-account': {
+          await authManager.ownerUpdateUser(val, { flagged: true, flaggedAt: new Date().toISOString() });
+          showToast('Account flagged for review', 'success');
+          break;
+        }
+        case 'remove-post': {
+          const { deleteDoc, doc } = await import('../firebase-config.js');
+          await deleteDoc(doc(db, 'posts', val));
+          showToast('Post removed', 'success');
+          break;
+        }
+        case 'remove-comment': {
+          const [postId, commentId] = val.split(':');
+          if (!postId || !commentId) throw new Error('Format: postId:commentId');
+          const { deleteDoc, doc } = await import('../firebase-config.js');
+          await deleteDoc(doc(db, 'posts', postId.trim(), 'comments', commentId.trim()));
+          showToast('Comment removed', 'success');
+          break;
+        }
+      }
+      actionArea.style.display = 'none';
+      currentAction = null;
     } catch (err) {
-      console.error('Admin update error:', err);
-      showToast('Update failed', 'error');
-      btn.disabled = false;
-      btn.innerHTML = '💾 Save';
+      console.error('Mod action error:', err);
+      showToast(err.message || 'Action failed', 'error');
     }
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = '✅ Confirm';
   });
 }
 
@@ -1461,15 +1669,13 @@ function showEditProfileModal() {
         </div>
       </div>
 
-      <!-- Admin-only fields (read-only) -->
+      <!-- Roll Number (read-only for users) -->
       <div class="pt-2">
-        <p class="text-[10px] text-gray-400 uppercase tracking-widest font-semibold mb-3">🔒 Admin-Only Info</p>
         <div class="space-y-3">
           <div>
-            <label class="text-xs font-semibold text-gray-400 mb-1 block">🔒 Roll Number</label>
-            <input type="text" value="${sanitizeHTML(user.rollNumber || 'Set by Admin')}" disabled class="w-full px-4 py-2.5 border border-gray-100 rounded-xl text-sm text-gray-400 bg-gray-50 cursor-not-allowed"/>
+            <label class="text-xs font-semibold text-gray-400 mb-1 block">Roll Number</label>
+            <input type="text" value="${sanitizeHTML(user.rollNumber || 'Not set')}" disabled class="w-full px-4 py-2.5 border border-gray-100 rounded-xl text-sm text-gray-400 bg-gray-50 cursor-not-allowed"/>
           </div>
-          <p class="text-[10px] text-gray-300 text-center">Roll Number can only be changed by admin</p>
         </div>
       </div>
 

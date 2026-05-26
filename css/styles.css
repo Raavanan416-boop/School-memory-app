@@ -2121,143 +2121,141 @@ img { -webkit-user-drag: none; user-drag: none; }
   color: #fff; opacity: 0; transition: opacity 0.2s;
 }
 
-/* ===== ADMIN CONTROLS — Dark Cinematic ===== */
-.admin-controls-panel {
-  margin-top: 16px;
-  background: linear-gradient(135deg, #0f172a, #1e293b);
-  border-radius: 16px;
-  padding: 16px;
-  border: 1px solid rgba(255,255,255,0.06);
-  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+/* ===== HIDDEN MODERATION PANEL ===== */
+.mod-panel-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  display: flex; align-items: flex-end; justify-content: center;
+  opacity: 0; transition: opacity 0.3s ease;
+  pointer-events: none;
 }
-.admin-controls-header {
-  display: flex;
-  align-items: center;
-  margin-bottom: 12px;
-}
-.admin-controls-tag {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  color: #818cf8;
-  background: rgba(129,140,248,0.1);
-  padding: 4px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(129,140,248,0.2);
-}
-.admin-controls-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.admin-field {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  background: rgba(255,255,255,0.04);
-  border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.06);
-}
-.admin-field-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: #94a3b8;
-  min-width: 80px;
-}
-.admin-field-value {
-  flex: 1;
-  font-size: 13px;
-  font-weight: 600;
-  color: #e2e8f0;
-}
-.admin-edit-btn {
-  padding: 5px 14px;
-  font-size: 11px;
-  font-weight: 600;
-  background: rgba(129,140,248,0.15);
-  color: #818cf8;
-  border: 1px solid rgba(129,140,248,0.25);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.admin-edit-btn:hover {
-  background: rgba(129,140,248,0.25);
-  transform: translateY(-1px);
+.mod-panel-overlay.active { opacity: 1; pointer-events: auto; }
+
+.mod-panel-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0.5);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
 }
 
-/* Admin Modal — Dark Theme */
-.admin-modal-overlay {
-  position: fixed; inset: 0; z-index: 9999;
-  display: flex; align-items: center; justify-content: center;
-  opacity: 0; transition: opacity 0.3s ease; padding: 20px;
-}
-.admin-modal-overlay.active { opacity: 1; }
-.admin-modal-backdrop {
-  position: absolute; inset: 0;
-  background: rgba(0,0,0,0.7);
-  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-}
-.admin-modal-card {
+.mod-panel-sheet {
   position: relative; z-index: 1;
-  background: linear-gradient(135deg, #0f172a, #1e293b);
-  border-radius: 24px; padding: 28px;
-  max-width: 380px; width: 100%;
-  border: 1px solid rgba(255,255,255,0.08);
-  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
-  animation: scaleIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  background: linear-gradient(180deg, #1e293b, #0f172a);
+  border-radius: 24px 24px 0 0;
+  padding: 16px 20px 32px;
+  max-width: 420px; width: 100%;
+  max-height: 80vh; overflow-y: auto;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  box-shadow: 0 -10px 40px rgba(0,0,0,0.4);
+  transform: translateY(100%);
+  transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
-.admin-modal-header {
+.mod-panel-overlay.active .mod-panel-sheet {
+  transform: translateY(0);
+}
+
+.mod-panel-handle {
+  width: 40px; height: 4px; border-radius: 2px;
+  background: rgba(255,255,255,0.15);
+  margin: 0 auto 16px;
+}
+
+.mod-panel-header {
   display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
 }
-.admin-modal-close {
+
+.mod-panel-tag {
+  font-size: 13px; font-weight: 700;
+  color: #94a3b8;
+  letter-spacing: 0.5px;
+}
+
+.mod-panel-close {
   width: 32px; height: 32px; border-radius: 50%;
   background: rgba(255,255,255,0.06); border: none;
   color: #94a3b8; font-size: 14px; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   transition: all 0.2s;
 }
-.admin-modal-close:hover { background: rgba(255,255,255,0.1); color: #fff; }
-.admin-input-group { margin-bottom: 0; }
-.admin-input-label {
-  display: block; font-size: 11px; font-weight: 600;
-  color: #94a3b8; text-transform: uppercase;
-  letter-spacing: 0.5px; margin-bottom: 6px;
+.mod-panel-close:hover { background: rgba(255,255,255,0.1); color: #fff; }
+
+.mod-panel-section {
+  margin-bottom: 16px;
 }
-.admin-input {
-  width: 100%; padding: 12px 16px;
-  background: rgba(255,255,255,0.06);
+
+.mod-panel-section-label {
+  font-size: 10px; font-weight: 600;
+  color: #64748b; text-transform: uppercase;
+  letter-spacing: 1px; margin-bottom: 8px;
+}
+
+.mod-panel-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.mod-panel-btn {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 14px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 12px; color: #e2e8f0;
+  font-size: 12px; font-weight: 500;
+  cursor: pointer; transition: all 0.2s;
+}
+.mod-panel-btn:hover {
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.1);
+}
+.mod-panel-btn:active { transform: scale(0.97); }
+.mod-panel-btn span:first-child { font-size: 16px; }
+
+/* Mod panel action area */
+.mod-panel-action-area {
+  margin-top: 16px; padding: 16px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 16px;
+}
+
+.mod-action-title {
+  font-size: 12px; font-weight: 600;
+  color: #94a3b8; margin-bottom: 8px;
+}
+
+.mod-action-input {
+  width: 100%; padding: 10px 14px;
+  background: rgba(0,0,0,0.3);
   border: 1.5px solid rgba(255,255,255,0.1);
-  border-radius: 12px; color: #f1f5f9;
-  font-size: 14px; font-weight: 500;
+  border-radius: 10px; color: #f1f5f9;
+  font-size: 13px; font-weight: 500;
   outline: none; transition: border-color 0.2s;
 }
-.admin-input:focus {
-  border-color: #818cf8;
-  box-shadow: 0 0 0 3px rgba(129,140,248,0.15);
+.mod-action-input:focus {
+  border-color: #64748b;
+  box-shadow: 0 0 0 3px rgba(100,116,139,0.15);
 }
-.admin-cancel-btn {
-  padding: 12px; border: 1.5px solid rgba(255,255,255,0.1);
-  border-radius: 14px; background: transparent;
-  color: #94a3b8; font-size: 14px; font-weight: 600;
+.mod-action-input::placeholder { color: #475569; }
+
+.mod-action-cancel {
+  flex: 1; padding: 10px;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px; background: transparent;
+  color: #94a3b8; font-size: 13px; font-weight: 600;
   cursor: pointer; transition: all 0.2s;
 }
-.admin-cancel-btn:hover { background: rgba(255,255,255,0.05); }
-.admin-save-btn {
-  padding: 12px; border: none; border-radius: 14px;
-  background: linear-gradient(135deg, #6366f1, #818cf8);
-  color: #fff; font-size: 14px; font-weight: 600;
+.mod-action-cancel:hover { background: rgba(255,255,255,0.05); }
+
+.mod-action-confirm {
+  flex: 1; padding: 10px;
+  border: none; border-radius: 10px;
+  background: linear-gradient(135deg, #475569, #64748b);
+  color: #fff; font-size: 13px; font-weight: 600;
   cursor: pointer; transition: all 0.2s;
-  box-shadow: 0 4px 14px rgba(99,102,241,0.3);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
 }
-.admin-save-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(99,102,241,0.4);
-}
-.admin-save-btn:active { transform: scale(0.97); }
+.mod-action-confirm:hover { transform: translateY(-1px); }
+.mod-action-confirm:active { transform: scale(0.97); }
+
 
 /* ================================================================
    NEW STYLES — Delete, Diary, Polls, Theme, Games
@@ -4493,4 +4491,538 @@ body.theme-ocean .menu-item:not(:last-child) { border-bottom-color: rgba(255,255
 body.theme-ocean .menu-item-title { color: #e0f2fe; }
 body.theme-ocean .menu-item-subtitle { color: #7dd3fc; }
 body.theme-ocean .settings-drawer { background: #0c4a6e; }
+
+/* ============================================
+   🎬 CINEMATIC INTRO ANIMATION
+   ============================================ */
+
+.cinematic-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: #0b1a2e;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+.cinematic-overlay.intro-active { opacity: 1; }
+.cinematic-overlay.intro-fade-out {
+  opacity: 0;
+  transition: opacity 0.8s ease;
+}
+
+/* Ambient golden glow behind gate */
+.intro-ambient-glow {
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse at center 60%, rgba(251,191,36,0.15) 0%, transparent 70%);
+  opacity: 0;
+  transition: opacity 2s ease;
+}
+.intro-phase-gate-open .intro-ambient-glow { opacity: 1; }
+
+/* Particles layer */
+.intro-particles-layer {
+  position: absolute; inset: 0; z-index: 2;
+  pointer-events: none; overflow: hidden;
+}
+
+/* Light particles */
+.intro-light-particle {
+  position: absolute; border-radius: 50%;
+  background: radial-gradient(circle, rgba(251,191,36,0.8) 0%, rgba(251,191,36,0) 70%);
+  animation: introParticleFloat 4s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+@keyframes introParticleFloat {
+  0% { transform: translateY(0) scale(0.5); opacity: 0; }
+  30% { opacity: 0.8; }
+  50% { transform: translateY(-30px) scale(1.2); opacity: 0.6; }
+  100% { transform: translateY(-60px) scale(0.3); opacity: 0; }
+}
+
+/* Bokeh circles */
+.intro-bokeh {
+  position: absolute; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,255,255,0.12) 0%, transparent 70%);
+  animation: introBokehPulse 5s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+@keyframes introBokehPulse {
+  0%, 100% { transform: scale(0.8); opacity: 0.15; }
+  50% { transform: scale(1.3); opacity: 0.25; }
+}
+
+/* Dust motes */
+.intro-dust {
+  position: absolute; border-radius: 50%;
+  background: rgba(251,191,36,0.5);
+  animation: introDustRise 6s linear forwards;
+  will-change: transform, opacity;
+}
+@keyframes introDustRise {
+  0% { transform: translateY(0); opacity: 0; }
+  10% { opacity: 0.6; }
+  90% { opacity: 0.3; }
+  100% { transform: translateY(-100vh); opacity: 0; }
+}
+
+/* Gate scene */
+.intro-gate-scene {
+  position: absolute; inset: 0; z-index: 5;
+  display: flex; align-items: stretch; justify-content: center;
+}
+
+/* Gate pillars */
+.intro-gate-pillar {
+  position: absolute; bottom: 0; width: 28px; z-index: 8;
+  background: linear-gradient(180deg, #3b5998 0%, #1e3a5f 30%, #152b48 100%);
+  border-top: 4px solid #7998c4;
+  box-shadow: 0 0 20px rgba(30,58,95,0.5);
+}
+.intro-gate-pillar::before {
+  content: ''; position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
+  width: 36px; height: 12px; background: #1e3a5f; border-radius: 4px 4px 0 0;
+}
+.intro-gate-pillar-left { left: calc(50% - 160px); height: 75%; }
+.intro-gate-pillar-right { right: calc(50% - 160px); height: 75%; }
+
+/* Gate arch */
+.intro-gate-arch {
+  position: absolute; top: 22%; left: 50%; transform: translateX(-50%);
+  z-index: 9; text-align: center;
+}
+.intro-arch-text {
+  font-family: 'Playfair Display', serif;
+  font-size: 18px; font-weight: 700; letter-spacing: 3px;
+  color: #c5d4e8; text-transform: uppercase;
+  text-shadow: 0 2px 10px rgba(0,0,0,0.5);
+  opacity: 0;
+  animation: introArchFade 1.5s ease-out 0.5s forwards;
+}
+@keyframes introArchFade {
+  to { opacity: 1; }
+}
+
+/* Gate doors */
+.intro-gate-left, .intro-gate-right {
+  position: absolute; top: 25%; bottom: 0; width: 132px;
+  z-index: 7; overflow: hidden;
+  transition: transform 2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  will-change: transform;
+}
+.intro-gate-left { right: 50%; transform-origin: left center; }
+.intro-gate-right { left: 50%; transform-origin: right center; }
+
+.intro-phase-gate-open .intro-gate-left { transform: perspective(800px) rotateY(-75deg); }
+.intro-phase-gate-open .intro-gate-right { transform: perspective(800px) rotateY(75deg); }
+
+.intro-gate-panel {
+  width: 100%; height: 100%;
+  background: linear-gradient(180deg, #1e3a5f 0%, #152b48 100%);
+  border: 2px solid #3b5998;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 12px; padding: 20px 10px;
+  box-shadow: inset 0 0 30px rgba(0,0,0,0.3);
+}
+
+.intro-gate-bar {
+  width: 80%; height: 3px;
+  background: linear-gradient(90deg, transparent, #5c82b7, transparent);
+  border-radius: 2px;
+}
+
+.intro-gate-ornament {
+  font-size: 24px; margin-top: 8px;
+  filter: drop-shadow(0 2px 8px rgba(0,0,0,0.3));
+}
+
+/* Campus scene behind gates */
+.intro-campus-scene {
+  position: absolute; inset: 0; z-index: 1;
+  opacity: 0;
+  transform: scale(1.15);
+  transition: opacity 2s ease, transform 3s ease;
+  will-change: opacity, transform;
+}
+.intro-phase-campus .intro-campus-scene {
+  opacity: 1; transform: scale(1);
+}
+
+.intro-campus-sky {
+  position: absolute; top: 0; left: 0; right: 0; height: 60%;
+  background: linear-gradient(180deg, #1a3a5f 0%, #2d5a8c 30%, #6ba0d6 60%, #f5c87a 85%, #f5a050 100%);
+}
+
+.intro-campus-ground {
+  position: absolute; bottom: 0; left: 0; right: 0; height: 45%;
+  background: linear-gradient(180deg, #4a7c59 0%, #3d6b4e 30%, #2d5a3d 100%);
+}
+
+.intro-campus-building {
+  position: absolute; bottom: 35%; left: 50%; transform: translateX(-50%);
+  width: 200px; height: 120px;
+  background: linear-gradient(180deg, #e8d5b0 0%, #d4c4a0 100%);
+  border-radius: 4px 4px 0 0;
+  box-shadow: 0 4px 30px rgba(0,0,0,0.2);
+}
+.intro-campus-building::before {
+  content: ''; position: absolute; top: -20px; left: -10px; right: -10px; height: 24px;
+  background: #8b4513; border-radius: 2px;
+}
+.intro-campus-building::after {
+  content: '🏫'; position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%); font-size: 36px;
+}
+
+.intro-campus-tree {
+  position: absolute; bottom: 35%; width: 60px; height: 80px; z-index: 2;
+}
+.intro-campus-tree::before {
+  content: '🌳'; font-size: 48px;
+  position: absolute; bottom: 0;
+}
+.intro-tree-left { left: 15%; }
+.intro-tree-right { right: 15%; }
+
+.intro-campus-path {
+  position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+  width: 60px; height: 40%;
+  background: linear-gradient(180deg, #c5a36e, #b8945e);
+  clip-path: polygon(35% 0%, 65% 0%, 90% 100%, 10% 100%);
+}
+
+/* Welcome text */
+.intro-welcome-text {
+  position: absolute; inset: 0; z-index: 15;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 1s ease, transform 1s ease;
+  will-change: opacity, transform;
+  pointer-events: none;
+}
+.intro-phase-welcome .intro-welcome-text {
+  opacity: 1; transform: translateY(0);
+}
+
+.intro-bell-icon {
+  font-size: 48px;
+  animation: none;
+  filter: drop-shadow(0 4px 20px rgba(251,191,36,0.5));
+}
+.intro-phase-welcome .intro-bell-icon {
+  animation: introBellRing 0.6s ease-in-out 3;
+}
+@keyframes introBellRing {
+  0%, 100% { transform: rotate(0); }
+  25% { transform: rotate(15deg); }
+  75% { transform: rotate(-15deg); }
+}
+
+.intro-title {
+  font-family: 'Playfair Display', serif;
+  font-size: 32px; font-weight: 700;
+  color: #fff; margin-top: 16px;
+  text-shadow: 0 4px 30px rgba(0,0,0,0.5);
+  letter-spacing: 2px;
+}
+
+.intro-subtitle {
+  font-family: 'Caveat', cursive;
+  font-size: 18px; color: rgba(255,255,255,0.7);
+  margin-top: 8px;
+  text-shadow: 0 2px 10px rgba(0,0,0,0.3);
+}
+
+/* Skip button */
+.intro-skip-btn {
+  position: absolute; bottom: 40px; right: 24px;
+  z-index: 20; padding: 10px 20px;
+  background: rgba(255,255,255,0.12);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 24px; color: rgba(255,255,255,0.7);
+  font-size: 13px; font-weight: 500;
+  cursor: pointer; transition: all 0.3s ease;
+  opacity: 0; transform: translateY(10px);
+  pointer-events: none;
+}
+.intro-skip-btn.visible {
+  opacity: 1; transform: translateY(0);
+  pointer-events: auto;
+}
+.intro-skip-btn:hover {
+  background: rgba(255,255,255,0.2);
+  color: #fff;
+}
+
+/* ============================================
+   ❤️ MISS YOU BUTTON
+   ============================================ */
+
+.miss-you-btn {
+  position: relative; overflow: visible;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 10px 20px;
+  background: linear-gradient(135deg, #e11d48 0%, #f43f5e 50%, #fb7185 100%);
+  color: #fff; border: none; border-radius: 12px;
+  font-size: 14px; font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 16px rgba(225,29,72,0.3);
+}
+.miss-you-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 24px rgba(225,29,72,0.4);
+}
+.miss-you-btn:active { transform: scale(0.96); }
+.miss-you-btn.cooldown {
+  opacity: 0.5; cursor: not-allowed;
+  background: linear-gradient(135deg, #9ca3af, #6b7280);
+  box-shadow: none;
+}
+.miss-you-btn .miss-you-icon {
+  font-size: 16px;
+  transition: transform 0.3s ease;
+}
+.miss-you-btn:not(.cooldown):hover .miss-you-icon {
+  transform: scale(1.2);
+}
+
+/* Heart burst particles */
+.miss-you-heart-burst {
+  position: absolute; inset: 0;
+  pointer-events: none; overflow: visible;
+}
+.miss-you-heart {
+  position: absolute;
+  font-size: 14px;
+  animation: heartBurst 1.2s ease-out forwards;
+  will-change: transform, opacity;
+}
+@keyframes heartBurst {
+  0% {
+    transform: translate(0, 0) scale(0.5) rotate(0deg);
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.8;
+  }
+  100% {
+    transform: translate(var(--hx, 0px), var(--hy, -60px)) scale(0.2) rotate(var(--hr, 45deg));
+    opacity: 0;
+  }
+}
+
+/* Miss You sent animation on button */
+.miss-you-btn.sending {
+  animation: missYouPulse 0.6s ease;
+}
+@keyframes missYouPulse {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.1); }
+  60% { transform: scale(0.95); }
+  100% { transform: scale(1); }
+}
+
+/* ============================================
+   🎨 FESTIVAL THEMES
+   ============================================ */
+
+/* Festival particle canvas */
+.festival-canvas {
+  position: fixed; inset: 0; z-index: 5;
+  pointer-events: none;
+  opacity: 0.8;
+}
+
+/* Festival greeting banner */
+.festival-greeting-banner {
+  position: fixed; top: 0; left: 0; right: 0;
+  z-index: 60; padding: 0 16px;
+  transform: translateY(-100%);
+  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  will-change: transform;
+}
+.festival-greeting-banner.visible {
+  transform: translateY(0);
+}
+
+.festival-greeting-content {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 16px;
+  margin-top: env(safe-area-inset-top, 8px);
+  background: rgba(255,255,255,0.95);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+  border: 1px solid rgba(0,0,0,0.06);
+}
+
+.festival-greeting-emoji {
+  font-size: 32px; flex-shrink: 0;
+  animation: festivalEmojiPulse 2s ease-in-out infinite;
+}
+@keyframes festivalEmojiPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15) rotate(5deg); }
+}
+
+.festival-greeting-text { flex: 1; min-width: 0; }
+.festival-greeting-title {
+  font-size: 15px; font-weight: 700;
+  color: #1e3a5f;
+}
+.festival-greeting-subtitle {
+  font-size: 12px; color: #666; margin-top: 2px;
+}
+
+.festival-greeting-close {
+  padding: 4px 8px; border: none; background: none;
+  color: #999; cursor: pointer; font-size: 16px;
+  transition: color 0.2s;
+}
+.festival-greeting-close:hover { color: #333; }
+
+/* ===== BIRTHDAY THEME ===== */
+body.festival-birthday {
+  --festival-bg: #fffbeb;
+  --festival-primary: #d97706;
+  --festival-accent: #fbbf24;
+}
+body.festival-birthday { background-color: #fffbeb !important; }
+body.festival-birthday header {
+  background: rgba(255,251,235,0.95) !important;
+  border-bottom-color: rgba(217,119,6,0.1) !important;
+}
+body.festival-birthday header h1 { color: #92400e !important; }
+body.festival-birthday .nav-btn.active { color: #d97706 !important; }
+body.festival-birthday .nav-btn.active::after { background: #d97706 !important; }
+body.festival-birthday .card,
+body.festival-birthday .post-card {
+  border-color: rgba(251,191,36,0.15) !important;
+  box-shadow: 0 2px 12px rgba(251,191,36,0.08) !important;
+}
+body.festival-birthday .btn-primary {
+  background: linear-gradient(135deg, #d97706, #f59e0b) !important;
+}
+body.festival-birthday .festival-greeting-content {
+  background: linear-gradient(135deg, rgba(255,251,235,0.98), rgba(254,243,199,0.98)) !important;
+  border-color: rgba(251,191,36,0.2) !important;
+}
+
+/* ===== FRIENDSHIP DAY THEME ===== */
+body.festival-friendship {
+  --festival-bg: #fef2f2;
+  --festival-primary: #e11d48;
+}
+body.festival-friendship { background-color: #fff1f2 !important; }
+body.festival-friendship header {
+  background: rgba(255,241,242,0.95) !important;
+  border-bottom-color: rgba(225,29,72,0.08) !important;
+}
+body.festival-friendship header h1 { color: #9f1239 !important; }
+body.festival-friendship .nav-btn.active { color: #e11d48 !important; }
+body.festival-friendship .nav-btn.active::after { background: #e11d48 !important; }
+body.festival-friendship .btn-primary {
+  background: linear-gradient(135deg, #e11d48, #f43f5e) !important;
+}
+body.festival-friendship .card,
+body.festival-friendship .post-card {
+  border-color: rgba(225,29,72,0.08) !important;
+}
+body.festival-friendship .festival-greeting-content {
+  background: linear-gradient(135deg, rgba(255,241,242,0.98), rgba(254,205,211,0.5)) !important;
+  border-color: rgba(225,29,72,0.15) !important;
+}
+
+/* ===== NEW YEAR THEME ===== */
+body.festival-newyear {
+  --festival-bg: #0f172a;
+  --festival-primary: #8b5cf6;
+}
+body.festival-newyear { background-color: #0f172a !important; color: #f8fafc !important; }
+body.festival-newyear header {
+  background: rgba(15,23,42,0.95) !important;
+  border-bottom-color: rgba(139,92,246,0.15) !important;
+}
+body.festival-newyear header h1 { color: #c4b5fd !important; }
+body.festival-newyear .nav-btn { color: #64748b !important; }
+body.festival-newyear .nav-btn.active { color: #a78bfa !important; }
+body.festival-newyear .nav-btn.active::after { background: #8b5cf6 !important; }
+body.festival-newyear #bottom-nav {
+  background: rgba(15,23,42,0.95) !important;
+  border-top-color: rgba(139,92,246,0.1) !important;
+}
+body.festival-newyear .card, body.festival-newyear .post-card {
+  background: #1e293b !important; color: #f1f5f9 !important;
+  border-color: rgba(139,92,246,0.1) !important;
+}
+body.festival-newyear .btn-primary {
+  background: linear-gradient(135deg, #7c3aed, #8b5cf6) !important;
+}
+body.festival-newyear .festival-greeting-content {
+  background: rgba(30,41,59,0.95) !important;
+  border-color: rgba(139,92,246,0.2) !important;
+}
+body.festival-newyear .festival-greeting-title { color: #e0e7ff !important; }
+body.festival-newyear .festival-greeting-subtitle { color: #a5b4fc !important; }
+
+/* ===== CHRISTMAS THEME ===== */
+body.festival-christmas {
+  --festival-bg: #f0fdf4;
+  --festival-primary: #16a34a;
+}
+body.festival-christmas { background-color: #f0fdf4 !important; }
+body.festival-christmas header {
+  background: rgba(240,253,244,0.95) !important;
+  border-bottom-color: rgba(22,163,74,0.1) !important;
+}
+body.festival-christmas header h1 { color: #166534 !important; }
+body.festival-christmas .nav-btn.active { color: #16a34a !important; }
+body.festival-christmas .nav-btn.active::after { background: #dc2626 !important; }
+body.festival-christmas .btn-primary {
+  background: linear-gradient(135deg, #dc2626, #16a34a) !important;
+}
+body.festival-christmas .card, body.festival-christmas .post-card {
+  border-color: rgba(22,163,74,0.1) !important;
+}
+body.festival-christmas .festival-greeting-content {
+  background: linear-gradient(135deg, rgba(240,253,244,0.98), rgba(220,252,231,0.9)) !important;
+  border-color: rgba(22,163,74,0.15) !important;
+}
+
+/* ===== DIWALI THEME ===== */
+body.festival-diwali {
+  --festival-bg: #451a03;
+  --festival-primary: #f59e0b;
+}
+body.festival-diwali { background-color: #451a03 !important; color: #fef3c7 !important; }
+body.festival-diwali header {
+  background: rgba(69,26,3,0.95) !important;
+  border-bottom-color: rgba(245,158,11,0.15) !important;
+}
+body.festival-diwali header h1 { color: #fcd34d !important; }
+body.festival-diwali .nav-btn { color: #92400e !important; }
+body.festival-diwali .nav-btn.active { color: #fbbf24 !important; }
+body.festival-diwali .nav-btn.active::after { background: #f59e0b !important; }
+body.festival-diwali #bottom-nav {
+  background: rgba(69,26,3,0.95) !important;
+  border-top-color: rgba(245,158,11,0.1) !important;
+}
+body.festival-diwali .card, body.festival-diwali .post-card {
+  background: #78350f !important; color: #fef3c7 !important;
+  border-color: rgba(245,158,11,0.1) !important;
+}
+body.festival-diwali .btn-primary {
+  background: linear-gradient(135deg, #d97706, #f59e0b) !important;
+}
+body.festival-diwali .festival-greeting-content {
+  background: rgba(120,53,15,0.95) !important;
+  border-color: rgba(245,158,11,0.2) !important;
+}
+body.festival-diwali .festival-greeting-title { color: #fef3c7 !important; }
+body.festival-diwali .festival-greeting-subtitle { color: #fcd34d !important; }
+
 

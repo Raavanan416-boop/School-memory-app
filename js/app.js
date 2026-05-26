@@ -238,6 +238,11 @@ function buildAppShell() {
 
   router.navigate('home');
 
+  // Initialize festival theme system (non-blocking)
+  import('./festival-themes.js').then(({ festivalManager }) => {
+    festivalManager.init();
+  }).catch(e => console.log('Festival themes init:', e));
+
   // Apply saved theme from localStorage (instant) and sync from Firestore
   const savedTheme = localStorage.getItem('app_theme');
   if (savedTheme && savedTheme !== 'theme-cream') {
@@ -568,11 +573,27 @@ function showInstallBanner() {
 async function init() {
   console.log('[ClassMemories] Starting...');
 
-  // Load core modules in parallel with splash
-  const [_] = await Promise.all([
-    animateSplash(),
-    loadCoreModules()
-  ]);
+  // Play cinematic intro on first visit (lazy loaded for resilience)
+  let introPlayed = false;
+  try {
+    const { playCinematicIntro } = await import('./cinematic-intro.js');
+    introPlayed = await playCinematicIntro();
+  } catch (e) {
+    console.warn('[ClassMemories] Cinematic intro failed:', e);
+  }
+
+  // Load core modules in parallel with splash (skip splash if intro played)
+  if (introPlayed) {
+    // Intro replaces splash — remove splash immediately
+    const splashEl = document.getElementById('splash-screen');
+    if (splashEl) splashEl.remove();
+    await loadCoreModules();
+  } else {
+    const [_] = await Promise.all([
+      animateSplash(),
+      loadCoreModules()
+    ]);
+  }
 
   console.log('[ClassMemories] Splash done, initializing auth...');
 

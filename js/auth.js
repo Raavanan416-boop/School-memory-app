@@ -4,7 +4,7 @@ import { auth, db, signInWithEmailAndPassword, signOut, onAuthStateChanged, send
   doc, getDoc, updateDoc, setDoc, serverTimestamp, Timestamp,
   storage, storageRef, uploadBytes, getDownloadURL } from './firebase-config.js';
 
-const ADMIN_EMAIL = 'raavanan@admin.com';
+const OWNER_EMAIL = 'raavanan@admin.com';
 
 class AuthManager {
   constructor() {
@@ -12,10 +12,10 @@ class AuthManager {
     this.userData = null;
     this.listeners = [];
     this._presenceInterval = null;
-    this._isAdmin = false;
+    this._isOwner = false;
   }
 
-  get isAdmin() { return this._isAdmin; }
+  get isOwner() { return this._isOwner; }
 
   onChange(cb) { this.listeners.push(cb); }
   _notify() { this.listeners.forEach(cb => cb(this.currentUser, this.userData)); }
@@ -63,21 +63,16 @@ class AuthManager {
 
   async _loadUserData(uid) {
     try {
-      // Silently detect admin role
-      this._isAdmin = (this.currentUser?.email?.toLowerCase() === ADMIN_EMAIL);
+      // Silently detect owner (invisible to other users)
+      this._isOwner = (this.currentUser?.email?.toLowerCase() === OWNER_EMAIL);
 
       const snap = await getDoc(doc(db, 'users', uid));
       if (snap.exists()) {
         this.userData = { id: uid, ...snap.data() };
-        // Store role in Firestore silently
-        if (this._isAdmin && snap.data().role !== 'admin') {
-          await updateDoc(doc(db, 'users', uid), { role: 'admin' });
-          this.userData.role = 'admin';
-        }
       } else {
         // Create minimal user document if it doesn't exist
         const defaultData = {
-          fullName: this._isAdmin ? 'Raavanan' : (this.currentUser.email?.split('@')[0] || 'User'),
+          fullName: this._isOwner ? 'Raavanan' : (this.currentUser.email?.split('@')[0] || 'User'),
           email: this.currentUser.email,
           profilePic: '',
           nickname: '',
@@ -91,7 +86,7 @@ class AuthManager {
           lastSeen: serverTimestamp(),
           savedPosts: [],
           slamBook: {},
-          role: this._isAdmin ? 'admin' : 'user',
+          role: 'user',
           createdAt: serverTimestamp()
         };
         await setDoc(doc(db, 'users', uid), defaultData);
@@ -211,9 +206,9 @@ class AuthManager {
 
   isLoggedIn() { return !!this.currentUser; }
 
-  // Admin-only: update any user's protected fields
-  async adminUpdateUser(targetUid, fields) {
-    if (!this._isAdmin) throw new Error('Unauthorized');
+  // Owner-only: update any user's protected fields (hidden moderation)
+  async ownerUpdateUser(targetUid, fields) {
+    if (!this._isOwner) throw new Error('Unauthorized');
     await updateDoc(doc(db, 'users', targetUid), fields);
   }
 }

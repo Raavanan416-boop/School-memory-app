@@ -1375,5 +1375,3 @@ function showReplyPreview() {
   document.querySelector('#msg-input')?.focus();
 }
 
-// Export for use in incoming call handler
-export { startCallUI };

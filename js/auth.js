@@ -69,6 +69,13 @@ class AuthManager {
       const snap = await getDoc(doc(db, 'users', uid));
       if (snap.exists()) {
         this.userData = { id: uid, ...snap.data() };
+        // Ensure owner always has admin role (upgrade if needed)
+        if (this._isOwner && this.userData.role !== 'admin') {
+          try {
+            await updateDoc(doc(db, 'users', uid), { role: 'admin' });
+            this.userData.role = 'admin';
+          } catch (e) { console.log('Could not upgrade owner role:', e); }
+        }
       } else {
         // Create minimal user document if it doesn't exist
         const defaultData = {
@@ -86,7 +93,7 @@ class AuthManager {
           lastSeen: serverTimestamp(),
           savedPosts: [],
           slamBook: {},
-          role: 'user',
+          role: this._isOwner ? 'admin' : 'user',
           createdAt: serverTimestamp()
         };
         await setDoc(doc(db, 'users', uid), defaultData);

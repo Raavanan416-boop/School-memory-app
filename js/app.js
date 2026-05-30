@@ -220,12 +220,27 @@ function buildAppShell() {
   // Notifications button
   $('#btn-notifications')?.addEventListener('click', () => router.navigate('notifications'));
 
-  // Set up notification badge
-  if (notificationManager) {
-    const badge = $('#notif-badge');
-    notificationManager.setBadgeElement(badge);
-    notificationManager.startListening();
-  }
+  // Set up notification badge + FCM
+    if (notificationManager) {
+      const badge = $('#notif-badge');
+      notificationManager.setBadgeElement(badge);
+      notificationManager.startListening();
+      // Initialize FCM (registers firebase-messaging-sw.js + token)
+      notificationManager.initFCM().then(() => {
+        // Request push permission after FCM is ready
+        if ('Notification' in window && Notification.permission === 'default') {
+          setTimeout(() => notificationManager.requestPushPermission(), 5000);
+        }
+      }).catch(e => console.log('[App] FCM init:', e.message));
+      // Unlock audio on first user touch/click (required by mobile browsers)
+      const unlockAudio = () => {
+        if (notificationManager) notificationManager.unlockAudio();
+        document.removeEventListener('touchstart', unlockAudio);
+        document.removeEventListener('click', unlockAudio);
+      };
+      document.addEventListener('touchstart', unlockAudio, { once: true });
+      document.addEventListener('click', unlockAudio, { once: true });
+    }
 
   // Start listening for incoming calls
   if (callManager) {
@@ -644,11 +659,14 @@ async function init() {
       buildAppShell();
     } else {
       console.log('[ClassMemories] No user, showing login...');
-      $('#app')?.classList.add('hidden');
-      $('#bottom-nav')?.classList.add('hidden');
-      if (notificationManager) notificationManager.stopListening();
-      if (callManager) callManager.stopListeningForCalls();
-      showLogin();
+        $('#app')?.classList.add('hidden');
+        $('#bottom-nav')?.classList.add('hidden');
+        if (notificationManager) {
+          notificationManager.removeFCMToken();
+          notificationManager.stopListening();
+        }
+        if (callManager) callManager.stopListeningForCalls();
+        showLogin();
     }
   });
 

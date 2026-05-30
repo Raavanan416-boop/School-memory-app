@@ -210,6 +210,7 @@ function showGiftPointsModal(allUsers) {
 
         // Send notification to friend
         await createNotification('friend_bonus', targetId, {
+          points: 5,
           message: `🎁 ${userData.fullName || 'Someone'} gifted you +5 Birthday Points!`
         });
 

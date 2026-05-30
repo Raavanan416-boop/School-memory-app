@@ -104,11 +104,15 @@ service cloud.firestore {
       }
     }
 
-    // Notifications
+    // Notifications — user can manage their own notifications
     match /notifications/{notifId} {
+      // User can read their own notifications
       allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      // Any authenticated user can create notifications (for others)
       allow create: if isAuthenticated();
+      // User can update their own (mark as read)
       allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      // User can delete their own
       allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }
 

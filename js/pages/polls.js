@@ -283,7 +283,7 @@ function showCreatePollModal() {
     if (options.length < 2) { showToast('Need at least 2 options', 'warning'); return; }
 
     try {
-      await addDoc(collection(db, 'polls'), {
+      const pollRef = await addDoc(collection(db, 'polls'), {
         question,
         options: options.map(text => ({ text, votes: [] })),
         authorId: authManager.currentUser.uid,
@@ -291,6 +291,17 @@ function showCreatePollModal() {
         createdAt: serverTimestamp()
       });
       showToast('Poll created! 📊', 'success');
+
+      // Notify all classmates about the new poll
+      try {
+        const usersSnap = await getDocs(collection(db, 'users'));
+        usersSnap.forEach(d => {
+          if (d.id !== authManager.currentUser.uid) {
+            createNotification('poll_created', d.id, { pollId: pollRef.id });
+          }
+        });
+      } catch (e) { console.log('Poll notification error:', e); }
+
       modal.close();
     } catch (e) {
       console.error('Create poll error:', e);

@@ -724,7 +724,7 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
         await updateDoc(doc(db, 'chats', currentChatId), {
           [`unreadCount.${otherUid}`]: increment(1)
         });
-        createNotification('chat_message', otherUid, { chatId: currentChatId, message: text });
+        createNotification('chat_message', otherUid, { chatId: currentChatId, message: text, messagePreview: text.substring(0, 80) });
       }
     } catch (e) { console.error('Send error:', e); }
   };

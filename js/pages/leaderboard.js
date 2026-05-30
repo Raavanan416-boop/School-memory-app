@@ -1,4 +1,4 @@
-// Leaderboard page — Social activity rankings (no game points)
+// Leaderboard page — Social activity rankings with birthday points
 import { db, collection, getDocs, query, orderBy, where, limit, onSnapshot } from '../firebase-config.js';
 import { sanitizeHTML, formatNumber } from '../utils.js';
 import { authManager } from '../auth.js';
@@ -7,10 +7,10 @@ import { router } from '../router.js';
 export async function renderLeaderboard(container) {
   let users = [];
   let posts = [];
-  let comments = [];
   let polls = [];
   let diaries = [];
   let capsules = [];
+  let birthdayPointsDocs = []; // Declared OUTSIDE try block to fix "not defined" error
 
   // Show loading
   container.innerHTML = `
@@ -39,7 +39,6 @@ export async function renderLeaderboard(container) {
       getDocs(collection(db, 'birthdayPoints')).catch(() => ({ forEach: () => {} }))
     ]);
 
-    let birthdayPointsDocs = [];
     usersSnap.forEach(d => users.push({ id: d.id, ...d.data() }));
     postsSnap.forEach(d => posts.push({ id: d.id, ...d.data() }));
     pollsSnap.forEach(d => polls.push({ id: d.id, ...d.data() }));
@@ -50,7 +49,7 @@ export async function renderLeaderboard(container) {
     console.error('Leaderboard load error:', e);
   }
 
-  // Calculate scores with NEW points system
+  // Calculate scores — fixed point system
   const scores = users.map(user => {
     const userPosts = posts.filter(p => p.authorId === user.id);
     const totalLikes = userPosts.reduce((sum, p) => sum + (p.likes?.length || 0), 0);
@@ -68,16 +67,15 @@ export async function renderLeaderboard(container) {
     const userDiaries = diaries.filter(d => d.authorId === user.id || d.userId === user.id);
     const userCapsules = capsules.filter(c => c.authorId === user.id || c.createdBy === user.id);
 
-    // Points calculation
+    // Points calculation — fixed flat rates
     const postPoints = userPosts.length * 20;      // Each post = +20
     const likePoints = totalLikes * 10;             // Each like = +10
     const commentPoints = totalComments * 5;        // Each comment = +5
-    // Random 1-4 points per poll/diary/capsule (seeded by count so it's consistent)
-    const pollPoints = userPolls.length * (1 + Math.floor(Math.abs(Math.sin(user.id?.charCodeAt(0) || 1)) * 4));
-    const diaryPoints = userDiaries.length * (1 + Math.floor(Math.abs(Math.cos(user.id?.charCodeAt(0) || 1)) * 4));
-    const capsulePoints = userCapsules.length * (1 + Math.floor(Math.abs(Math.sin((user.id?.charCodeAt(1) || 2) * 7)) * 4));
+    const pollPoints = userPolls.length * 1;        // Each poll = +1
+    const diaryPoints = userDiaries.length * 1;     // Each diary = +1
+    const capsulePoints = userCapsules.length * 1;  // Each capsule = +1
 
-    // Birthday points from birthdayPoints collection
+    // Birthday points from birthdayPoints collection (safe — variable always exists)
     const userBdayPointsReceived = birthdayPointsDocs
       .filter(bp => bp.targetUserId === user.id)
       .reduce((sum, bp) => sum + (bp.points || 0), 0);
@@ -235,11 +233,11 @@ export async function renderLeaderboard(container) {
           <p>📸 Post a memory: <span class="font-semibold text-navy-600">+20 pts</span></p>
           <p>❤️ Each like received: <span class="font-semibold text-navy-600">+10 pts</span></p>
           <p>💬 Each comment: <span class="font-semibold text-navy-600">+5 pts</span></p>
-          <p>📊 Create a poll: <span class="font-semibold text-navy-600">+1–4 pts</span></p>
-          <p>📖 Diary entry: <span class="font-semibold text-navy-600">+1–4 pts</span></p>
-          <p>⏳ Time capsule: <span class="font-semibold text-navy-600">+1–4 pts</span></p>
-          <p>🎂 Birthday bonus: <span class="font-semibold text-navy-600">+10 pts</span></p>
-          <p>🎁 Birthday gift from friend: <span class="font-semibold text-navy-600">+5 pts</span></p>
+          <p>📊 Create a poll: <span class="font-semibold text-navy-600">+1 pts</span></p>
+          <p>📖 Diary entry: <span class="font-semibold text-navy-600">+1 pts</span></p>
+          <p>⏳ Time capsule: <span class="font-semibold text-navy-600">+1 pts</span></p>
+          <p>🎂 Birthday gift claim: <span class="font-semibold text-navy-600">+10 pts</span></p>
+          <p>🎁 Birthday gift transfer: <span class="font-semibold text-navy-600">+5 pts to receiver</span></p>
         </div>
       </div>
     </section>

@@ -20,7 +20,11 @@ service cloud.firestore {
     // Users collection
     match /users/{userId} {
       allow read: if isAuthenticated();
+      // Owner or admin can write anything
       allow write: if isOwner(userId) || isAdmin();
+      // Any authenticated user can update points (for birthday gift transfers)
+      allow update: if isAuthenticated()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['points']);
     }
 
     // Posts collection

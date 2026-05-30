@@ -1,5 +1,5 @@
-// Birthday page — Birthday calendar with 10-day upcoming filter + month grid click filter
-// Enhanced with birthday points system, wish viewing, and gift points
+// Birthday page — Birthday calendar with birthday points system
+// Fixed: manual claim, birthday person gifts points to friends, view wishes
 import { db, collection, getDocs, addDoc, doc, getDoc, updateDoc, query, where, orderBy, onSnapshot, serverTimestamp, increment } from '../firebase-config.js';
 import { showToast, sanitizeHTML, isBirthdayToday, getDaysUntil, formatDate, timeAgo } from '../utils.js';
 import { authManager } from '../auth.js';
@@ -16,10 +16,6 @@ function cleanupListeners() {
 
 // ===== CORE FILTER FUNCTIONS =====
 
-/**
- * Filter users whose next birthday is within the next N days (default 10).
- * Returns sorted array with `daysUntil` field attached.
- */
 function filterUpcomingTenDays(users, maxDays = 10) {
   return users
     .filter(u => u.dateOfBirth && !isBirthdayToday(u.dateOfBirth))
@@ -28,10 +24,6 @@ function filterUpcomingTenDays(users, maxDays = 10) {
     .sort((a, b) => a.daysUntil - b.daysUntil);
 }
 
-/**
- * Filter users whose birthday falls in a specific month (0-indexed).
- * Returns sorted by day-of-month.
- */
 function filterBySelectedMonth(users, monthIndex) {
   return users
     .filter(u => {
@@ -45,35 +37,54 @@ function filterBySelectedMonth(users, monthIndex) {
     .sort((a, b) => a.birthDay - b.birthDay);
 }
 
-// ===== BIRTHDAY POINTS — AUTO CLAIM =====
+// ===== CHECK IF BIRTHDAY GIFT ALREADY CLAIMED =====
 
-/**
- * Auto-claim +10 birthday points for the current user if today is their birthday.
- * Only once per year, prevents duplicates via birthdayPoints collection.
- */
-async function autoClaimBirthdayPoints() {
-  const currentUser = authManager.currentUser;
-  const userData = authManager.userData;
-  if (!currentUser || !userData?.dateOfBirth) return;
-
-  // Check if today is the user's birthday
-  if (!isBirthdayToday(userData.dateOfBirth)) return;
-
+async function checkBirthdayClaimed(userId) {
   const currentYear = new Date().getFullYear();
-
   try {
-    // Check if already claimed this year
     const q = query(
       collection(db, 'birthdayPoints'),
-      where('targetUserId', '==', currentUser.uid),
+      where('targetUserId', '==', userId),
       where('year', '==', currentYear),
       where('type', '==', 'birthday_self')
     );
     const snap = await getDocs(q);
+    return !snap.empty;
+  } catch (e) {
+    console.error('Check claim error:', e);
+    return false;
+  }
+}
 
-    if (!snap.empty) return; // Already claimed
+// ===== MANUAL CLAIM BIRTHDAY GIFT (+10 POINTS) =====
 
-    // Award +10 birthday points
+async function claimBirthdayGift(btnElement) {
+  const currentUser = authManager.currentUser;
+  const userData = authManager.userData;
+  if (!currentUser || !userData?.dateOfBirth) return;
+
+  if (!isBirthdayToday(userData.dateOfBirth)) {
+    showToast('It\'s not your birthday today!', 'warning');
+    return;
+  }
+
+  // Disable button immediately
+  btnElement.disabled = true;
+  btnElement.textContent = 'Claiming...';
+
+  const currentYear = new Date().getFullYear();
+
+  try {
+    // Double-check not already claimed
+    const alreadyClaimed = await checkBirthdayClaimed(currentUser.uid);
+    if (alreadyClaimed) {
+      btnElement.textContent = '✅ Birthday Gift Claimed';
+      btnElement.classList.add('opacity-60');
+      showToast('You already claimed your birthday gift!', 'info');
+      return;
+    }
+
+    // Claim +10 birthday points
     await addDoc(collection(db, 'birthdayPoints'), {
       type: 'birthday_self',
       targetUserId: currentUser.uid,
@@ -89,16 +100,133 @@ async function autoClaimBirthdayPoints() {
       points: increment(10)
     });
 
-    showToast('🎉 Happy Birthday! You received +10 Birthday Points.', 'success');
+    btnElement.textContent = '✅ Birthday Gift Claimed';
+    btnElement.classList.add('opacity-60');
+    showToast('🎉 You claimed +10 Birthday Points!', 'success');
   } catch (e) {
-    console.error('Auto-claim birthday points error:', e);
+    console.error('Claim birthday gift error:', e);
+    btnElement.disabled = false;
+    btnElement.textContent = '🎁 Claim Birthday Gift (+10 Points)';
+    showToast('Failed to claim. Try again.', 'error');
   }
+}
+
+// ===== GIFT 5 POINTS TO A FRIEND (birthday person only) =====
+
+function showGiftPointsModal(allUsers) {
+  const currentUser = authManager.currentUser;
+  const userData = authManager.userData;
+  if (!currentUser || !userData) return;
+
+  // Filter out self
+  const friends = allUsers.filter(u => u.id !== currentUser.uid);
+
+  const modal = router.openModal('', { title: '🎁 Gift Birthday Points' });
+  modal.body.innerHTML = `
+    <div class="p-4 space-y-4">
+      <div class="text-center mb-2">
+        <p class="text-sm text-navy-700">Select a friend to gift <strong>+5 points</strong></p>
+        <p class="text-[10px] text-gray-400 mt-1">You will lose 5 points. You must have enough balance.</p>
+      </div>
+
+      <div class="space-y-2 max-h-[300px] overflow-y-auto" id="gift-friends-list">
+        ${friends.map(u => `
+          <button class="gift-friend-btn card p-3 flex items-center gap-3 w-full text-left hover:shadow-md transition-all active:scale-[0.98]" data-uid="${u.id}" data-name="${sanitizeHTML(u.fullName || 'Unknown')}">
+            ${u.profilePic
+              ? `<img src="${u.profilePic}" class="w-9 h-9 rounded-full object-cover border-2 border-white shadow-sm" alt=""/>`
+              : `<div class="w-9 h-9 rounded-full bg-navy-500 text-white flex items-center justify-center text-xs font-bold shadow-sm">${(u.fullName || '?')[0]}</div>`}
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-semibold text-navy-800 truncate">${sanitizeHTML(u.fullName || 'Unknown')}</p>
+            </div>
+            <span class="text-xs px-2.5 py-1 rounded-full bg-amber-50 text-amber-600 font-semibold whitespace-nowrap">🎁 +5 pts</span>
+          </button>
+        `).join('')}
+      </div>
+
+      <button id="cancel-gift" class="w-full py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-500 hover:bg-gray-50 transition-colors">Cancel</button>
+    </div>
+  `;
+
+  modal.body.querySelector('#cancel-gift')?.addEventListener('click', () => modal.close());
+
+  // Handle friend selection
+  modal.body.querySelectorAll('.gift-friend-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const targetId = btn.dataset.uid;
+      const targetName = btn.dataset.name;
+
+      // Disable all buttons
+      modal.body.querySelectorAll('.gift-friend-btn').forEach(b => { b.disabled = true; b.style.opacity = '0.5'; });
+      btn.style.opacity = '1';
+      btn.querySelector('span').textContent = 'Sending...';
+
+      const currentYear = new Date().getFullYear();
+
+      try {
+        // Check if already gifted this year
+        const dupeQ = query(
+          collection(db, 'birthdayPoints'),
+          where('senderId', '==', currentUser.uid),
+          where('year', '==', currentYear),
+          where('type', '==', 'birthday_gift')
+        );
+        const dupeSnap = await getDocs(dupeQ);
+
+        if (!dupeSnap.empty) {
+          showToast('You already gifted points this birthday!', 'warning');
+          modal.close();
+          return;
+        }
+
+        // Check if birthday person has enough points
+        const myDoc = await getDoc(doc(db, 'users', currentUser.uid));
+        const myPoints = myDoc.data()?.points || 0;
+        if (myPoints < 5) {
+          showToast('Not enough points! You need at least 5.', 'warning');
+          modal.close();
+          return;
+        }
+
+        // Create birthday gift record
+        await addDoc(collection(db, 'birthdayPoints'), {
+          type: 'birthday_gift',
+          targetUserId: targetId,
+          senderId: currentUser.uid,
+          senderName: userData.fullName || 'Unknown',
+          points: 5,
+          year: currentYear,
+          createdAt: serverTimestamp()
+        });
+
+        // Deduct 5 from birthday person
+        await updateDoc(doc(db, 'users', currentUser.uid), {
+          points: increment(-5)
+        });
+
+        // Add 5 to friend
+        await updateDoc(doc(db, 'users', targetId), {
+          points: increment(5)
+        });
+
+        // Send notification to friend
+        await createNotification('friend_bonus', targetId, {
+          message: `🎁 ${userData.fullName || 'Someone'} gifted you +5 Birthday Points!`
+        });
+
+        showToast(`🎉 Gifted +5 points to ${targetName}!`, 'success');
+        modal.close();
+      } catch (e) {
+        console.error('Gift points error:', e);
+        showToast('Failed to gift points. Try again.', 'error');
+        modal.close();
+      }
+    });
+  });
 }
 
 // ===== MAIN RENDER =====
 
 export async function renderBirthday(container) {
-  // Cleanup previous listeners
   cleanupListeners();
 
   let users = [];
@@ -110,15 +238,18 @@ export async function renderBirthday(container) {
   const currentUserId = authManager.currentUser?.uid;
   const todayBirthdays = users.filter(u => isBirthdayToday(u.dateOfBirth));
   const upcomingTen = filterUpcomingTenDays(users, 10);
+  const iAmBirthdayPerson = todayBirthdays.some(u => u.id === currentUserId);
 
-  // Auto-claim birthday points for current user
-  autoClaimBirthdayPoints();
+  // Check if already claimed (for birthday person)
+  let alreadyClaimed = false;
+  if (iAmBirthdayPerson) {
+    alreadyClaimed = await checkBirthdayClaimed(currentUserId);
+  }
 
   const months = ['January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'];
   const monthAbbr = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 
-  // Track which month is currently selected
   let selectedMonth = -1;
 
   container.innerHTML = `
@@ -142,14 +273,24 @@ export async function renderBirthday(container) {
                 <div class="text-5xl mb-2">🎂</div>
                 <h3 class="text-xl font-bold text-navy-800">Happy Birthday, ${sanitizeHTML(u.fullName || 'Classmate')}! 🎉</h3>
                 <p class="text-sm text-navy-600 mt-1">${u.dateOfBirth ? new Date(u.dateOfBirth).toLocaleDateString('en-IN', { day: 'numeric', month: 'long' }) : ''}</p>
-                <div class="mt-4 flex items-center justify-center gap-3">
+                <div class="mt-4 flex flex-col items-center gap-2">
                   ${isMe ? `
+                    <!-- Birthday Person: View Wishes -->
                     <button class="px-5 py-2.5 bg-gradient-to-r from-pink-500 to-rose-500 text-white rounded-full text-sm font-semibold shadow-lg view-wishes-btn" data-uid="${u.id}" data-name="${sanitizeHTML(u.fullName || '')}">
-                      View Wishes ❤️
+                      🎁 View Wishes
+                    </button>
+                    <!-- Birthday Person: Claim Gift -->
+                    <button class="px-5 py-2.5 rounded-full text-sm font-semibold shadow-md claim-birthday-btn ${alreadyClaimed ? 'bg-gray-300 text-gray-500 opacity-60' : 'bg-gradient-to-r from-amber-500 to-orange-500 text-white'}" ${alreadyClaimed ? 'disabled' : ''}>
+                      ${alreadyClaimed ? '✅ Birthday Gift Claimed' : '🎁 Claim Birthday Gift (+10 Points)'}
+                    </button>
+                    <!-- Birthday Person: Gift 5 Points to Friend -->
+                    <button class="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-full text-sm font-semibold shadow-md gift-points-btn">
+                      🎁 Gift 5 Birthday Points to a Friend
                     </button>
                   ` : `
+                    <!-- Not Birthday Person: Send Wish only -->
                     <button class="px-5 py-2.5 bg-navy-500 text-white rounded-full text-sm font-semibold send-wish-btn" data-uid="${u.id}" data-name="${sanitizeHTML(u.fullName || '')}">
-                      🎂 Wish Birthday
+                      🎂 Send Wish
                     </button>
                   `}
                 </div>
@@ -215,7 +356,17 @@ export async function renderBirthday(container) {
   // Back button
   container.querySelector('#bday-back-btn')?.addEventListener('click', () => router.navigateBack());
 
-  // Send wishes (for friends)
+  // Claim birthday gift (birthday person only)
+  container.querySelector('.claim-birthday-btn')?.addEventListener('click', (e) => {
+    claimBirthdayGift(e.currentTarget);
+  });
+
+  // Gift 5 points to a friend (birthday person only)
+  container.querySelector('.gift-points-btn')?.addEventListener('click', () => {
+    showGiftPointsModal(users);
+  });
+
+  // Send wishes (for friends — NOT birthday person)
   container.querySelectorAll('.send-wish-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       showWishModal(btn.dataset.uid, btn.dataset.name);
@@ -238,7 +389,7 @@ export async function renderBirthday(container) {
 
   // ===== MONTH GRID CLICK → MODAL =====
   const monthGrid = container.querySelector('#month-grid');
-  let activeModal = null; // track current open modal
+  let activeModal = null;
 
   monthGrid?.addEventListener('click', (e) => {
     const card = e.target.closest('.bday-month-card');
@@ -247,24 +398,20 @@ export async function renderBirthday(container) {
     const monthIdx = parseInt(card.dataset.month, 10);
     if (isNaN(monthIdx)) return;
 
-    // Close existing modal if open
     if (activeModal) {
       closeBdayModal();
-      if (selectedMonth === monthIdx) return; // toggle off same month
+      if (selectedMonth === monthIdx) return;
     }
 
     selectedMonth = monthIdx;
 
-    // Highlight the clicked card
     monthGrid.querySelectorAll('.bday-month-card').forEach(c => {
       c.classList.remove('ring-2', 'ring-navy-500', 'bg-navy-50');
     });
     card.classList.add('ring-2', 'ring-navy-500', 'bg-navy-50');
 
-    // Filter data
     const filtered = filterBySelectedMonth(users, monthIdx);
 
-    // Build modal overlay
     const overlay = document.createElement('div');
     overlay.className = 'bday-modal-overlay';
     overlay.innerHTML = `
@@ -301,14 +448,11 @@ export async function renderBirthday(container) {
     document.body.appendChild(overlay);
     activeModal = overlay;
 
-    // Trigger entrance animation
     requestAnimationFrame(() => overlay.classList.add('bday-modal-active'));
 
-    // Close handlers
     overlay.querySelector('#bday-modal-close-btn')?.addEventListener('click', closeBdayModal);
     overlay.querySelector('.bday-modal-backdrop')?.addEventListener('click', closeBdayModal);
 
-    // Close on Escape key
     const onEsc = (ev) => { if (ev.key === 'Escape') closeBdayModal(); };
     document.addEventListener('keydown', onEsc);
     overlay._escHandler = onEsc;
@@ -316,21 +460,14 @@ export async function renderBirthday(container) {
 
   function closeBdayModal() {
     if (!activeModal) return;
-
-    // Remove ESC listener
     if (activeModal._escHandler) document.removeEventListener('keydown', activeModal._escHandler);
-
-    // Exit animation
     activeModal.classList.add('bday-modal-closing');
     activeModal.classList.remove('bday-modal-active');
     setTimeout(() => {
       activeModal?.remove();
       activeModal = null;
     }, 250);
-
     selectedMonth = -1;
-
-    // Reset grid highlights
     const currentMonth = new Date().getMonth();
     monthGrid?.querySelectorAll('.bday-month-card').forEach(c => {
       c.classList.remove('ring-2', 'ring-navy-500', 'bg-navy-50');
@@ -353,7 +490,6 @@ function renderBirthdayCard(u, showFullDate = false) {
     ? new Date(u.dateOfBirth).toLocaleDateString('en-IN', { day: 'numeric', month: 'long' })
     : '';
 
-  // Badge logic
   let badgeClass = 'bg-cream-100 text-gray-500';
   let badgeText = `${u.daysUntil} days`;
 
@@ -387,7 +523,7 @@ function renderBirthdayCard(u, showFullDate = false) {
   `;
 }
 
-// ===== ENHANCED WISH MODAL (for friends) =====
+// ===== WISH MODAL (for friends — message only, NO points) =====
 
 function showWishModal(userId, userName) {
   const modal = router.openModal('', { title: `🎂 Wish ${userName}` });
@@ -398,22 +534,6 @@ function showWishModal(userId, userName) {
         <textarea id="wish-text" rows="3" placeholder="Write your birthday wishes..."
           class="w-full px-4 py-3 border border-gray-200 rounded-2xl text-sm text-navy-800 placeholder:text-gray-400 focus:outline-none focus:border-navy-500 resize-none bg-white font-handwriting text-base"></textarea>
       </div>
-
-      <!-- Points Toggle -->
-      <div class="flex items-center justify-between p-3 rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200">
-        <div class="flex items-center gap-2">
-          <span class="text-lg">🎁</span>
-          <div>
-            <p class="text-sm font-semibold text-navy-800">Send +5 Birthday Points</p>
-            <p class="text-[10px] text-gray-400">Gift points to ${sanitizeHTML(userName)}</p>
-          </div>
-        </div>
-        <label class="bday-toggle-switch">
-          <input type="checkbox" id="send-points-toggle" checked>
-          <span class="bday-toggle-slider"></span>
-        </label>
-      </div>
-
       <div class="flex gap-2">
         <button id="cancel-wish" class="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-500 hover:bg-gray-50 transition-colors">Cancel</button>
         <button id="submit-wish" class="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-navy-500 to-navy-600 text-white text-sm font-semibold shadow-md hover:shadow-lg transition-all">Send Wish 🎂</button>
@@ -421,14 +541,10 @@ function showWishModal(userId, userName) {
     </div>
   `;
 
-  // Cancel button
   modal.body.querySelector('#cancel-wish')?.addEventListener('click', () => modal.close());
 
-  // Submit wish
   modal.body.querySelector('#submit-wish')?.addEventListener('click', async () => {
     const text = modal.body.querySelector('#wish-text')?.value.trim();
-    const sendPoints = modal.body.querySelector('#send-points-toggle')?.checked;
-
     if (!text) { showToast('Write something!', 'warning'); return; }
 
     const submitBtn = modal.body.querySelector('#submit-wish');
@@ -437,6 +553,20 @@ function showWishModal(userId, userName) {
     try {
       const currentYear = new Date().getFullYear();
 
+      // Check for duplicate wish from same user this year
+      const dupeQ = query(
+        collection(db, 'birthdays'),
+        where('targetUserId', '==', userId),
+        where('authorId', '==', authManager.currentUser.uid),
+        where('year', '==', currentYear)
+      );
+      const dupeSnap = await getDocs(dupeQ);
+      if (!dupeSnap.empty) {
+        showToast('You already sent a wish!', 'info');
+        modal.close();
+        return;
+      }
+
       // Save wish to birthdays collection
       await addDoc(collection(db, 'birthdays'), {
         targetUserId: userId,
@@ -444,58 +574,16 @@ function showWishModal(userId, userName) {
         authorName: authManager.userData?.fullName || 'Unknown',
         authorPhoto: authManager.userData?.profilePic || '',
         message: text,
-        pointsSent: sendPoints ? 5 : 0,
         year: currentYear,
         createdAt: serverTimestamp()
       });
 
-      // Send notification — birthday wish
+      // Send notification
       await createNotification('birthday_wish', userId, {
         message: `❤️ New Birthday Wish from ${authManager.userData?.fullName || 'Someone'}`
       });
 
-      // Handle gift points
-      if (sendPoints) {
-        // Check for duplicate gift points
-        const dupeQ = query(
-          collection(db, 'birthdayPoints'),
-          where('senderId', '==', authManager.currentUser.uid),
-          where('targetUserId', '==', userId),
-          where('year', '==', currentYear),
-          where('type', '==', 'birthday_gift')
-        );
-        const dupeSnap = await getDocs(dupeQ);
-
-        if (dupeSnap.empty) {
-          // Award +5 gift points
-          await addDoc(collection(db, 'birthdayPoints'), {
-            type: 'birthday_gift',
-            targetUserId: userId,
-            senderId: authManager.currentUser.uid,
-            senderName: authManager.userData?.fullName || 'Unknown',
-            points: 5,
-            year: currentYear,
-            createdAt: serverTimestamp()
-          });
-
-          // Increment target user's total points
-          await updateDoc(doc(db, 'users', userId), {
-            points: increment(5)
-          });
-
-          // Send notification — gift points
-          await createNotification('friend_bonus', userId, {
-            message: `🎁 ${authManager.userData?.fullName || 'Someone'} sent you +5 Birthday Points`
-          });
-
-          showToast('🎉 Birthday points sent successfully!', 'success');
-        } else {
-          showToast('Wishes sent! 🎈 (Points already gifted earlier)', 'success');
-        }
-      } else {
-        showToast('Wishes sent! 🎈', 'success');
-      }
-
+      showToast('🎉 Wishes sent!', 'success');
       modal.close();
     } catch (e) {
       console.error('Send wish error:', e);
@@ -505,10 +593,10 @@ function showWishModal(userId, userName) {
   });
 }
 
-// ===== VIEW WISHES MODAL (for birthday person) =====
+// ===== VIEW WISHES MODAL (birthday person) =====
 
 function showViewWishesModal(userId, userName) {
-  const modal = router.openModal('', { title: `❤️ Birthday Wishes` });
+  const modal = router.openModal('', { title: '❤️ Birthday Wishes' });
   modal.body.innerHTML = `
     <div class="p-4">
       <div class="text-center mb-4">
@@ -527,16 +615,16 @@ function showViewWishesModal(userId, userName) {
   const listContainer = modal.body.querySelector('#wishes-list-container');
   const currentYear = new Date().getFullYear();
 
-  // Real-time listener for wishes
-  try {
-    const q = query(
-      collection(db, 'birthdays'),
-      where('targetUserId', '==', userId),
-      where('year', '==', currentYear),
-      orderBy('createdAt', 'desc')
-    );
+  // Use getDocs instead of onSnapshot to avoid infinite loading from index issues
+  (async () => {
+    try {
+      const q = query(
+        collection(db, 'birthdays'),
+        where('targetUserId', '==', userId),
+        where('year', '==', currentYear)
+      );
+      const snap = await getDocs(q);
 
-    const unsub = onSnapshot(q, (snap) => {
       if (snap.empty) {
         listContainer.innerHTML = `
           <div class="text-center py-8">
@@ -551,6 +639,13 @@ function showViewWishesModal(userId, userName) {
       const wishes = [];
       snap.forEach(d => wishes.push({ id: d.id, ...d.data() }));
 
+      // Sort by createdAt descending (manual sort since no orderBy to avoid index requirement)
+      wishes.sort((a, b) => {
+        const ta = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0;
+        const tb = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
+        return tb - ta;
+      });
+
       listContainer.innerHTML = `
         <div class="text-center mb-3">
           <span class="text-xs px-3 py-1 rounded-full bg-pink-50 text-pink-600 font-semibold">
@@ -559,7 +654,6 @@ function showViewWishesModal(userId, userName) {
         </div>
         ${wishes.map((w, i) => {
           const time = w.createdAt?.toDate ? timeAgo(w.createdAt.toDate()) : 'just now';
-          const pointsBadge = w.pointsSent ? `<span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 font-semibold">🎁 +${w.pointsSent} pts</span>` : '';
           return `
             <div class="card p-4 border border-pink-100 hover:border-pink-200 transition-all" style="animation: msgSlideIn 0.3s ease-out ${i * 0.08}s both;">
               <div class="flex items-start gap-3">
@@ -567,11 +661,8 @@ function showViewWishesModal(userId, userName) {
                   ? `<img src="${w.authorPhoto}" class="w-10 h-10 rounded-full object-cover border-2 border-pink-200 shadow-sm flex-shrink-0" alt=""/>`
                   : `<div class="w-10 h-10 rounded-full bg-gradient-to-br from-pink-400 to-rose-500 text-white flex items-center justify-center text-sm font-bold shadow-sm flex-shrink-0">${(w.authorName || '?')[0]}</div>`}
                 <div class="flex-1 min-w-0">
-                  <div class="flex items-center gap-2 mb-1">
-                    <p class="text-sm font-semibold text-navy-800">${sanitizeHTML(w.authorName || 'Unknown')} ❤️</p>
-                    ${pointsBadge}
-                  </div>
-                  <p class="text-sm text-navy-700 font-handwriting leading-relaxed">"${sanitizeHTML(w.message)}"</p>
+                  <p class="text-sm font-semibold text-navy-800">${sanitizeHTML(w.authorName || 'Unknown')} ❤️</p>
+                  <p class="text-sm text-navy-700 font-handwriting leading-relaxed mt-1">"${sanitizeHTML(w.message)}"</p>
                   <p class="text-[10px] text-gray-400 mt-2 flex items-center gap-1">
                     <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                     ${time}
@@ -582,45 +673,55 @@ function showViewWishesModal(userId, userName) {
           `;
         }).join('')}
       `;
-    });
-
-    _activeListeners.push(unsub);
-  } catch (e) {
-    console.error('View wishes error:', e);
-    listContainer.innerHTML = `
-      <div class="text-center py-6">
-        <p class="text-sm text-red-400">Failed to load wishes</p>
-      </div>
-    `;
-  }
+    } catch (e) {
+      console.error('View wishes error:', e);
+      listContainer.innerHTML = `
+        <div class="text-center py-6">
+          <div class="text-3xl mb-2">😕</div>
+          <p class="text-sm text-gray-500">Could not load wishes</p>
+          <p class="text-[10px] text-gray-400 mt-1">Try again later</p>
+        </div>
+      `;
+    }
+  })();
 }
 
 // ===== LOAD WISHES PREVIEW (shown below birthday banner) =====
 
-async function loadWishesPreview(container, userId) {
+function loadWishesPreview(container, userId) {
   const wishesEl = container.querySelector(`#wishes-${userId}`);
   if (!wishesEl) return;
 
-  try {
-    const q = query(
-      collection(db, 'birthdays'),
-      where('targetUserId', '==', userId),
-      where('year', '==', new Date().getFullYear()),
-      orderBy('createdAt', 'desc')
-    );
-    const unsub = onSnapshot(q, (snap) => {
+  // Use getDocs to avoid Firestore index issues causing infinite loading
+  (async () => {
+    try {
+      const q = query(
+        collection(db, 'birthdays'),
+        where('targetUserId', '==', userId),
+        where('year', '==', new Date().getFullYear())
+      );
+      const snap = await getDocs(q);
+
       if (snap.empty) {
         wishesEl.innerHTML = '<p class="text-xs text-gray-400">Be the first to wish!</p>';
         return;
       }
-      wishesEl.innerHTML = `<p class="text-xs text-gray-500 mb-2">💕 ${snap.size} wish${snap.size !== 1 ? 'es' : ''} received!</p>` +
-        [...snap.docs].slice(0, 3).map(d => {
-          const w = d.data();
-          return `<p class="text-xs text-gray-600"><span class="font-semibold">${sanitizeHTML(w.authorName)}</span>: ${sanitizeHTML(w.message)}</p>`;
-        }).join('');
-    });
-    _activeListeners.push(unsub);
-  } catch (e) { }
+
+      const docs = [...snap.docs].map(d => d.data());
+      docs.sort((a, b) => {
+        const ta = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0;
+        const tb = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
+        return tb - ta;
+      });
+
+      wishesEl.innerHTML = `<p class="text-xs text-gray-500 mb-2">💕 ${docs.length} wish${docs.length !== 1 ? 'es' : ''} received!</p>` +
+        docs.slice(0, 3).map(w =>
+          `<p class="text-xs text-gray-600"><span class="font-semibold">${sanitizeHTML(w.authorName)}</span>: ${sanitizeHTML(w.message)}</p>`
+        ).join('');
+    } catch (e) {
+      wishesEl.innerHTML = '<p class="text-xs text-gray-400">Be the first to wish!</p>';
+    }
+  })();
 }
 
 // ===== CONFETTI =====

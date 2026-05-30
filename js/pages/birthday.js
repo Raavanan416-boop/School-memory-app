@@ -294,7 +294,6 @@ export async function renderBirthday(container) {
                     </button>
                   `}
                 </div>
-                ${isMe ? `<div class="mt-3 wishes-preview" id="wishes-${u.id}"></div>` : ''}
               </div>
             </div>
           `}).join('')}
@@ -380,12 +379,8 @@ export async function renderBirthday(container) {
     });
   });
 
-  // Load wishes preview ONLY for the birthday person (privacy)
+  // Confetti for today's birthdays
   todayBirthdays.forEach(u => {
-    // Only load wish data for the birthday person viewing their own card
-    if (u.id === currentUserId) {
-      loadWishesPreview(container, u.id);
-    }
     const confettiBox = container.querySelector(`#bday-confetti-${u.id}`);
     if (confettiBox) spawnConfetti(confettiBox);
   });
@@ -689,43 +684,7 @@ function showViewWishesModal(userId, userName) {
   })();
 }
 
-// ===== LOAD WISHES PREVIEW (shown below birthday banner) =====
 
-function loadWishesPreview(container, userId) {
-  const wishesEl = container.querySelector(`#wishes-${userId}`);
-  if (!wishesEl) return;
-
-  // Use getDocs to avoid Firestore index issues causing infinite loading
-  (async () => {
-    try {
-      const q = query(
-        collection(db, 'birthdays'),
-        where('targetUserId', '==', userId),
-        where('year', '==', new Date().getFullYear())
-      );
-      const snap = await getDocs(q);
-
-      if (snap.empty) {
-        wishesEl.innerHTML = '<p class="text-xs text-gray-400">Be the first to wish!</p>';
-        return;
-      }
-
-      const docs = [...snap.docs].map(d => d.data());
-      docs.sort((a, b) => {
-        const ta = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0;
-        const tb = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
-        return tb - ta;
-      });
-
-      wishesEl.innerHTML = `<p class="text-xs text-gray-500 mb-2">💕 ${docs.length} wish${docs.length !== 1 ? 'es' : ''} received!</p>` +
-        docs.slice(0, 3).map(w =>
-          `<p class="text-xs text-gray-600"><span class="font-semibold">${sanitizeHTML(w.authorName)}</span>: ${sanitizeHTML(w.message)}</p>`
-        ).join('');
-    } catch (e) {
-      wishesEl.innerHTML = '<p class="text-xs text-gray-400">Be the first to wish!</p>';
-    }
-  })();
-}
 
 // ===== CONFETTI =====
 

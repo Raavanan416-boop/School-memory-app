@@ -112,9 +112,11 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }
 
-    // Birthday wishes
+    // Birthday wishes — private: only sender or receiver can read
     match /birthdays/{wishId} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated()
+        && (resource.data.authorId == request.auth.uid
+            || resource.data.targetUserId == request.auth.uid);
       allow create: if isAuthenticated()
         && request.resource.data.authorId == request.auth.uid;
     }

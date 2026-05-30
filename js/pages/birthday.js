@@ -288,13 +288,13 @@ export async function renderBirthday(container) {
                       🎁 Gift 5 Birthday Points to a Friend
                     </button>
                   ` : `
-                    <!-- Not Birthday Person: Send Wish only -->
+                    <!-- Not Birthday Person: Send Wish only (no wish data shown) -->
                     <button class="px-5 py-2.5 bg-navy-500 text-white rounded-full text-sm font-semibold send-wish-btn" data-uid="${u.id}" data-name="${sanitizeHTML(u.fullName || '')}">
                       🎂 Send Wish
                     </button>
                   `}
                 </div>
-                <div class="mt-3 wishes-preview" id="wishes-${u.id}"></div>
+                ${isMe ? `<div class="mt-3 wishes-preview" id="wishes-${u.id}"></div>` : ''}
               </div>
             </div>
           `}).join('')}
@@ -380,9 +380,12 @@ export async function renderBirthday(container) {
     });
   });
 
-  // Load wishes preview for today's birthdays
+  // Load wishes preview ONLY for the birthday person (privacy)
   todayBirthdays.forEach(u => {
-    loadWishesPreview(container, u.id);
+    // Only load wish data for the birthday person viewing their own card
+    if (u.id === currentUserId) {
+      loadWishesPreview(container, u.id);
+    }
     const confettiBox = container.querySelector(`#bday-confetti-${u.id}`);
     if (confettiBox) spawnConfetti(confettiBox);
   });

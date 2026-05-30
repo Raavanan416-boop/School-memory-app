@@ -595,67 +595,417 @@ export async function renderProfile(container, data = null) {
 
 }
 
-// ===== HIDDEN MODERATION PANEL (Owner-only) =====
+// ===== HIDDEN OWNER CONTROL SYSTEM (Owner-only) =====
+// Premium multi-step flow: Choose Action → Select User → Edit → Save
+let _ownerUsersCache = null;
+
 async function showHiddenModPanel() {
   if (!authManager.isOwner) return;
 
+  // Vibrate on open
+  if (navigator.vibrate) navigator.vibrate([30, 50, 30]);
+
+  // Load all users
+  let allUsers = [];
+  if (_ownerUsersCache) {
+    allUsers = _ownerUsersCache;
+  } else {
+    try {
+      const snap = await getDocs(collection(db, 'users'));
+      snap.forEach(d => allUsers.push({ id: d.id, ...d.data() }));
+      _ownerUsersCache = allUsers;
+      // Refresh cache after 60s
+      setTimeout(() => { _ownerUsersCache = null; }, 60000);
+    } catch (e) { console.error('Failed to load users:', e); }
+  }
+
+  // State
+  let currentStep = 1; // 1=action, 2=user, 3=edit
+  let selectedAction = null;
+  let selectedUser = null;
+
+  const ACTION_OPTIONS = [
+    { key: 'dateOfBirth', icon: '🎂', label: 'Date of Birth', desc: 'Fix incorrect birthday', inputType: 'date' },
+    { key: 'rollNumber', icon: '🔢', label: 'Roll Number', desc: 'Correct roll number', inputType: 'text' },
+    { key: 'fullName', icon: '✏️', label: 'Display Name', desc: 'Update user\'s name', inputType: 'text' },
+    { key: 'profilePic', icon: '📷', label: 'Profile Image', desc: 'Reset profile photo', inputType: 'reset' },
+    { key: 'joinedYear', icon: '🏫', label: 'School Join Year', desc: 'Fix joining year', inputType: 'text' },
+    { key: 'endYear', icon: '🎓', label: 'School End Year', desc: 'Fix graduation year', inputType: 'text' },
+    { key: 'nickname', icon: '🏷️', label: 'Username / Nickname', desc: 'Change nickname', inputType: 'text' },
+    { key: 'recovery', icon: '🔐', label: 'Account Recovery', desc: 'Reset account flags', inputType: 'recovery' }
+  ];
+
+  // Create overlay
   const overlay = document.createElement('div');
-  overlay.className = 'mod-panel-overlay';
+  overlay.className = 'oc-overlay';
+
+  function renderStep1() {
+    return `
+      <div class="oc-step oc-step-enter" data-step="1">
+        <div class="oc-header">
+          <div class="oc-header-glow"></div>
+          <div class="oc-shield">🛡️</div>
+          <h2 class="oc-title">Owner Controls</h2>
+          <p class="oc-subtitle">What do you want to change?</p>
+        </div>
+        <div class="oc-options-grid">
+          ${ACTION_OPTIONS.map(opt => `
+            <button class="oc-option-card" data-action="${opt.key}">
+              <div class="oc-option-icon">${opt.icon}</div>
+              <div class="oc-option-info">
+                <span class="oc-option-label">${opt.label}</span>
+                <span class="oc-option-desc">${opt.desc}</span>
+              </div>
+              <svg class="oc-option-arrow" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+            </button>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderStep2() {
+    const act = ACTION_OPTIONS.find(a => a.key === selectedAction);
+    return `
+      <div class="oc-step oc-step-enter" data-step="2">
+        <div class="oc-step-header">
+          <button class="oc-back-btn" data-goto="1">
+            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/></svg>
+          </button>
+          <div class="oc-step-tag">${act?.icon || '⚙️'} ${act?.label || 'Change'}</div>
+          <div style="width:36px"></div>
+        </div>
+        <p class="oc-step-instruction">Select the user to update</p>
+        <div class="oc-search-box">
+          <svg class="oc-search-icon" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input type="text" class="oc-search-input" id="oc-user-search" placeholder="Search by name or roll number..." autocomplete="off"/>
+        </div>
+        <div class="oc-user-list" id="oc-user-list">
+          ${renderUserList(allUsers)}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderUserList(users) {
+    if (!users.length) return '<p class="oc-empty-msg">No users found</p>';
+    return users.map(u => `
+      <button class="oc-user-card" data-uid="${u.id}">
+        <div class="oc-user-avatar-wrap">
+          ${u.profilePic
+            ? `<img src="${u.profilePic}" class="oc-user-avatar" alt=""/>`
+            : `<div class="oc-user-avatar oc-user-avatar-placeholder">${(u.fullName || '?')[0].toUpperCase()}</div>`}
+          <div class="oc-user-status ${u.online ? 'online' : ''}"></div>
+        </div>
+        <div class="oc-user-info">
+          <span class="oc-user-name">${sanitizeHTML(u.fullName || 'Unknown')}</span>
+          <span class="oc-user-detail">${u.rollNumber ? 'Roll: ' + sanitizeHTML(u.rollNumber) : sanitizeHTML(u.email || '')}</span>
+        </div>
+        <svg class="oc-user-arrow" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+      </button>
+    `).join('');
+  }
+
+  function renderStep3() {
+    const act = ACTION_OPTIONS.find(a => a.key === selectedAction);
+    const currentValue = selectedUser[selectedAction] || '';
+
+    let inputHTML = '';
+    if (act.inputType === 'date') {
+      inputHTML = `
+        <div class="oc-field-group">
+          <label class="oc-field-label">Current Value</label>
+          <div class="oc-field-current">${currentValue || 'Not set'}</div>
+        </div>
+        <div class="oc-field-group">
+          <label class="oc-field-label">New ${act.label}</label>
+          <input type="date" class="oc-field-input" id="oc-edit-value" value="${currentValue}"/>
+        </div>
+      `;
+    } else if (act.inputType === 'reset') {
+      inputHTML = `
+        <div class="oc-field-group">
+          <label class="oc-field-label">Current Photo</label>
+          <div class="oc-current-photo">
+            ${selectedUser.profilePic
+              ? `<img src="${selectedUser.profilePic}" class="oc-photo-preview" alt=""/>`
+              : '<div class="oc-photo-placeholder">No photo</div>'}
+          </div>
+        </div>
+        <div class="oc-reset-warning">
+          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+          <span>This will remove the user's profile photo</span>
+        </div>
+        <input type="hidden" id="oc-edit-value" value="__RESET__"/>
+      `;
+    } else if (act.inputType === 'recovery') {
+      inputHTML = `
+        <div class="oc-field-group">
+          <label class="oc-field-label">Account Status</label>
+          <div class="oc-field-current">${selectedUser.flagged ? '⚠️ Flagged' : '✅ Normal'}</div>
+        </div>
+        <div class="oc-recovery-actions">
+          <label class="oc-recovery-item">
+            <input type="checkbox" id="oc-unflag" ${selectedUser.flagged ? 'checked' : ''}/> Remove flag from account
+          </label>
+          <label class="oc-recovery-item">
+            <input type="checkbox" id="oc-reset-bio"/> Reset bio
+          </label>
+          <label class="oc-recovery-item">
+            <input type="checkbox" id="oc-reset-nickname"/> Reset nickname
+          </label>
+        </div>
+        <input type="hidden" id="oc-edit-value" value="__RECOVERY__"/>
+      `;
+    } else {
+      inputHTML = `
+        <div class="oc-field-group">
+          <label class="oc-field-label">Current Value</label>
+          <div class="oc-field-current">${sanitizeHTML(currentValue) || 'Not set'}</div>
+        </div>
+        <div class="oc-field-group">
+          <label class="oc-field-label">New ${act.label}</label>
+          <input type="text" class="oc-field-input" id="oc-edit-value" value="${sanitizeHTML(currentValue)}" placeholder="Enter new value..." autocomplete="off"/>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="oc-step oc-step-enter" data-step="3">
+        <div class="oc-step-header">
+          <button class="oc-back-btn" data-goto="2">
+            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/></svg>
+          </button>
+          <div class="oc-step-tag">${act?.icon || '⚙️'} Edit ${act?.label || 'Field'}</div>
+          <div style="width:36px"></div>
+        </div>
+
+        <!-- Target user card -->
+        <div class="oc-target-user">
+          <div class="oc-target-avatar-wrap">
+            ${selectedUser.profilePic
+              ? `<img src="${selectedUser.profilePic}" class="oc-target-avatar" alt=""/>`
+              : `<div class="oc-target-avatar oc-target-avatar-placeholder">${(selectedUser.fullName || '?')[0].toUpperCase()}</div>`}
+          </div>
+          <div class="oc-target-info">
+            <span class="oc-target-name">${sanitizeHTML(selectedUser.fullName || 'Unknown')}</span>
+            <span class="oc-target-email">${sanitizeHTML(selectedUser.email || '')}</span>
+          </div>
+        </div>
+
+        <!-- Edit form -->
+        <div class="oc-edit-form">
+          ${inputHTML}
+        </div>
+
+        <button class="oc-save-btn" id="oc-save-btn">
+          <span class="oc-save-text">Save Changes</span>
+          <span class="oc-save-loader" style="display:none">
+            <span class="oc-spinner"></span> Saving...
+          </span>
+        </button>
+      </div>
+    `;
+  }
+
+  function navigateToStep(step) {
+    const contentEl = overlay.querySelector('.oc-content');
+    const currentStepEl = contentEl.querySelector('.oc-step');
+    if (currentStepEl) {
+      currentStepEl.classList.add('oc-step-exit');
+      currentStepEl.addEventListener('animationend', () => currentStepEl.remove(), { once: true });
+    }
+
+    currentStep = step;
+    let html = '';
+    switch (step) {
+      case 1: html = renderStep1(); break;
+      case 2: html = renderStep2(); break;
+      case 3: html = renderStep3(); break;
+    }
+    contentEl.insertAdjacentHTML('beforeend', html);
+    if (navigator.vibrate) navigator.vibrate(15);
+    bindStepEvents();
+  }
+
+  function bindStepEvents() {
+    // Back buttons
+    overlay.querySelectorAll('.oc-back-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const goto = parseInt(btn.dataset.goto);
+        navigateToStep(goto);
+      });
+    });
+
+    // Step 1: Action selection
+    overlay.querySelectorAll('.oc-option-card').forEach(card => {
+      card.addEventListener('click', () => {
+        selectedAction = card.dataset.action;
+        navigateToStep(2);
+      });
+    });
+
+    // Step 2: User search + selection
+    const searchInput = overlay.querySelector('#oc-user-search');
+    const userList = overlay.querySelector('#oc-user-list');
+    if (searchInput && userList) {
+      searchInput.addEventListener('input', () => {
+        const q = searchInput.value.toLowerCase().trim();
+        const filtered = allUsers.filter(u =>
+          (u.fullName || '').toLowerCase().includes(q) ||
+          (u.rollNumber || '').toLowerCase().includes(q) ||
+          (u.email || '').toLowerCase().includes(q)
+        );
+        userList.innerHTML = renderUserList(filtered);
+        // Re-bind user card clicks
+        bindUserCardClicks();
+      });
+      // Focus search
+      setTimeout(() => searchInput.focus(), 300);
+    }
+    bindUserCardClicks();
+
+    // Step 3: Save
+    const saveBtn = overlay.querySelector('#oc-save-btn');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', handleSave);
+    }
+  }
+
+  function bindUserCardClicks() {
+    overlay.querySelectorAll('.oc-user-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const uid = card.dataset.uid;
+        selectedUser = allUsers.find(u => u.id === uid);
+        if (selectedUser) navigateToStep(3);
+      });
+    });
+  }
+
+  async function handleSave() {
+    const saveBtn = overlay.querySelector('#oc-save-btn');
+    const saveTxt = saveBtn.querySelector('.oc-save-text');
+    const saveLoader = saveBtn.querySelector('.oc-save-loader');
+    saveBtn.disabled = true;
+    saveTxt.style.display = 'none';
+    saveLoader.style.display = 'inline-flex';
+
+    try {
+      const act = ACTION_OPTIONS.find(a => a.key === selectedAction);
+      const inputEl = overlay.querySelector('#oc-edit-value');
+      let updates = {};
+
+      if (act.inputType === 'reset') {
+        updates = { profilePic: '' };
+      } else if (act.inputType === 'recovery') {
+        const unflag = overlay.querySelector('#oc-unflag')?.checked;
+        const resetBio = overlay.querySelector('#oc-reset-bio')?.checked;
+        const resetNickname = overlay.querySelector('#oc-reset-nickname')?.checked;
+        if (unflag) { updates.flagged = false; updates.flaggedAt = ''; }
+        if (resetBio) updates.bio = '';
+        if (resetNickname) updates.nickname = '';
+        if (Object.keys(updates).length === 0) {
+          showToast('Select at least one option', 'warning');
+          saveBtn.disabled = false;
+          saveTxt.style.display = 'inline';
+          saveLoader.style.display = 'none';
+          return;
+        }
+      } else {
+        const val = inputEl?.value?.trim();
+        if (!val) {
+          showToast('Please enter a value', 'warning');
+          saveBtn.disabled = false;
+          saveTxt.style.display = 'inline';
+          saveLoader.style.display = 'none';
+          return;
+        }
+        updates[selectedAction] = val;
+      }
+
+      await authManager.ownerUpdateUser(selectedUser.id, updates);
+
+      // Update local cache
+      const cachedUser = _ownerUsersCache?.find(u => u.id === selectedUser.id);
+      if (cachedUser) Object.assign(cachedUser, updates);
+
+      // Show premium success popup
+      showOwnerSuccessPopup(act.label);
+
+      // Close panel after success
+      setTimeout(() => {
+        closePanel();
+      }, 1800);
+
+    } catch (err) {
+      console.error('Owner update error:', err);
+      showToast(err.message || 'Update failed — check permissions', 'error');
+      saveBtn.disabled = false;
+      saveTxt.style.display = 'inline';
+      saveLoader.style.display = 'none';
+    }
+  }
+
+  function showOwnerSuccessPopup(fieldName) {
+    if (navigator.vibrate) navigator.vibrate([50, 30, 80]);
+
+    const popup = document.createElement('div');
+    popup.className = 'oc-success-popup';
+    popup.innerHTML = `
+      <div class="oc-success-backdrop"></div>
+      <div class="oc-success-card">
+        <div class="oc-success-glow"></div>
+        <div class="oc-success-checkmark">
+          <svg width="48" height="48" fill="none" viewBox="0 0 48 48">
+            <circle cx="24" cy="24" r="22" stroke="url(#sg)" stroke-width="3" class="oc-success-circle"/>
+            <path d="M14 24.5l7 7 13-13" stroke="#4ade80" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="oc-success-check"/>
+            <defs><linearGradient id="sg" x1="0" y1="0" x2="48" y2="48"><stop stop-color="#4ade80"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs>
+          </svg>
+        </div>
+        <h3 class="oc-success-title">Changes Updated Successfully</h3>
+        <p class="oc-success-desc">${sanitizeHTML(fieldName)} has been updated</p>
+        <div class="oc-success-particles" id="oc-particles"></div>
+      </div>
+    `;
+    document.body.appendChild(popup);
+    requestAnimationFrame(() => popup.classList.add('active'));
+
+    // Spawn particles
+    const particleContainer = popup.querySelector('#oc-particles');
+    const sparkles = ['✨', '⭐', '💫', '🌟', '✦', '◆'];
+    for (let i = 0; i < 12; i++) {
+      const p = document.createElement('span');
+      p.className = 'oc-particle';
+      p.textContent = sparkles[i % sparkles.length];
+      const angle = (i / 12) * Math.PI * 2;
+      const dist = 60 + Math.random() * 50;
+      p.style.setProperty('--px', `${Math.cos(angle) * dist}px`);
+      p.style.setProperty('--py', `${Math.sin(angle) * dist - 20}px`);
+      p.style.animationDelay = `${i * 40}ms`;
+      particleContainer.appendChild(p);
+    }
+
+    setTimeout(() => {
+      popup.classList.remove('active');
+      setTimeout(() => popup.remove(), 400);
+    }, 2000);
+  }
+
+  function closePanel() {
+    overlay.classList.remove('active');
+    setTimeout(() => overlay.remove(), 400);
+  }
+
+  // Build initial layout
   overlay.innerHTML = `
-    <div class="mod-panel-backdrop"></div>
-    <div class="mod-panel-sheet">
-      <div class="mod-panel-handle"></div>
-      <div class="mod-panel-header">
-        <span class="mod-panel-tag">🛡 Tools</span>
-        <button class="mod-panel-close">✕</button>
-      </div>
-
-      <div class="mod-panel-section">
-        <p class="mod-panel-section-label">User Corrections</p>
-        <div class="mod-panel-grid">
-          <button class="mod-panel-btn" data-action="fix-dob">
-            <span>📅</span><span>Fix DOB</span>
-          </button>
-          <button class="mod-panel-btn" data-action="fix-roll">
-            <span>🔢</span><span>Fix Roll No.</span>
-          </button>
-          <button class="mod-panel-btn" data-action="reset-pic">
-            <span>🖼</span><span>Reset Photo</span>
-          </button>
-          <button class="mod-panel-btn" data-action="flag-account">
-            <span>⚠️</span><span>Flag Account</span>
-          </button>
-        </div>
-      </div>
-
-      <div class="mod-panel-section">
-        <p class="mod-panel-section-label">Content Moderation</p>
-        <div class="mod-panel-grid">
-          <button class="mod-panel-btn" data-action="remove-post">
-            <span>🗑</span><span>Remove Post</span>
-          </button>
-          <button class="mod-panel-btn" data-action="remove-comment">
-            <span>💬</span><span>Remove Comment</span>
-          </button>
-        </div>
-      </div>
-
-      <!-- User Directory (loaded dynamically) -->
-      <div class="mod-panel-section">
-        <p class="mod-panel-section-label">User Directory</p>
-        <div id="mod-user-list" class="mod-user-list">
-          <p style="color:#64748b;font-size:12px;text-align:center;padding:12px">Loading users...</p>
-        </div>
-      </div>
-
-      <!-- Action input area (hidden until action selected) -->
-      <div class="mod-panel-action-area" id="mod-action-area" style="display:none">
-        <p class="mod-action-title" id="mod-action-title">Action</p>
-        <input type="text" class="mod-action-input" id="mod-action-input" placeholder="Enter value"/>
-        <div class="flex gap-3 mt-3">
-          <button class="mod-action-cancel" id="mod-action-cancel">Cancel</button>
-          <button class="mod-action-confirm" id="mod-action-confirm">\u2705 Confirm</button>
-        </div>
+    <div class="oc-backdrop"></div>
+    <div class="oc-sheet">
+      <div class="oc-handle"></div>
+      <button class="oc-close-btn" id="oc-close-btn">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+      <div class="oc-content">
+        ${renderStep1()}
       </div>
     </div>
   `;
@@ -663,157 +1013,37 @@ async function showHiddenModPanel() {
   document.body.appendChild(overlay);
   requestAnimationFrame(() => overlay.classList.add('active'));
 
-  // Load user list
-  try {
-    const usersSnap = await getDocs(collection(db, 'users'));
-    const listEl = overlay.querySelector('#mod-user-list');
-    if (usersSnap.empty) {
-      listEl.innerHTML = '<p style="color:#64748b;font-size:12px;text-align:center">No users found</p>';
+  // Close handlers
+  overlay.querySelector('.oc-backdrop').addEventListener('click', closePanel);
+  overlay.querySelector('#oc-close-btn').addEventListener('click', closePanel);
+
+  // Swipe-to-close
+  const sheet = overlay.querySelector('.oc-sheet');
+  let touchStartY = 0;
+  let isDragging = false;
+  sheet.addEventListener('touchstart', (e) => {
+    touchStartY = e.touches[0].clientY;
+    isDragging = true;
+    sheet.style.transition = 'none';
+  }, { passive: true });
+  sheet.addEventListener('touchmove', (e) => {
+    if (!isDragging) return;
+    const dy = e.touches[0].clientY - touchStartY;
+    if (dy > 0) sheet.style.transform = `translateY(${dy}px)`;
+  }, { passive: true });
+  sheet.addEventListener('touchend', (e) => {
+    if (!isDragging) return;
+    isDragging = false;
+    sheet.style.transition = '';
+    const dy = (e.changedTouches?.[0]?.clientY || 0) - touchStartY;
+    if (dy > 100) {
+      closePanel();
     } else {
-      listEl.innerHTML = '';
-      usersSnap.forEach(d => {
-        const u = d.data();
-        const row = document.createElement('div');
-        row.className = 'mod-user-row';
-        row.innerHTML = `
-          <div class="mod-user-info">
-            <span class="mod-user-name">${sanitizeHTML(u.fullName || 'Unknown')}</span>
-            <span class="mod-user-email">${sanitizeHTML(u.email || '')}</span>
-          </div>
-          <button class="mod-copy-id-btn" data-uid="${d.id}">Copy ID</button>
-        `;
-        row.querySelector('.mod-copy-id-btn').addEventListener('click', () => {
-          navigator.clipboard.writeText(d.id).then(() => {
-            showToast(`ID copied: ${d.id.slice(0,8)}...`, 'success');
-          }).catch(() => {
-            showToast(d.id, 'success');
-          });
-        });
-        listEl.appendChild(row);
-      });
+      sheet.style.transform = '';
     }
-  } catch (e) {
-    console.log('Failed to load users:', e);
-  }
-
-
-  const close = () => {
-    overlay.classList.remove('active');
-    setTimeout(() => overlay.remove(), 300);
-  };
-
-  overlay.querySelector('.mod-panel-backdrop').addEventListener('click', close);
-  overlay.querySelector('.mod-panel-close').addEventListener('click', close);
-
-  // Current action state
-  let currentAction = null;
-  const actionArea = overlay.querySelector('#mod-action-area');
-  const actionTitle = overlay.querySelector('#mod-action-title');
-  const actionInput = overlay.querySelector('#mod-action-input');
-  const cancelBtn = overlay.querySelector('#mod-action-cancel');
-  const confirmBtn = overlay.querySelector('#mod-action-confirm');
-
-  const showActionInput = (title, placeholder, type = 'text') => {
-    actionArea.style.display = 'block';
-    actionTitle.textContent = title;
-    actionInput.placeholder = placeholder;
-    actionInput.type = type;
-    actionInput.value = '';
-    actionInput.focus();
-  };
-
-  cancelBtn.addEventListener('click', () => {
-    actionArea.style.display = 'none';
-    currentAction = null;
   });
 
-  // Handle action button clicks
-  overlay.querySelectorAll('.mod-panel-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const action = btn.dataset.action;
-      currentAction = action;
-
-      switch (action) {
-        case 'fix-dob':
-          showActionInput('Fix Date of Birth', 'Enter user ID, then new DOB', 'text');
-          actionInput.placeholder = 'userId:YYYY-MM-DD';
-          break;
-        case 'fix-roll':
-          showActionInput('Fix Roll Number', 'userId:newRollNumber', 'text');
-          break;
-        case 'reset-pic':
-          showActionInput('Reset Profile Photo', 'Enter user ID to reset', 'text');
-          break;
-        case 'flag-account':
-          showActionInput('Flag Account for Review', 'Enter user ID to flag', 'text');
-          break;
-        case 'remove-post':
-          showActionInput('Remove Post', 'Enter post ID to remove', 'text');
-          break;
-        case 'remove-comment':
-          showActionInput('Remove Comment', 'postId:commentId', 'text');
-          break;
-      }
-    });
-  });
-
-  // Handle confirm
-  confirmBtn.addEventListener('click', async () => {
-    const val = actionInput.value.trim();
-    if (!val) { showToast('Please enter a value', 'error'); return; }
-    confirmBtn.disabled = true;
-    confirmBtn.textContent = '⏳...';
-
-    try {
-      switch (currentAction) {
-        case 'fix-dob': {
-          const [uid, dob] = val.split(':');
-          if (!uid || !dob) throw new Error('Format: userId:YYYY-MM-DD');
-          await authManager.ownerUpdateUser(uid.trim(), { dateOfBirth: dob.trim() });
-          showToast('DOB updated', 'success');
-          break;
-        }
-        case 'fix-roll': {
-          const [uid, roll] = val.split(':');
-          if (!uid || !roll) throw new Error('Format: userId:rollNumber');
-          await authManager.ownerUpdateUser(uid.trim(), { rollNumber: roll.trim() });
-          showToast('Roll number updated', 'success');
-          break;
-        }
-        case 'reset-pic': {
-          await authManager.ownerUpdateUser(val, { profilePic: '' });
-          showToast('Profile photo reset', 'success');
-          break;
-        }
-        case 'flag-account': {
-          await authManager.ownerUpdateUser(val, { flagged: true, flaggedAt: new Date().toISOString() });
-          showToast('Account flagged for review', 'success');
-          break;
-        }
-        case 'remove-post': {
-          const { deleteDoc, doc } = await import('../firebase-config.js');
-          await deleteDoc(doc(db, 'posts', val));
-          showToast('Post removed', 'success');
-          break;
-        }
-        case 'remove-comment': {
-          const [postId, commentId] = val.split(':');
-          if (!postId || !commentId) throw new Error('Format: postId:commentId');
-          const { deleteDoc, doc } = await import('../firebase-config.js');
-          await deleteDoc(doc(db, 'posts', postId.trim(), 'comments', commentId.trim()));
-          showToast('Comment removed', 'success');
-          break;
-        }
-      }
-      actionArea.style.display = 'none';
-      currentAction = null;
-    } catch (err) {
-      console.error('Mod action error:', err);
-      showToast(err.message || 'Action failed', 'error');
-    }
-    confirmBtn.disabled = false;
-    confirmBtn.textContent = '✅ Confirm';
-  });
+  bindStepEvents();
 }
 
 // Export for secret route access

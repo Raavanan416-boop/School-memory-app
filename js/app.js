@@ -315,6 +315,10 @@ function buildAppShell() {
         const { destroyChat } = await import('./pages/chat.js').catch(() => ({}));
         if (destroyChat) destroyChat();
       }
+      if (page !== 'birthday') {
+        const { destroyBirthday } = await import('./pages/birthday.js').catch(() => ({}));
+        if (destroyBirthday) destroyBirthday();
+      }
     } catch(e) { /* non-critical cleanup */ }
   };
 

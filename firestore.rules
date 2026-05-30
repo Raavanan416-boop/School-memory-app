@@ -115,6 +115,12 @@ service cloud.firestore {
         && request.resource.data.authorId == request.auth.uid;
     }
 
+    // Birthday points (self-claim + friend gifts)
+    match /birthdayPoints/{docId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+    }
+
     // Games (scores, votes, etc.)
     match /games/{gameId} {
       allow read: if isAuthenticated();

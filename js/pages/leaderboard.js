@@ -30,19 +30,22 @@ export async function renderLeaderboard(container) {
   container.querySelector('#lb-back-btn')?.addEventListener('click', () => router.navigateBack());
 
   try {
-    const [usersSnap, postsSnap, pollsSnap, diariesSnap, capsulesSnap] = await Promise.all([
+    const [usersSnap, postsSnap, pollsSnap, diariesSnap, capsulesSnap, bdayPointsSnap] = await Promise.all([
       getDocs(collection(db, 'users')),
       getDocs(collection(db, 'posts')),
       getDocs(collection(db, 'polls')).catch(() => ({ forEach: () => {} })),
       getDocs(collection(db, 'diary')).catch(() => ({ forEach: () => {} })),
-      getDocs(collection(db, 'timecapsules')).catch(() => ({ forEach: () => {} }))
+      getDocs(collection(db, 'timecapsules')).catch(() => ({ forEach: () => {} })),
+      getDocs(collection(db, 'birthdayPoints')).catch(() => ({ forEach: () => {} }))
     ]);
 
+    let birthdayPointsDocs = [];
     usersSnap.forEach(d => users.push({ id: d.id, ...d.data() }));
     postsSnap.forEach(d => posts.push({ id: d.id, ...d.data() }));
     pollsSnap.forEach(d => polls.push({ id: d.id, ...d.data() }));
     diariesSnap.forEach(d => diaries.push({ id: d.id, ...d.data() }));
     capsulesSnap.forEach(d => capsules.push({ id: d.id, ...d.data() }));
+    bdayPointsSnap.forEach(d => birthdayPointsDocs.push({ id: d.id, ...d.data() }));
   } catch (e) {
     console.error('Leaderboard load error:', e);
   }
@@ -74,17 +77,12 @@ export async function renderLeaderboard(container) {
     const diaryPoints = userDiaries.length * (1 + Math.floor(Math.abs(Math.cos(user.id?.charCodeAt(0) || 1)) * 4));
     const capsulePoints = userCapsules.length * (1 + Math.floor(Math.abs(Math.sin((user.id?.charCodeAt(1) || 2) * 7)) * 4));
 
-    // Birthday bonus: +10 if today is their birthday
-    let birthdayBonus = 0;
-    if (user.dob) {
-      const today = new Date();
-      const dob = user.dob.toDate ? user.dob.toDate() : new Date(user.dob);
-      if (dob.getMonth() === today.getMonth() && dob.getDate() === today.getDate()) {
-        birthdayBonus = 10;
-      }
-    }
+    // Birthday points from birthdayPoints collection
+    const userBdayPointsReceived = birthdayPointsDocs
+      .filter(bp => bp.targetUserId === user.id)
+      .reduce((sum, bp) => sum + (bp.points || 0), 0);
 
-    const total = postPoints + likePoints + commentPoints + pollPoints + diaryPoints + capsulePoints + birthdayBonus;
+    const total = postPoints + likePoints + commentPoints + pollPoints + diaryPoints + capsulePoints + userBdayPointsReceived;
 
     // Activity badges
     const badges = [];
@@ -95,7 +93,7 @@ export async function renderLeaderboard(container) {
     if (totalComments >= 10) badges.push({ icon: '💬', name: 'Chatterbox' });
     if (userPolls.length >= 3) badges.push({ icon: '📊', name: 'Pollster' });
     if (userDiaries.length >= 5) badges.push({ icon: '📖', name: 'Storyteller' });
-    if (birthdayBonus > 0) badges.push({ icon: '🎂', name: 'Birthday Star' });
+    if (userBdayPointsReceived > 0) badges.push({ icon: '🎂', name: 'Birthday Star' });
 
     return {
       ...user,
@@ -105,7 +103,7 @@ export async function renderLeaderboard(container) {
       pollCount: userPolls.length,
       diaryCount: userDiaries.length,
       capsuleCount: userCapsules.length,
-      birthdayBonus,
+      birthdayPoints: userBdayPointsReceived,
       total,
       badges
     };
@@ -241,6 +239,7 @@ export async function renderLeaderboard(container) {
           <p>📖 Diary entry: <span class="font-semibold text-navy-600">+1–4 pts</span></p>
           <p>⏳ Time capsule: <span class="font-semibold text-navy-600">+1–4 pts</span></p>
           <p>🎂 Birthday bonus: <span class="font-semibold text-navy-600">+10 pts</span></p>
+          <p>🎁 Birthday gift from friend: <span class="font-semibold text-navy-600">+5 pts</span></p>
         </div>
       </div>
     </section>

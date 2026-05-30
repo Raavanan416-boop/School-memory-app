@@ -155,7 +155,8 @@ class NotificationManager {
       badge_suggestion: `${name} suggested a new title for you 🏷`,
       tag: `${name} tagged you in a memory 📸`,
       birthday_bonus: `You received birthday bonus points! 🎂✨`,
-      friend_bonus: `${name} sent you birthday bonus points! 🎁`,
+      birthday_wish: `❤️ New Birthday Wish from ${name}`,
+      friend_bonus: `${name} sent you +5 Birthday Points! 🎁`,
       miss_you: `${name} misses you ❤️🥺`
     };
     return messages[notif.type] || notif.message || 'New notification';
@@ -216,7 +217,7 @@ class NotificationManager {
       case 'poll_created': return '/#polls';
       case 'diary_entry': return '/#diary';
       case 'time_capsule_unlock': return '/#timecapsule';
-      case 'birthday': return '/#home';
+      case 'birthday': case 'birthday_wish': case 'birthday_bonus': case 'friend_bonus': return '/#birthday';
       case 'miss_you': return '/#profile';
       default: return '/';
     }
@@ -239,6 +240,9 @@ class NotificationManager {
         break;
       case 'time_capsule_unlock':
         if (router) router.navigate('timecapsule');
+        break;
+      case 'birthday': case 'birthday_wish': case 'birthday_bonus': case 'friend_bonus':
+        if (router) router.navigate('birthday');
         break;
       case 'miss_you':
         if (router) router.navigate('profile', { userId: notif.fromId });

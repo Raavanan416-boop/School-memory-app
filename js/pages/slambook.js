@@ -1,4 +1,4 @@
-import { db, doc, getDoc, getDocs, collection, query, where, orderBy, addDoc, onSnapshot, serverTimestamp, updateDoc, deleteDoc } from '../firebase-config.js';
+import { db, doc, getDoc, getDocs, collection, query, where, orderBy, addDoc, onSnapshot, serverTimestamp, updateDoc, deleteDoc, limit } from '../firebase-config.js';
 import { authManager, awardPoints } from '../auth.js';
 import { router } from '../router.js';
 import { showToast, sanitizeHTML, timeAgo } from '../utils.js';

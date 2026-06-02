@@ -513,7 +513,11 @@ window.openOwnerUserEdit = async (uid) => {
 };
 
 window.executeResetLeaderboard = async function(container) {
-  if (!confirm('EXTREME WARNING:\\n\\nThis will reset ALL users points back to 0 visually.\\nAre you absolutely sure?')) return;
+  if (!authManager.isOwner) {
+    showToast('Permission denied', 'error');
+    return;
+  }
+  if (!confirm('⚠ Reset all user points?\n\nThis will set all leaderboard points to zero.')) return;
   
   const btn = container.querySelector('#btn-reset-leaderboard');
   const ogText = btn.textContent;
@@ -521,39 +525,20 @@ window.executeResetLeaderboard = async function(container) {
   btn.textContent = 'EXECUTING RESET...';
 
   try {
-    const [postsSnap, pollsSnap, diariesSnap, capsulesSnap, bdayPointsSnap] = await Promise.all([
-      getDocs(collection(db, 'posts')),
-      getDocs(collection(db, 'polls')).catch(()=>({forEach:()=>{}})),
-      getDocs(collection(db, 'diary')).catch(()=>({forEach:()=>{}})),
-      getDocs(collection(db, 'timecapsules')).catch(()=>({forEach:()=>{}})),
-      getDocs(collection(db, 'birthdayPoints')).catch(()=>({forEach:()=>{}}))
-    ]);
-
-    const posts = []; postsSnap.forEach(d=>posts.push(d.data()));
-    const polls = []; pollsSnap.forEach(d=>polls.push(d.data()));
-    const diaries = []; diariesSnap.forEach(d=>diaries.push(d.data()));
-    const capsules = []; capsulesSnap.forEach(d=>capsules.push(d.data()));
-    const bdayPoints = []; bdayPointsSnap.forEach(d=>bdayPoints.push(d.data()));
+    console.log('Leaderboard Reset Started');
+    const usersSnap = await getDocs(collection(db, 'users'));
+    console.log(`Users Found: ${usersSnap.size}`);
+    console.log('Resetting Points...');
 
     const batch = writeBatch(db);
-    allUsers.forEach(user => {
-      const uPosts = posts.filter(p => p.authorId === user.id);
-      const likes = uPosts.reduce((sum, p) => sum + (p.likes?.length || 0), 0);
-      let comments = 0;
-      posts.forEach(p => {
-        if (p.comments) comments += p.comments.filter(c => c.userId === user.id || c.authorId === user.id).length;
-      });
-      const uPolls = polls.filter(p => p.authorId === user.id || p.createdBy === user.id).length;
-      const uDiaries = diaries.filter(d => d.authorId === user.id || d.userId === user.id).length;
-      const uCapsules = capsules.filter(c => c.authorId === user.id || c.createdBy === user.id).length;
-      const bday = bdayPoints.filter(bp => bp.targetUserId === user.id).reduce((s, bp) => s + (bp.points || 0), 0);
-
-      const total = (uPosts.length * 20) + (likes * 10) + (comments * 5) + uPolls + uDiaries + uCapsules + bday;
-      
-      batch.update(doc(db, 'users', user.id), { pointsOffset: total });
+    usersSnap.forEach(userDoc => {
+      batch.update(doc(db, 'users', userDoc.id), { points: 0 });
     });
+    
     await batch.commit();
-    showToast('Leaderboard has been globally reset.', 'success');
+    console.log('Batch Commit Success');
+    console.log('Leaderboard Updated');
+    showToast('✅ Leaderboard Reset Successfully', 'success');
   } catch (e) {
     console.error(e);
     showToast('Failed to reset leaderboard', 'error');

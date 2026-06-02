@@ -20,6 +20,7 @@ export function destroyDiary() {
 }
 
 export async function renderDiary(container) {
+  router.registerDestroy('diary', destroyDiary);
   destroyDiary();
 
   container.innerHTML = `

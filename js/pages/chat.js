@@ -33,6 +33,7 @@ export function destroyChat() {
 let chatContainer = null;
 
 export async function renderChat(container) {
+  router.registerDestroy('chat', destroyChat);
   destroyChat();
   chatContainer = container;
 
@@ -414,46 +415,67 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
     });
   }
 
-  // Load messages with auto-scroll
+  // Load messages with auto-scroll and pagination
   const msgContainer = chatView.querySelector('#chat-messages') || document.querySelector('#chat-messages');
   let isFirstLoad = true;
+  let messageLimit = 30;
+  let chatObserver = null;
   
-  try {
-    const q = query(collection(db, 'chats', chatId, 'messages'), orderBy('createdAt', 'asc'), limit(100));
-    unsubMessages = onSnapshot(q, (snap) => {
-      msgContainer.innerHTML = '';
-      if (snap.empty) {
-        msgContainer.innerHTML = `
-          <div class="flex items-center justify-center h-full">
-            <div class="text-center">
-              <div class="text-4xl mb-2">👋</div>
-              <p class="text-sm text-gray-400">Start the conversation!</p>
-            </div>
-          </div>`;
-        return;
-      }
-      let lastDate = '';
-      let lastSender = '';
-      snap.forEach(d => {
-        const msg = d.data();
-        const msgId = d.id;
-        const isMine = msg.senderId === authManager.currentUser?.uid;
-        const msgTime = msg.createdAt?.toDate ? msg.createdAt.toDate() : new Date();
-
-        // Skip messages hidden for current user (delete for me)
-        // Check both hiddenFor (new) and deletedFor (old) for backwards compatibility
-        const myUid = authManager.currentUser?.uid;
-        if (msg.hiddenFor?.includes(myUid) || msg.deletedFor?.includes(myUid)) return;
-
-        // Date separator
-        const dateStr = msgTime.toLocaleDateString();
-        if (dateStr !== lastDate) {
-          lastDate = dateStr;
-          msgContainer.innerHTML += `
-            <div class="flex items-center justify-center my-3">
-              <span class="text-[10px] text-gray-400 bg-cream-200/80 px-3 py-1 rounded-full backdrop-blur-sm">${dateStr === new Date().toLocaleDateString() ? 'Today' : dateStr}</span>
+  const setupMessageListener = () => {
+    if (unsubMessages) unsubMessages();
+    try {
+      // Use desc to get newest messages, then reverse below for UI
+      const q = query(collection(db, 'chats', chatId, 'messages'), orderBy('createdAt', 'desc'), limit(messageLimit));
+      unsubMessages = onSnapshot(q, (snap) => {
+        // Save scroll position for smooth pagination (load older)
+        const oldHeight = msgContainer.scrollHeight;
+        const oldScroll = msgContainer.scrollTop;
+        
+        msgContainer.innerHTML = '';
+        if (snap.empty) {
+          msgContainer.innerHTML = `
+            <div class="flex items-center justify-center h-full">
+              <div class="text-center">
+                <div class="text-4xl mb-2">👋</div>
+                <p class="text-sm text-gray-400">Start the conversation!</p>
+              </div>
             </div>`;
+          return;
         }
+
+        // Pagination observer target
+        if (snap.size >= messageLimit) {
+          const topEl = document.createElement('div');
+          topEl.id = 'chat-top-observer';
+          topEl.className = 'py-3 text-center text-[10px] text-navy-300 font-semibold uppercase tracking-wider';
+          topEl.textContent = 'Loading older messages...';
+          msgContainer.appendChild(topEl);
+        }
+
+        let lastDate = '';
+        let lastSender = '';
+        
+        const docs = [];
+        snap.forEach(d => docs.push(d));
+        docs.reverse(); // Render oldest first (top to bottom)
+
+        docs.forEach(d => {
+          const msg = d.data();
+          const msgId = d.id;
+          const isMine = msg.senderId === authManager.currentUser?.uid;
+          const msgTime = msg.createdAt?.toDate ? msg.createdAt.toDate() : new Date();
+
+          const myUid = authManager.currentUser?.uid;
+          if (msg.hiddenFor?.includes(myUid) || msg.deletedFor?.includes(myUid)) return;
+
+          const dateStr = msgTime.toLocaleDateString();
+          if (dateStr !== lastDate) {
+            lastDate = dateStr;
+            const dateEl = document.createElement('div');
+            dateEl.className = 'flex items-center justify-center my-3';
+            dateEl.innerHTML = `<span class="text-[10px] text-gray-400 bg-cream-200/80 px-3 py-1 rounded-full backdrop-blur-sm">${dateStr === new Date().toLocaleDateString() ? 'Today' : dateStr}</span>`;
+            msgContainer.appendChild(dateEl);
+          }
 
         // Consecutive same-sender: tighter spacing
         const sameSender = msg.senderId === lastSender;
@@ -565,18 +587,45 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
         msgContainer.appendChild(msgEl);
       });
 
-      // Auto-scroll to bottom
-      requestAnimationFrame(() => {
-        msgContainer.scrollTop = msgContainer.scrollHeight;
-      });
+      // Restore scroll or auto-scroll
+      if (isFirstLoad) {
+        requestAnimationFrame(() => {
+          msgContainer.scrollTop = msgContainer.scrollHeight;
+        });
+      } else if (msgContainer.scrollHeight > oldHeight) {
+        // We loaded older messages, preserve the exact scroll position
+        msgContainer.scrollTop = oldScroll + (msgContainer.scrollHeight - oldHeight);
+      } else {
+        // A new message arrived while we are at the bottom, auto scroll
+        if (msgContainer.scrollHeight - msgContainer.scrollTop - msgContainer.clientHeight < 150) {
+          requestAnimationFrame(() => {
+            msgContainer.scrollTop = msgContainer.scrollHeight;
+          });
+        }
+      }
       
-      // Mark messages as read when viewing
+      // Setup Infinite Scroll Observer
+      if (chatObserver) { chatObserver.disconnect(); chatObserver = null; }
+      const topObserverTarget = msgContainer.querySelector('#chat-top-observer');
+      if (topObserverTarget && 'IntersectionObserver' in window) {
+        chatObserver = new IntersectionObserver((entries) => {
+          if (entries[0].isIntersecting) {
+            messageLimit += 30;
+            setupMessageListener();
+          }
+        });
+        chatObserver.observe(topObserverTarget);
+      }
+      
       if (otherUid && !isFirstLoad) {
         markMessagesAsRead(chatId, otherUid);
       }
       isFirstLoad = false;
     });
   } catch (e) { console.error(e); }
+  };
+  
+  setupMessageListener();
 
   // Typing indicator + Pinned message bar - watch the chat document
   unsubTyping = onSnapshot(doc(db, 'chats', chatId), (snap) => {
@@ -787,19 +836,19 @@ export function startCallUI(targetUid, targetName, type) {
   const callOverlay = document.getElementById('call-overlay');
   if (!callOverlay) return;
 
-  // Set up callbacks BEFORE starting the call
+  // Set up call state tracking
   let callTimer = null;
   let callSeconds = 0;
 
+  // Callback: state changes (dialing → ringing → connected)
   callManager.onCallStateChange = (state) => {
     const statusEl = callOverlay.querySelector('#call-status-text');
     if (statusEl) {
       if (state === 'dialing') statusEl.textContent = 'Calling...';
       else if (state === 'ringing') statusEl.textContent = 'Ringing...';
       else if (state === 'connected') {
-        // Immediately show connected, then start timer
+        // Timer starts NOW — only when ICE has truly connected
         statusEl.textContent = 'Connected · 00:00';
-        // Clear any previous timer
         if (callTimer) clearInterval(callTimer);
         callSeconds = 0;
         callTimer = setInterval(() => {
@@ -817,6 +866,7 @@ export function startCallUI(targetUid, targetName, type) {
     }
   };
 
+  // Callback: remote stream received
   callManager.onRemoteStream = (userId, stream) => {
     const container = callOverlay.querySelector('#remote-video-container');
     if (container && type === 'video') {
@@ -841,11 +891,20 @@ export function startCallUI(targetUid, targetName, type) {
     }
   };
 
-  callManager.onCallEnd = () => {
+  // Callback: call ended
+  callManager.onCallEnd = (reason) => {
     if (callTimer) clearInterval(callTimer);
     callOverlay.classList.add('hidden');
     callOverlay.innerHTML = '';
-    showToast('Call ended', 'info');
+    if (reason === 'no_answer') {
+      showToast('No answer', 'info');
+    } else if (reason === 'rejected') {
+      showToast('Call declined', 'info');
+    } else if (reason === 'disconnected' || reason === 'failed') {
+      showToast('Call disconnected', 'warning');
+    } else {
+      showToast('Call ended', 'info');
+    }
   };
 
   // Now show the call UI
@@ -871,6 +930,10 @@ export function startCallUI(targetUid, targetName, type) {
             <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9.75a2.25 2.25 0 002.25-2.25V7.5a2.25 2.25 0 00-2.25-2.25H4.5A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z"/></svg>
             <span class="text-[10px] mt-1">Camera</span>
           </button>
+          <button class="call-control-btn" id="switch-camera">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182M2.985 19.644V14.652"/></svg>
+            <span class="text-[10px] mt-1">Flip</span>
+          </button>
         ` : `
           <button class="call-control-btn" id="toggle-speaker">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z"/></svg>
@@ -885,26 +948,167 @@ export function startCallUI(targetUid, targetName, type) {
     </div>
   `;
 
-  // Start the call (async - local video will be available after)
+  // Start the call (async)
   (async () => {
-    await callManager.startCall(targetUid, targetName, type);
-    
+    const callId = await callManager.startCall(targetUid, targetName, type);
+    if (!callId) {
+      // Call failed to start
+      callOverlay.classList.add('hidden');
+      callOverlay.innerHTML = '';
+      return;
+    }
+
     // Show local video preview after stream is ready
     if (type === 'video' && callManager.localStream) {
-      const localContainer = callOverlay.querySelector('#local-video-container');
-      if (localContainer) {
-        const video = document.createElement('video');
-        video.srcObject = callManager.localStream;
-        video.autoplay = true;
-        video.playsInline = true;
-        video.muted = true;
-        video.className = 'w-full h-full object-cover rounded-xl';
-        localContainer.appendChild(video);
-      }
+      _showLocalVideo(callOverlay, callManager.localStream);
     }
   })();
 
-  // Controls
+  // Bind control handlers
+  _bindCallControls(callOverlay, callTimer, type);
+}
+
+// ===== RECEIVER CALL UI (after answerCall completes) =====
+export function showAnsweredCallUI(callerUid, callerName, type) {
+  const callOverlay = document.getElementById('call-overlay');
+  if (!callOverlay) return;
+
+  let callTimer = null;
+  let callSeconds = 0;
+
+  // Callback: state changes
+  callManager.onCallStateChange = (state) => {
+    const statusEl = callOverlay.querySelector('#call-status-text');
+    if (statusEl) {
+      if (state === 'connected') {
+        statusEl.textContent = 'Connected · 00:00';
+        if (callTimer) clearInterval(callTimer);
+        callSeconds = 0;
+        callTimer = setInterval(() => {
+          callSeconds++;
+          const mins = Math.floor(callSeconds / 60).toString().padStart(2, '0');
+          const secs = (callSeconds % 60).toString().padStart(2, '0');
+          statusEl.textContent = `Connected · ${mins}:${secs}`;
+        }, 1000);
+      }
+    }
+    if (state === 'connected' && type === 'video') {
+      const callInfo = callOverlay.querySelector('.call-info');
+      if (callInfo) callInfo.style.display = 'none';
+    }
+  };
+
+  // If already connected (ICE completed before UI rendered), start timer
+  if (callManager.callStatus === 'connected') {
+    // Will be handled after UI renders below
+    setTimeout(() => {
+      if (callManager.onCallStateChange) callManager.onCallStateChange('connected');
+    }, 100);
+  }
+
+  // Callback: remote stream
+  callManager.onRemoteStream = (userId, stream) => {
+    const container = callOverlay.querySelector('#remote-video-container');
+    if (container && type === 'video') {
+      container.innerHTML = '';
+      const video = document.createElement('video');
+      video.srcObject = stream;
+      video.autoplay = true;
+      video.playsInline = true;
+      video.className = 'w-full h-full object-cover';
+      container.appendChild(video);
+    }
+    if (type === 'voice') {
+      const existingAudio = callOverlay.querySelector('audio');
+      if (!existingAudio) {
+        const audio = document.createElement('audio');
+        audio.srcObject = stream;
+        audio.autoplay = true;
+        audio.play().catch(console.error);
+        callOverlay.appendChild(audio);
+      }
+    }
+  };
+
+  // Callback: call ended
+  callManager.onCallEnd = (reason) => {
+    if (callTimer) clearInterval(callTimer);
+    callOverlay.classList.add('hidden');
+    callOverlay.innerHTML = '';
+    showToast('Call ended', 'info');
+  };
+
+  // Render the call UI
+  callOverlay.classList.remove('hidden');
+  callOverlay.innerHTML = `
+    <div class="call-screen ${type === 'video' ? 'call-video' : 'call-voice'}">
+      <div id="remote-video-container" class="call-remote-video"></div>
+      <div id="local-video-container" class="call-local-video"></div>
+      <div class="call-info">
+        <div class="call-avatar-ring">
+          <div class="avatar avatar-placeholder text-2xl w-20 h-20">${callerName[0]}</div>
+        </div>
+        <h3 class="text-lg font-bold text-white mt-4">${sanitizeHTML(callerName)}</h3>
+        <p class="text-sm text-white/70 mt-1" id="call-status-text">Connecting...</p>
+      </div>
+      <div class="call-controls">
+        <button class="call-control-btn" id="toggle-mute">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"/></svg>
+          <span class="text-[10px] mt-1">Mute</span>
+        </button>
+        ${type === 'video' ? `
+          <button class="call-control-btn" id="toggle-camera">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9.75a2.25 2.25 0 002.25-2.25V7.5a2.25 2.25 0 00-2.25-2.25H4.5A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z"/></svg>
+            <span class="text-[10px] mt-1">Camera</span>
+          </button>
+          <button class="call-control-btn" id="switch-camera">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182M2.985 19.644V14.652"/></svg>
+            <span class="text-[10px] mt-1">Flip</span>
+          </button>
+        ` : `
+          <button class="call-control-btn" id="toggle-speaker">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z"/></svg>
+            <span class="text-[10px] mt-1">Speaker</span>
+          </button>
+        `}
+        <button class="call-control-btn call-end-btn" id="end-call-btn">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15.536a5 5 0 010-7.072m-2.828 9.9a9 9 0 010-12.728"/></svg>
+          <span class="text-[10px] mt-1">End</span>
+        </button>
+      </div>
+    </div>
+  `;
+
+  // Show local video preview (receiver side)
+  if (type === 'video' && callManager.localStream) {
+    _showLocalVideo(callOverlay, callManager.localStream);
+  }
+
+  // If remote stream already available, show it
+  Object.entries(callManager.remoteStreams).forEach(([uid, stream]) => {
+    if (callManager.onRemoteStream) callManager.onRemoteStream(uid, stream);
+  });
+
+  // Bind controls
+  _bindCallControls(callOverlay, callTimer, type);
+}
+
+// ===== SHARED: Show local video preview =====
+function _showLocalVideo(callOverlay, stream) {
+  const localContainer = callOverlay.querySelector('#local-video-container');
+  if (localContainer) {
+    const video = document.createElement('video');
+    video.srcObject = stream;
+    video.autoplay = true;
+    video.playsInline = true;
+    video.muted = true; // Mute local preview to avoid echo
+    video.className = 'w-full h-full object-cover rounded-xl';
+    localContainer.appendChild(video);
+  }
+}
+
+// ===== SHARED: Bind call control buttons =====
+function _bindCallControls(callOverlay, callTimer, type) {
   callOverlay.querySelector('#toggle-mute')?.addEventListener('click', () => {
     const muted = callManager.toggleMute();
     const btn = callOverlay.querySelector('#toggle-mute');
@@ -928,12 +1132,24 @@ export function startCallUI(targetUid, targetName, type) {
     }
   });
 
+  callOverlay.querySelector('#switch-camera')?.addEventListener('click', async () => {
+    const btn = callOverlay.querySelector('#switch-camera');
+    if (btn) btn.classList.add('call-control-active');
+    const facing = await callManager.switchCamera();
+    if (facing && callManager.localStream) {
+      // Update local video preview with new stream
+      _showLocalVideo(callOverlay, callManager.localStream);
+    }
+    setTimeout(() => {
+      if (btn) btn.classList.remove('call-control-active');
+    }, 500);
+  });
+
   callOverlay.querySelector('#toggle-speaker')?.addEventListener('click', () => {
     const btn = callOverlay.querySelector('#toggle-speaker');
     const audio = callOverlay.querySelector('audio');
     if (audio && btn) {
       const isLoud = btn.classList.toggle('call-control-active');
-      // Try to increase volume
       audio.volume = isLoud ? 1.0 : 0.5;
       btn.querySelector('span').textContent = isLoud ? 'Earpiece' : 'Speaker';
     }

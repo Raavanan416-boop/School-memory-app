@@ -1,4 +1,4 @@
-const CACHE_NAME = 'class-memories-v6';
+const CACHE_NAME = 'class-memories-v7';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -69,96 +69,6 @@ self.addEventListener('fetch', (e) => {
   );
 });
 
-// Track recently shown tags to prevent duplicate notifications
-const recentPushTags = new Set();
-
-// Push notification handler (from FCM or server)
-self.addEventListener('push', (event) => {
-  // If firebase-messaging-sw.js already handled this, skip
-  const data = event.data ? event.data.json() : {};
-
-  // Check if this is an FCM message (has fcm field) — let firebase-messaging-sw handle it
-  if (data.fcmMessageId || data.from) {
-    return; // Firebase Messaging SW will handle this
-  }
-
-  const notifData = data.notification || data;
-  const title = notifData.title || data.title || 'Class Memories';
-  const tag = notifData.tag || data.tag || 'cm-notification-' + Date.now();
-
-  // Duplicate prevention
-  if (recentPushTags.has(tag)) return;
-  recentPushTags.add(tag);
-  setTimeout(() => recentPushTags.delete(tag), 5000);
-
-  const options = {
-    body: notifData.body || data.body || 'New notification',
-    icon: '/icons/icon-192.svg',
-    badge: '/icons/icon-192.svg',
-    vibrate: [200, 100, 200, 100, 200],
-    tag: tag,
-    renotify: true,
-    requireInteraction: true,
-    data: {
-      url: data.url || data.targetUrl || '/',
-      type: data.type || 'general',
-      notifId: data.notifId || ''
-    },
-    actions: [
-      { action: 'open', title: 'Open' },
-      { action: 'dismiss', title: 'Dismiss' }
-    ]
-  };
-
-  event.waitUntil(
-    self.registration.showNotification(title, options)
-  );
-});
-
-// Message handler — show notifications from main thread
-self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SHOW_NOTIFICATION') {
-    const { title, body, data } = event.data;
-    self.registration.showNotification(title || 'Class Memories', {
-      body: body || 'New notification',
-      icon: '/icons/icon-192.svg',
-      badge: '/icons/icon-192.svg',
-      vibrate: [200, 100, 200, 100, 200],
-      tag: 'cm-' + Date.now(),
-      renotify: true,
-      requireInteraction: true,
-      data: data || {}
-    });
-  }
-});
-
-// Notification click handler
-self.addEventListener('notificationclick', (event) => {
-  event.notification.close();
-
-  if (event.action === 'dismiss') return;
-
-  const targetUrl = event.notification.data?.url || '/';
-  const notifId = event.notification.data?.notifId || '';
-
-  event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
-      // Focus existing window if open
-      for (const client of clientList) {
-        if (client.url.includes(self.location.origin)) {
-          client.focus();
-          // Send message for in-app navigation
-          client.postMessage({
-            type: 'NOTIFICATION_CLICK',
-            url: targetUrl,
-            notifId: notifId
-          });
-          return;
-        }
-      }
-      // Otherwise open new window
-      const fullUrl = new URL(targetUrl, self.location.origin).href;
-      return clients.openWindow(fullUrl);
-    })
-  );
-});
+// NOTE: Push notifications and notificationclick are handled exclusively
+// by firebase-messaging-sw.js to avoid conflicts between service workers.
+// Do NOT add push or notificationclick handlers here.

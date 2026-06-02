@@ -253,41 +253,25 @@ function buildAppShell() {
 
   router.navigate('home');
 
-  // ===== SECRET MODERATION ACCESS (Owner-only) =====
-  // Method 1: Secret URL route — navigate to /#mod
-  router.register('mod', async (container) => {
+  // ===== HIDDEN OWNER CONTROL SYSTEM =====
+  // Fully isolated from normal flow. Only loads if owner navigates to it via secret trigger.
+  router.register('owner', async (container) => {
     if (!authManager.isOwner) {
       container.innerHTML = '<div class="flex items-center justify-center min-h-[50vh]"><p class="text-gray-400">Page not found</p></div>';
       return;
     }
-    // Dynamically load and open mod panel from profile module
+    // Lazy load the sensitive owner panel code
     try {
-      const profileMod = await import('./pages/profile.js');
-      if (profileMod.openModPanel) {
-        profileMod.openModPanel();
-      }
-    } catch (e) { console.log('Mod route error:', e); }
-    router.navigate('profile');
+      const ownerMod = await import('./pages/owner.js');
+      await ownerMod.renderOwnerPanel(container);
+    } catch (e) {
+      console.error('Owner panel failed:', e);
+      container.innerHTML = `<div class="p-8 bg-[#0f172a] text-red-500 min-h-screen">
+        <h2 class="font-bold text-2xl mb-4">Module Import Error</h2>
+        <pre class="bg-gray-900 p-4 rounded text-xs overflow-auto text-red-400">${e.message}\n\n${e.stack}</pre>
+      </div>`;
+    }
   });
-
-  // Method 2: Triple-tap on header title
-  let headerTapCount = 0;
-  let headerTapTimer = null;
-  const headerTitle = app.querySelector('header h1');
-  if (headerTitle && authManager.isOwner) {
-    headerTitle.addEventListener('click', () => {
-      headerTapCount++;
-      if (headerTapTimer) clearTimeout(headerTapTimer);
-      headerTapTimer = setTimeout(() => { headerTapCount = 0; }, 800);
-      if (headerTapCount >= 5) {
-        headerTapCount = 0;
-        if (navigator.vibrate) navigator.vibrate(50);
-        import('./pages/profile.js').then(mod => {
-          if (mod.openModPanel) mod.openModPanel();
-        }).catch(() => {});
-      }
-    });
-  }
 
   // Initialize festival theme system (non-blocking)
   import('./festival-themes.js').then(({ festivalManager }) => {
@@ -528,6 +512,98 @@ function showIncomingCallUI(call) {
   const callOverlay = document.getElementById('call-overlay');
   if (!callOverlay) return;
 
+  // If auto-accept (from push notification action), handle immediately
+  if (call.autoAccept) {
+    handleAcceptCall(call);
+    return;
+  }
+
+  // Start ringtone + vibration
+  if (notificationManager) {
+    notificationManager.playIncomingRingtone();
+    // Close the push notification for this call (we're handling it in-app)
+    notificationManager.closeCallNotification(call.id);
+  }
+
+  // Set callManager state to incoming
+  if (callManager) {
+    callManager.callStatus = 'incoming';
+  }
+
+  const callTypeLabel = call.type === 'video' ? 'Video' : 'Voice';
+  const callTypeIcon = call.type === 'video' ? '📹' : '📞';
+
+  callOverlay.classList.remove('hidden');
+  callOverlay.innerHTML = `
+    <div class="call-screen">
+      <div class="call-info">
+        <div class="call-avatar-ring">
+          ${call.callerPhoto
+            ? `<img src="${call.callerPhoto}" class="w-20 h-20 rounded-full object-cover" alt="" />`
+            : `<div class="avatar avatar-placeholder text-2xl w-20 h-20">${(call.callerName || '?')[0]}</div>`
+          }
+        </div>
+        <h3 class="text-lg font-bold text-white mt-4">${sanitizeHTML(call.callerName || 'Unknown')}</h3>
+        <p class="text-sm text-white/70 mt-1">${callTypeIcon} Incoming ${callTypeLabel} Call...</p>
+      </div>
+      <div class="call-controls">
+        <button class="call-control-btn call-end-btn" id="reject-call" style="background:#ef4444">
+          <svg class="w-7 h-7" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          <span class="text-[10px] mt-1 text-white">Reject</span>
+        </button>
+        <button class="call-control-btn" id="accept-call" style="background:#22c55e;box-shadow:0 4px 20px rgba(34,197,94,0.4)">
+          <svg class="w-7 h-7" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"/></svg>
+          <span class="text-[10px] mt-1 text-white">Accept</span>
+        </button>
+      </div>
+    </div>
+  `;
+
+  // Accept handler
+  callOverlay.querySelector('#accept-call')?.addEventListener('click', () => {
+    handleAcceptCall(call);
+  });
+
+  // Reject handler
+  callOverlay.querySelector('#reject-call')?.addEventListener('click', () => {
+    // Stop ringtone
+    if (notificationManager) notificationManager.stopIncomingRingtone();
+    callManager.rejectCall(call.id);
+    callOverlay.classList.add('hidden');
+    callOverlay.innerHTML = '';
+  });
+
+  // Auto-dismiss after 35s (matches caller's timeout)
+  const autoDismissTimer = setTimeout(() => {
+    if (callOverlay.querySelector('#accept-call')) {
+      if (notificationManager) notificationManager.stopIncomingRingtone();
+      callOverlay.classList.add('hidden');
+      callOverlay.innerHTML = '';
+      if (callManager) callManager._resetCallState('no_answer');
+    }
+  }, 35000);
+
+  // Store timer reference so we can clear it on accept/reject
+  callOverlay._autoDismissTimer = autoDismissTimer;
+}
+
+async function handleAcceptCall(call) {
+  const callOverlay = document.getElementById('call-overlay');
+  if (!callOverlay) return;
+
+  // Stop ringtone immediately
+  if (notificationManager) {
+    notificationManager.stopIncomingRingtone();
+    notificationManager.closeCallNotification(call.id);
+  }
+
+  // Clear auto-dismiss timer
+  if (callOverlay._autoDismissTimer) {
+    clearTimeout(callOverlay._autoDismissTimer);
+    callOverlay._autoDismissTimer = null;
+  }
+
+  // Show "Connecting..." state while answering
   callOverlay.classList.remove('hidden');
   callOverlay.innerHTML = `
     <div class="call-screen">
@@ -536,47 +612,24 @@ function showIncomingCallUI(call) {
           <div class="avatar avatar-placeholder text-2xl w-20 h-20">${(call.callerName || '?')[0]}</div>
         </div>
         <h3 class="text-lg font-bold text-white mt-4">${sanitizeHTML(call.callerName || 'Unknown')}</h3>
-        <p class="text-sm text-white/70 mt-1">Incoming ${call.type} call...</p>
-      </div>
-      <div class="call-controls">
-        <button class="call-control-btn call-end-btn" id="reject-call" style="background:#ef4444">
-          <svg class="w-7 h-7" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
-        </button>
-        <button class="call-control-btn" id="accept-call" style="background:#22c55e;box-shadow:0 4px 20px rgba(34,197,94,0.4)">
-          <svg class="w-7 h-7" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"/></svg>
-        </button>
+        <p class="text-sm text-white/70 mt-1">Connecting...</p>
       </div>
     </div>
   `;
 
-  callOverlay.querySelector('#accept-call')?.addEventListener('click', async () => {
-    // Don't hide overlay — transition directly to call UI
-    try {
-      await callManager.answerCall(call.id);
-      // Now import and start the call UI in the same overlay
-      const { startCallUI } = await import('./pages/chat.js');
-      startCallUI(call.callerId, call.callerName, call.type);
-    } catch (e) {
-      console.error('Accept call error:', e);
-      callOverlay.classList.add('hidden');
-      callOverlay.innerHTML = '';
-      showToast('Could not accept call', 'error');
-    }
-  });
+  try {
+    // Answer the call first (establishes WebRTC connection)
+    await callManager.answerCall(call.id);
 
-  callOverlay.querySelector('#reject-call')?.addEventListener('click', () => {
-    callManager.rejectCall(call.id);
+    // Then transition to the full call UI (with controls)
+    const { showAnsweredCallUI } = await import('./pages/chat.js');
+    showAnsweredCallUI(call.callerId, call.callerName, call.type);
+  } catch (e) {
+    console.error('Accept call error:', e);
     callOverlay.classList.add('hidden');
     callOverlay.innerHTML = '';
-  });
-
-  // Auto-dismiss after 30s
-  setTimeout(() => {
-    if (callOverlay.querySelector('#accept-call')) {
-      callOverlay.classList.add('hidden');
-      callOverlay.innerHTML = '';
-    }
-  }, 30000);
+    showToast('Could not accept call', 'error');
+  }
 }
 
 // ===== PWA Install =====

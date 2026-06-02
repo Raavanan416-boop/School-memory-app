@@ -226,8 +226,19 @@ function showGiftPointsModal(allUsers) {
 }
 
 // ===== MAIN RENDER =====
+let unsubBirthday = null;
+
+export function destroyBirthday() {
+  if (unsubBirthday) {
+    unsubBirthday();
+    unsubBirthday = null;
+  }
+  cleanupListeners();
+}
 
 export async function renderBirthday(container) {
+  router.registerDestroy('birthday', destroyBirthday);
+  destroyBirthday();
   cleanupListeners();
 
   let users = [];
@@ -477,10 +488,7 @@ export async function renderBirthday(container) {
   }
 }
 
-// Cleanup function for router
-export function destroyBirthday() {
-  cleanupListeners();
-}
+
 
 // ===== REUSABLE BIRTHDAY CARD RENDERER =====
 

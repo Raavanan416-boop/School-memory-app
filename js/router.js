@@ -8,11 +8,14 @@ class Router {
     this.history = [];
     this.modalStack = [];
     this.onNavigate = null;
+    this.destroyHooks = {};
   }
 
   setContainer(el) { this.container = el; }
 
   register(name, renderFn) { this.routes[name] = renderFn; }
+
+  registerDestroy(name, destroyFn) { this.destroyHooks[name] = destroyFn; }
 
   async navigate(page, data = null) {
     if (!this.container || !this.routes[page]) return;
@@ -24,6 +27,15 @@ class Router {
     // Save history
     if (this.currentPage) {
       this.history.push({ page: this.currentPage, sub: this.currentSub });
+      
+      // CRITICAL: Clean up previous page to prevent memory leaks and duplicate Firebase listeners
+      if (this.destroyHooks[this.currentPage]) {
+        try {
+          this.destroyHooks[this.currentPage]();
+        } catch (e) {
+          console.error(`Error destroying page ${this.currentPage}:`, e);
+        }
+      }
     }
 
     // Close any open modals

@@ -3,7 +3,7 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/fireba
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail,
   updatePassword, EmailAuthProvider, reauthenticateWithCredential }
   from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
-import { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc,
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc,
   query, where, orderBy, limit, limitToLast, onSnapshot, serverTimestamp, Timestamp,
   arrayUnion, arrayRemove, increment, startAfter, endAt, writeBatch, deleteField,
   startAt, endBefore, getCountFromServer }
@@ -23,7 +23,9 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const db = getFirestore(app);
+const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({tabManager: persistentMultipleTabManager()})
+});
 const storage = getStorage(app);
 
 export {

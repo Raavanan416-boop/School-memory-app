@@ -13,17 +13,20 @@ let unsubFeed = null;
 let lastDoc = null;
 let loadingMore = false;
 let allPostsLoaded = false;
+let feedObserver = null;
 const deletedPostIds = new Set(); // Track locally deleted post IDs
 
 export function destroyHome() {
   if (timerInterval) clearInterval(timerInterval);
   if (quoteInterval) clearInterval(quoteInterval);
   if (unsubFeed) unsubFeed();
+  if (feedObserver) { feedObserver.disconnect(); feedObserver = null; }
   timerInterval = null; quoteInterval = null; unsubFeed = null;
   lastDoc = null; loadingMore = false; allPostsLoaded = false;
 }
 
 export async function renderHome(container) {
+  router.registerDestroy('home', destroyHome);
   destroyHome();
 
   // Check for birthdays today
@@ -141,10 +144,21 @@ export async function renderHome(container) {
     loadFeed(container);
   });
 
-  // Load more
-  container.querySelector('#load-more-btn')?.addEventListener('click', () => {
+  // Load more (manual fallback)
+  const loadMoreBtn = container.querySelector('#load-more-btn');
+  loadMoreBtn?.addEventListener('click', () => {
     loadMorePosts(container);
   });
+
+  // Infinite Scroll
+  if (loadMoreBtn && 'IntersectionObserver' in window) {
+    feedObserver = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting && !loadingMore && !allPostsLoaded) {
+        loadMorePosts(container);
+      }
+    }, { rootMargin: '300px' }); // Load 300px before reaching the bottom
+    feedObserver.observe(loadMoreBtn);
+  }
 
   // Throwback
   loadThrowback(container);
@@ -227,7 +241,9 @@ function loadFeed(container) {
       snap.forEach(d => {
         // Skip locally deleted posts (optimistic filter)
         if (deletedPostIds.has(d.id)) return;
-        feedEl.appendChild(createPostCard({ id: d.id, ...d.data() }));
+        const postData = d.data();
+        if (postData.isHidden && !authManager.isOwner) return;
+        feedEl.appendChild(createPostCard({ id: d.id, ...postData }));
         lastDoc = d;
       });
 
@@ -262,7 +278,9 @@ async function loadMorePosts(container) {
       container.querySelector('#load-more-container')?.classList.add('hidden');
     } else {
       snap.forEach(d => {
-        feedEl.appendChild(createPostCard({ id: d.id, ...d.data() }));
+        const postData = d.data();
+        if (postData.isHidden && !authManager.isOwner) return;
+        feedEl.appendChild(createPostCard({ id: d.id, ...postData }));
         lastDoc = d;
       });
       if (snap.size < 10) {

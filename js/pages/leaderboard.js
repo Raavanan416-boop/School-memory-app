@@ -4,7 +4,18 @@ import { sanitizeHTML, formatNumber } from '../utils.js';
 import { authManager } from '../auth.js';
 import { router } from '../router.js';
 
+let unsubLeaderboard = null;
+
+export function destroyLeaderboard() {
+  if (unsubLeaderboard) {
+    unsubLeaderboard();
+    unsubLeaderboard = null;
+  }
+}
+
 export async function renderLeaderboard(container) {
+  router.registerDestroy('leaderboard', destroyLeaderboard);
+  destroyLeaderboard();
   let users = [];
   let posts = [];
   let polls = [];
@@ -80,7 +91,12 @@ export async function renderLeaderboard(container) {
       .filter(bp => bp.targetUserId === user.id)
       .reduce((sum, bp) => sum + (bp.points || 0), 0);
 
-    const total = postPoints + likePoints + commentPoints + pollPoints + diaryPoints + capsulePoints + userBdayPointsReceived;
+    let total = postPoints + likePoints + commentPoints + pollPoints + diaryPoints + capsulePoints + userBdayPointsReceived;
+
+    // Apply owner panel reset offset if it exists
+    if (user.pointsOffset) {
+      total = Math.max(0, total - user.pointsOffset);
+    }
 
     // Activity badges
     const badges = [];

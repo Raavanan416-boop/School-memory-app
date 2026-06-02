@@ -1,5 +1,6 @@
 // Notification system — FCM push + real-time Firestore + in-app notifications
 // Supports: background push, lock screen, foreground toast, badge count, dedup, delete
+// Fixed: token refresh, call types, ringtone management, foreground notification
 import { db, app, collection, doc, addDoc, deleteDoc, query, where, orderBy, limit,
   onSnapshot, updateDoc, serverTimestamp, getDocs } from './firebase-config.js';
 import { authManager } from './auth.js';
@@ -62,6 +63,28 @@ const NOTIF_CONFIG = {
     bodyTemplate: (name) => `${name} wrote in the diary.`,
     getUrl: () => `/?page=diary`,
   },
+  // Call notifications
+  voice_call_incoming: {
+    title: '📞 Incoming Voice Call',
+    bodyTemplate: (name) => `Incoming voice call from ${name}`,
+    getUrl: () => `/?page=chat`,
+  },
+  video_call_incoming: {
+    title: '📹 Incoming Video Call',
+    bodyTemplate: (name) => `Incoming video call from ${name}`,
+    getUrl: () => `/?page=chat`,
+  },
+  missed_voice_call: {
+    title: '📵 Missed Voice Call',
+    bodyTemplate: (name) => `Missed voice call from ${name}`,
+    getUrl: (data) => `/?page=chat&userId=${data.fromId || ''}`,
+  },
+  missed_video_call: {
+    title: '📵 Missed Video Call',
+    bodyTemplate: (name) => `Missed video call from ${name}`,
+    getUrl: (data) => `/?page=chat&userId=${data.fromId || ''}`,
+  },
+  // Legacy call type (for backwards compatibility)
   call_incoming: {
     title: '📞 Incoming Call',
     bodyTemplate: (name) => `Incoming call from ${name}.`,
@@ -99,7 +122,9 @@ class NotificationManager {
     this.pushPermission = 'default';
     this._messaging = null;
     this._soundAudio = null;
+    this._ringtoneAudio = null;
     this._soundUnlocked = false;
+    this._tokenRefreshInterval = null;
   }
 
   onChange(cb) { this.listeners.push(cb); }
@@ -118,6 +143,18 @@ class NotificationManager {
       });
       console.log('[Notifications] FCM SW registered:', swReg.scope);
 
+      // Wait for the SW to be active
+      if (swReg.installing) {
+        await new Promise(resolve => {
+          swReg.installing.addEventListener('statechange', function handler(e) {
+            if (e.target.state === 'activated') {
+              resolve();
+              e.target.removeEventListener('statechange', handler);
+            }
+          });
+        });
+      }
+
       // Dynamic import of Firebase Messaging
       const { getMessaging, getToken, onMessage } = await import(
         'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js'
@@ -125,19 +162,27 @@ class NotificationManager {
 
       this._messaging = getMessaging(app);
 
-      // Handle foreground messages
+      // Handle foreground messages — show in-app notification
       onMessage(this._messaging, (payload) => {
         console.log('[Notifications] Foreground message:', payload);
         const data = payload.data || {};
         const notifPayload = payload.notification || {};
+        const type = data.type || 'general';
+
+        // For incoming calls in foreground, don't show toast — the call UI handles it
+        if (type === 'voice_call_incoming' || type === 'video_call_incoming') {
+          console.log('[Notifications] Call notification received in foreground — call UI will handle');
+          return;
+        }
 
         // Show in-app notification (toast + sound) for foreground
         this._showForegroundNotification({
           title: data.title || notifPayload.title || '📸 Class Memories',
           body: data.body || notifPayload.body || 'New notification',
-          type: data.type || 'general',
+          type: type,
           targetUrl: data.targetUrl || '/',
           notifId: data.notifId || '',
+          fromName: data.fromName || '',
         });
       });
 
@@ -146,6 +191,14 @@ class NotificationManager {
         if (event.data?.type === 'NOTIFICATION_CLICK') {
           this._handleNotificationClick(event.data.url, event.data.notifId);
         }
+        // Handle call accept from notification
+        if (event.data?.type === 'ACCEPT_CALL') {
+          this._handleCallAcceptFromNotification(event.data);
+        }
+        // Handle call reject from notification
+        if (event.data?.type === 'REJECT_CALL') {
+          this._handleCallRejectFromNotification(event.data);
+        }
       });
 
       return swReg;
@@ -153,6 +206,29 @@ class NotificationManager {
       console.warn('[Notifications] FCM init failed:', e);
       return null;
     }
+  }
+
+  // Handle call accept from push notification action
+  _handleCallAcceptFromNotification(data) {
+    // Import call manager dynamically to avoid circular dependency
+    import('./calls.js').then(({ callManager }) => {
+      if (callManager.onIncomingCall) {
+        callManager.onIncomingCall({
+          id: data.callId,
+          callerId: data.callerId,
+          callerName: data.callerName,
+          type: 'voice', // will be overridden by actual call data
+          autoAccept: true
+        });
+      }
+    }).catch(console.error);
+  }
+
+  // Handle call reject from push notification action
+  _handleCallRejectFromNotification(data) {
+    import('./calls.js').then(({ callManager }) => {
+      callManager.rejectCall(data.callId);
+    }).catch(console.error);
   }
 
   // Request push notification permission + get FCM token
@@ -166,6 +242,8 @@ class NotificationManager {
       if (permission === 'granted') {
         console.log('[Notifications] Push permission granted');
         await this._registerFCMToken();
+        // Start periodic token refresh (every 6 hours)
+        this._startTokenRefresh();
       }
       return permission;
     } catch (e) {
@@ -184,8 +262,13 @@ class NotificationManager {
       );
 
       const swReg = await navigator.serviceWorker.getRegistration('/');
+      if (!swReg) {
+        console.warn('[Notifications] No service worker registration found');
+        return;
+      }
 
-      // Get FCM token — VAPID key placeholder (replace with your key from Firebase Console)
+      // Get FCM token — VAPID key from Firebase Console > Cloud Messaging > Web Push certificates
+      // NOTE: Replace this with your actual public VAPID key if push isn't working
       const token = await getToken(this._messaging, {
         vapidKey: 'qxHBJtuRVh-UdDL4nGmIEJplitZyHDQ_viFI22ibmQc',
         serviceWorkerRegistration: swReg,
@@ -199,16 +282,35 @@ class NotificationManager {
         await updateDoc(doc(db, 'users', authManager.currentUser.uid), {
           fcmToken: token,
           pushEnabled: true,
+          fcmTokenUpdatedAt: serverTimestamp(),
         });
-        console.log('[Notifications] FCM token saved');
+        console.log('[Notifications] FCM token saved:', token.substring(0, 20) + '...');
       }
     } catch (e) {
       console.log('[Notifications] FCM token registration failed:', e.message);
     }
   }
 
+  // Periodically refresh FCM token (Google rotates tokens)
+  _startTokenRefresh() {
+    if (this._tokenRefreshInterval) clearInterval(this._tokenRefreshInterval);
+    // Refresh token every 6 hours
+    this._tokenRefreshInterval = setInterval(() => {
+      console.log('[Notifications] Periodic token refresh...');
+      this._registerFCMToken();
+    }, 6 * 60 * 60 * 1000);
+  }
+
+  _stopTokenRefresh() {
+    if (this._tokenRefreshInterval) {
+      clearInterval(this._tokenRefreshInterval);
+      this._tokenRefreshInterval = null;
+    }
+  }
+
   // Remove FCM token on logout
   async removeFCMToken() {
+    this._stopTokenRefresh();
     if (!authManager.currentUser) return;
     try {
       await updateDoc(doc(db, 'users', authManager.currentUser.uid), {
@@ -228,6 +330,10 @@ class NotificationManager {
     // Request push permission after a short delay (not too aggressive)
     if ('Notification' in window && Notification.permission === 'default') {
       setTimeout(() => this.requestPushPermission(), 3000);
+    } else if ('Notification' in window && Notification.permission === 'granted') {
+      // Already granted — ensure token is fresh
+      this._registerFCMToken();
+      this._startTokenRefresh();
     }
     this.pushPermission = 'Notification' in window ? Notification.permission : 'denied';
 
@@ -260,8 +366,12 @@ class NotificationManager {
           const newest = newNotifs[0];
           // Only show in-app notification if app is focused (push handles background)
           if (document.hasFocus()) {
-            this._showInAppNotification(newest);
-            this._playNotificationSound();
+            // Don't show toast for call notifications — call UI handles those
+            const callTypes = ['voice_call_incoming', 'video_call_incoming', 'call_incoming'];
+            if (!callTypes.includes(newest.type)) {
+              this._showInAppNotification(newest);
+              this._playNotificationSound();
+            }
           }
         }
       }
@@ -275,6 +385,7 @@ class NotificationManager {
       this.unsubscribe();
       this.unsubscribe = null;
     }
+    this._stopTokenRefresh();
   }
 
   // ===== BADGE =====
@@ -334,7 +445,8 @@ class NotificationManager {
 
   _showForegroundNotification(data) {
     // Show toast for foreground messages
-    showToast(data.body || 'New notification', 'info');
+    const displayText = data.fromName ? `${data.fromName}: ${data.body}` : (data.body || 'New notification');
+    showToast(displayText, 'info');
     this._playNotificationSound();
   }
 
@@ -408,6 +520,110 @@ class NotificationManager {
 
       setTimeout(() => ctx.close().catch(() => {}), 600);
     } catch (e) { /* Web Audio not supported */ }
+  }
+
+  // ===== INCOMING CALL RINGTONE =====
+
+  // Play a ringtone that loops until stopped (for incoming calls)
+  playIncomingRingtone() {
+    this.stopIncomingRingtone(); // Stop any existing ringtone
+
+    try {
+      // Try notification.mp3 as ringtone first (looped)
+      this._ringtoneAudio = new Audio('/assets/notification.mp3');
+      this._ringtoneAudio.loop = true;
+      this._ringtoneAudio.volume = 0.8;
+      this._ringtoneAudio.play().catch(() => {
+        // Fallback: synthesized ringtone using Web Audio API
+        this._playSynthRingtone();
+      });
+    } catch (e) {
+      this._playSynthRingtone();
+    }
+
+    // Also vibrate if supported (WhatsApp-style vibration pattern)
+    if (navigator.vibrate) {
+      this._vibrationInterval = setInterval(() => {
+        navigator.vibrate([500, 200, 500, 200, 500]);
+      }, 2000);
+    }
+  }
+
+  // Synthesized ringtone using Web Audio API (fallback)
+  _playSynthRingtone() {
+    try {
+      this._ringtoneCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = this._ringtoneCtx;
+
+      const playRingCycle = () => {
+        if (!this._ringtoneCtx) return;
+        const now = ctx.currentTime;
+
+        // Classic phone ring pattern: two quick tones
+        const ringNotes = [
+          { freq: 440, start: 0, dur: 0.4 },
+          { freq: 480, start: 0, dur: 0.4 },
+          { freq: 440, start: 0.6, dur: 0.4 },
+          { freq: 480, start: 0.6, dur: 0.4 },
+        ];
+
+        ringNotes.forEach(n => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(n.freq, now + n.start);
+          gain.gain.setValueAtTime(0, now + n.start);
+          gain.gain.linearRampToValueAtTime(0.15, now + n.start + 0.02);
+          gain.gain.setValueAtTime(0.15, now + n.start + n.dur - 0.02);
+          gain.gain.linearRampToValueAtTime(0, now + n.start + n.dur);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + n.start);
+          osc.stop(now + n.start + n.dur);
+        });
+      };
+
+      playRingCycle();
+      this._ringtoneRepeat = setInterval(playRingCycle, 2000);
+    } catch (e) { /* Web Audio not supported */ }
+  }
+
+  // Stop the incoming call ringtone
+  stopIncomingRingtone() {
+    if (this._ringtoneAudio) {
+      this._ringtoneAudio.pause();
+      this._ringtoneAudio.currentTime = 0;
+      this._ringtoneAudio = null;
+    }
+    if (this._ringtoneCtx) {
+      this._ringtoneCtx.close().catch(() => {});
+      this._ringtoneCtx = null;
+    }
+    if (this._ringtoneRepeat) {
+      clearInterval(this._ringtoneRepeat);
+      this._ringtoneRepeat = null;
+    }
+    if (this._vibrationInterval) {
+      clearInterval(this._vibrationInterval);
+      this._vibrationInterval = null;
+    }
+    // Stop vibration
+    if (navigator.vibrate) {
+      navigator.vibrate(0);
+    }
+  }
+
+  // Close incoming call push notification (when handled in-app)
+  closeCallNotification(callId) {
+    if (!callId) return;
+    navigator.serviceWorker.getRegistration('/').then(reg => {
+      if (reg && reg.active) {
+        reg.active.postMessage({
+          type: 'CLOSE_CALL_NOTIFICATION',
+          callId: callId
+        });
+      }
+    }).catch(() => {});
   }
 
   // ===== CLICK HANDLING / DEEP LINKS =====
@@ -493,34 +709,41 @@ class NotificationManager {
     const targetUrl = config.getUrl({ ...data, fromId: authManager.currentUser.uid });
 
     // Deduplication key — prevents duplicate notifications for same action
-    const dedupKey = data.deduplicationKey || `${type}_${authManager.currentUser.uid}_${targetUserId}_${data.postId || data.pollId || data.capsuleId || ''}`;
+    // For calls, use callId as the dedup key
+    const dedupKey = data.deduplicationKey ||
+      data.callId ||
+      `${type}_${authManager.currentUser.uid}_${targetUserId}_${data.postId || data.pollId || data.capsuleId || ''}`;
 
-    // Check for existing duplicate within last 60 seconds
-    try {
-      const dedupQuery = query(
-        collection(db, 'notifications'),
-        where('userId', '==', targetUserId),
-        where('deduplicationKey', '==', dedupKey),
-        orderBy('createdAt', 'desc'),
-        limit(1)
-      );
-      const existing = await getDocs(dedupQuery);
-      if (!existing.empty) {
-        const lastNotif = existing.docs[0].data();
-        if (lastNotif.createdAt?.toDate) {
-          const elapsed = Date.now() - lastNotif.createdAt.toDate().getTime();
-          if (elapsed < 60000) {
-            console.log('[Notifications] Duplicate suppressed:', dedupKey);
-            return; // Skip duplicate
+    // Check for existing duplicate within last 60 seconds (skip for calls — they need to be fast)
+    const isCallType = type.includes('call');
+    if (!isCallType) {
+      try {
+        const dedupQuery = query(
+          collection(db, 'notifications'),
+          where('userId', '==', targetUserId),
+          where('deduplicationKey', '==', dedupKey),
+          orderBy('createdAt', 'desc'),
+          limit(1)
+        );
+        const existing = await getDocs(dedupQuery);
+        if (!existing.empty) {
+          const lastNotif = existing.docs[0].data();
+          if (lastNotif.createdAt?.toDate) {
+            const elapsed = Date.now() - lastNotif.createdAt.toDate().getTime();
+            if (elapsed < 60000) {
+              console.log('[Notifications] Duplicate suppressed:', dedupKey);
+              return; // Skip duplicate
+            }
           }
         }
+      } catch (e) {
+        // Dedup query failed — proceed anyway (index might not exist yet)
+        console.warn('[Notifications] Dedup check failed:', e.message);
       }
-    } catch (e) {
-      // Dedup query failed — proceed anyway (index might not exist yet)
-      console.warn('[Notifications] Dedup check failed:', e.message);
     }
 
     // Create the notification document
+    // This triggers the Cloud Function which sends the FCM push
     try {
       await addDoc(collection(db, 'notifications'), {
         type,

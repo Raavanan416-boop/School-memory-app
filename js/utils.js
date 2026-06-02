@@ -166,9 +166,13 @@ export async function compressImage(file, maxWidth = 1200, quality = 0.8) {
         canvas.width = w;
         canvas.height = h;
         canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        
+        // Ensure the new filename has .webp extension
+        const newName = file.name.replace(/\.[^/.]+$/, "") + ".webp";
+        
         canvas.toBlob((blob) => {
-          resolve(new File([blob], file.name, { type: 'image/jpeg', lastModified: Date.now() }));
-        }, 'image/jpeg', quality);
+          resolve(new File([blob], newName, { type: 'image/webp', lastModified: Date.now() }));
+        }, 'image/webp', quality);
       };
       img.src = e.target.result;
     };

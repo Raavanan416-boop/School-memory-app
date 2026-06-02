@@ -7,7 +7,16 @@ import { router } from '../router.js';
 
 let unsubNotifs = null;
 
+export function destroyNotifications() {
+  if (unsubNotifs) {
+    unsubNotifs();
+    unsubNotifs = null;
+  }
+}
+
 export async function renderNotifications(container) {
+  router.registerDestroy('notifications', destroyNotifications);
+  destroyNotifications();
   if (unsubNotifs) unsubNotifs();
 
   container.innerHTML = `
@@ -189,6 +198,10 @@ function createNotifCard(notif) {
     announcement: { icon: '📢', color: 'bg-orange-50 border-orange-100' },
     diary_entry: { icon: '📖', color: 'bg-warm-50 border-warm-100' },
     call_incoming: { icon: '📞', color: 'bg-green-50 border-green-100' },
+    voice_call_incoming: { icon: '📞', color: 'bg-green-50 border-green-100' },
+    video_call_incoming: { icon: '📹', color: 'bg-green-50 border-green-100' },
+    missed_voice_call: { icon: '📵', color: 'bg-red-50 border-red-100' },
+    missed_video_call: { icon: '📵', color: 'bg-red-50 border-red-100' },
     game_challenge: { icon: '🎮', color: 'bg-orange-50 border-orange-100' },
     tag: { icon: '📸', color: 'bg-blue-50 border-blue-100' },
     badge_suggestion: { icon: '🏅', color: 'bg-amber-50 border-amber-100' },
@@ -307,6 +320,10 @@ function getDefaultTitle(type) {
     announcement: '📢 School Announcement',
     diary_entry: '📖 New Diary Entry',
     call_incoming: '📞 Incoming Call',
+    voice_call_incoming: '📞 Incoming Voice Call',
+    video_call_incoming: '📹 Incoming Video Call',
+    missed_voice_call: '📵 Missed Voice Call',
+    missed_video_call: '📵 Missed Video Call',
     game_challenge: '🎮 Game Challenge',
     tag: '📸 Tagged',
     badge_suggestion: '🏅 New Badge',
@@ -330,6 +347,10 @@ function getDefaultBody(notif) {
     announcement: 'New announcement available.',
     diary_entry: `${name} wrote in the diary.`,
     call_incoming: `Incoming call from ${name}.`,
+    voice_call_incoming: `Incoming voice call from ${name}.`,
+    video_call_incoming: `Incoming video call from ${name}.`,
+    missed_voice_call: `Missed voice call from ${name}.`,
+    missed_video_call: `Missed video call from ${name}.`,
     game_challenge: `${name} challenged you!`,
     tag: `${name} tagged you in a memory.`,
     badge_suggestion: `${name} suggested a new title for you.`,

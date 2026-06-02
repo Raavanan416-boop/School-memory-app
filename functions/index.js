@@ -1,4 +1,4 @@
-// Cloud Functions — Push notification sender
+// Cloud Functions — Push notification sender + Call notification handler
 // Triggers when a notification document is created in Firestore
 // Reads the receiver's FCM token and sends push via FCM
 
@@ -12,15 +12,18 @@ const db = getFirestore();
 
 /**
  * Send push notification when a notification document is created.
+ * Handles all types: messages, likes, comments, calls, missed calls, etc.
  * 
  * Expected notification document fields:
  * - userId: string (receiver's uid)
  * - title: string (notification title with emoji)
  * - body: string (notification body text)
- * - type: string (like, comment, chat_message, etc.)
+ * - type: string (like, comment, chat_message, voice_call_incoming, etc.)
  * - targetUrl: string (deep-link URL for click routing)
  * - fromId: string (sender's uid)
  * - fromName: string (sender's display name)
+ * - callId: string (for call notifications)
+ * - callType: string ('voice' or 'video')
  */
 exports.sendPushNotification = onDocumentCreated('notifications/{notifId}', async (event) => {
   const snap = event.data;
@@ -51,51 +54,67 @@ exports.sendPushNotification = onDocumentCreated('notifications/{notifId}', asyn
       return;
     }
 
-    // Build the FCM message
+    const type = notif.type || 'general';
     const title = notif.title || '📸 Class Memories';
     const body = notif.body || notif.message || 'New notification';
     const targetUrl = notif.targetUrl || '/';
 
+    // Determine priority and TTL based on notification type
+    const isCallNotif = type.includes('call_incoming');
+    const isMissedCall = type.includes('missed_');
+    const priority = isCallNotif ? 'high' : 'high'; // All notifications are high priority
+    const ttl = isCallNotif ? '30' : '86400'; // Calls expire in 30s, others in 24h
+
+    // Build the FCM message
     const message = {
       token: fcmToken,
-      notification: {
-        title: title,
-        body: body,
-      },
+      // Use data-only message for maximum control over notification display
       data: {
         title: title,
         body: body,
-        type: notif.type || 'general',
+        type: type,
         targetUrl: targetUrl,
         notifId: notifId,
-        tag: `${notif.type || 'general'}-${notifId}`,
+        tag: `${type}-${notifId}`,
         fromId: notif.fromId || '',
         fromName: notif.fromName || '',
+        // Call-specific fields
+        callId: notif.callId || '',
+        callType: notif.callType || '',
+        callerName: notif.fromName || '',
+        callerId: notif.fromId || '',
       },
       webpush: {
         headers: {
           Urgency: 'high',
-          TTL: '86400',
+          TTL: ttl,
         },
-        notification: {
-          title: title,
-          body: body,
-          icon: '/icons/icon-192.svg',
-          badge: '/icons/icon-192.svg',
-          vibrate: [200, 100, 200, 100, 200],
-          tag: `${notif.type || 'general'}-${notifId}`,
-          renotify: true,
-          requireInteraction: true,
-          data: {
-            url: targetUrl,
-            type: notif.type || 'general',
-            notifId: notifId,
+        // Let the service worker handle notification display
+        // Only include notification for non-call types (calls need custom handling)
+        ...(isCallNotif ? {} : {
+          notification: {
+            title: title,
+            body: body,
+            icon: '/icons/icon-192.svg',
+            badge: '/icons/icon-192.svg',
+            vibrate: [200, 100, 200, 100, 200],
+            tag: `${type}-${notifId}`,
+            renotify: true,
+            requireInteraction: type !== 'chat_message',
+            data: {
+              url: targetUrl,
+              type: type,
+              notifId: notifId,
+            },
+            actions: isCallNotif ? [
+              { action: 'accept_call', title: '✅ Accept' },
+              { action: 'reject_call', title: '❌ Reject' }
+            ] : [
+              { action: 'open', title: 'Open' },
+              { action: 'dismiss', title: 'Dismiss' },
+            ],
           },
-          actions: [
-            { action: 'open', title: 'Open' },
-            { action: 'dismiss', title: 'Dismiss' },
-          ],
-        },
+        }),
         fcmOptions: {
           link: targetUrl,
         },
@@ -103,18 +122,42 @@ exports.sendPushNotification = onDocumentCreated('notifications/{notifId}', asyn
       android: {
         priority: 'high',
         notification: {
-          channelId: 'class_memories_notifications',
+          channelId: isCallNotif ? 'incoming_calls' : 'class_memories_notifications',
           priority: 'max',
           defaultSound: true,
           defaultVibrateTimings: true,
           visibility: 'public',
+          // For calls, make the notification persistent
+          ...(isCallNotif ? {
+            sticky: true,
+            ongoing: true,
+          } : {}),
+        },
+      },
+      apns: {
+        headers: {
+          'apns-priority': '10',
+          'apns-push-type': 'alert',
+        },
+        payload: {
+          aps: {
+            alert: {
+              title: title,
+              body: body,
+            },
+            sound: isCallNotif ? 'default' : 'default',
+            badge: 1,
+            'content-available': 1,
+            'mutable-content': 1,
+            ...(isCallNotif ? { 'interruption-level': 'time-sensitive' } : {}),
+          },
         },
       },
     };
 
     // Send the push notification
     const response = await getMessaging().send(message);
-    console.log('Push sent successfully:', response, 'to:', receiverId);
+    console.log('Push sent successfully:', response, 'type:', type, 'to:', receiverId);
 
   } catch (error) {
     // Handle invalid/expired tokens

@@ -11,11 +11,14 @@ let unsubPolls = null;
 const deletedPollIds = new Set();
 
 export function destroyPolls() {
-  if (unsubPolls) unsubPolls();
-  unsubPolls = null;
+  if (unsubPolls) {
+    unsubPolls();
+    unsubPolls = null;
+  }
 }
 
 export async function renderPolls(container) {
+  router.registerDestroy('polls', destroyPolls);
   destroyPolls();
 
   container.innerHTML = `

@@ -8,13 +8,16 @@ import { showDeleteConfirmation } from '../delete-confirm.js';
 
 let unsubCapsules = null;
 
-export function destroyTimeCapsule() {
-  if (unsubCapsules) unsubCapsules();
-  unsubCapsules = null;
+export function destroyTimecapsule() {
+  if (unsubCapsules) {
+    unsubCapsules();
+    unsubCapsules = null;
+  }
 }
 
 export async function renderTimeCapsule(container) {
-  destroyTimeCapsule();
+  router.registerDestroy('timecapsule', destroyTimecapsule);
+  destroyTimecapsule();
 
   container.innerHTML = `
     <section class="px-4 pt-4">

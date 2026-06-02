@@ -223,12 +223,48 @@ class AuthManager {
 export const authManager = new AuthManager();
 
 export async function awardPoints(userId, points, reason) {
-  if (!userId || !points) return;
+  console.log(`[Points Engine] AWARD POINTS STARTED`);
+  console.log(`[Points Engine] User: ${userId}, Points: ${points}, Reason: ${reason}`);
+
+  if (!userId || !points) {
+    console.log(`[Points Engine] FAILED: Missing userId or points`);
+    return;
+  }
   try {
     const userRef = doc(db, 'users', userId);
+    console.log(`[Points Engine] UPDATING USER POINTS`);
+    
+    // Check current points (for debugging)
+    const snap = await getDoc(userRef);
+    const currentPoints = snap.exists() ? (snap.data().points || 0) : 0;
+    console.log(`[Points Engine] Current Points: ${currentPoints}`);
+
     await updateDoc(userRef, {
       points: increment(points)
     });
+    
+    // Update local cache so UI updates instantly without relying on a reload
+    if (userId === authManager.currentUser?.uid && authManager.userData) {
+      authManager.userData.points = currentPoints + points;
+      authManager._notify();
+    }
+
+    console.log(`[Points Engine] POINT UPDATE SUCCESS`);
+    console.log(`[Points Engine] Updated Points: ${currentPoints + points}`);
+    
+    // Save points transaction history
+    /* 
+    console.log(`[Points Engine] Saving transaction record...`);
+    const { collection, addDoc, serverTimestamp } = await import('./firebase-config.js');
+    await addDoc(collection(db, 'pointsHistory'), {
+      userId,
+      points,
+      reason,
+      createdAt: serverTimestamp()
+    });
+    console.log(`[Points Engine] Transaction saved.`);
+    */
+
     const action = points > 0 ? `Awarded +${points}` : `Deducted ${points}`;
     console.log(`[Points Engine] ${action} to user ${userId} for: ${reason}. Total points updated via transaction.`);
   } catch(e) {

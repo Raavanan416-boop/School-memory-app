@@ -14,22 +14,22 @@ export function destroySlamBook() {
 
 export async function renderSlamBookTab(el, user, viewingOther) {
   destroySlamBook();
-  
+
   const q = query(collection(db, 'slambooks'), where('ownerId', '==', user.id));
-  
+
   el.innerHTML = '<div class="p-8 text-center text-gray-400">Loading Slam Books...</div>';
-  
+
   unsubBooks = onSnapshot(q, (snap) => {
     const books = [];
     snap.forEach(d => books.push({ id: d.id, ...d.data() }));
-    
+
     // Sort descending client-side to avoid requiring composite index
     books.sort((a, b) => {
       const ta = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
       const tb = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
       return tb - ta;
     });
-    
+
     if (!viewingOther) {
       renderOwnerBooksList(el, user, books);
     } else {
@@ -48,7 +48,7 @@ function renderOwnerBooksList(el, user, books) {
         <div class="text-5xl mb-4">📚</div>
         <h3 class="text-xl font-bold text-navy-800 mb-2 font-handwriting">Create Your First Slam Book</h3>
         <p class="text-sm text-gray-500 mb-6">Ask your friends anything! Add custom questions, emojis, and more.</p>
-        <button id="btn-create-slambook" class="px-6 py-3 bg-navy-600 hover:bg-navy-700 text-white font-bold rounded-xl shadow-lg transition-all transform hover:scale-105">+ Build My Slam Book (+4 Pts)</button>
+        <button id="btn-create-slambook" class="px-6 py-3 bg-navy-600 hover:bg-navy-700 text-white font-bold rounded-xl shadow-lg transition-all transform hover:scale-105">+ Build My Slam Book (+5 Pts)</button>
       </div>
     `;
     el.querySelector('#btn-create-slambook')?.addEventListener('click', () => showSlamBookConfigurator());
@@ -86,7 +86,7 @@ function renderOwnerBooksList(el, user, books) {
   `;
 
   el.querySelector('#btn-create-slambook')?.addEventListener('click', () => showSlamBookConfigurator());
-  
+
   el.querySelectorAll('.btn-dashboard').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -112,7 +112,7 @@ function renderOwnerBooksList(el, user, books) {
 function renderGuestBooksList(el, user, books) {
   // Simple check for friendship could be added here. For now assume if they can see the profile, they can see 'public'.
   // If visibility is 'close', we'd normally check friends list. 
-  
+
   if (books.length === 0) {
     el.innerHTML = `
       <div class="px-4 py-16 text-center animate-fadeIn">
@@ -157,7 +157,7 @@ function showSlamBookConfigurator(existingBook = null) {
   let description = existingBook?.description || '';
   let visibility = existingBook?.visibility || 'public';
   let allowAnonymous = existingBook?.allowAnonymous ?? true;
-  
+
   let questions = existingBook?.questions ? JSON.parse(JSON.stringify(existingBook.questions)) : [
     { id: 'q1', type: 'memory', text: 'What is your favorite memory with me?', isRequired: true },
     { id: 'q2', type: 'text', text: 'Describe me in 3 words!', isRequired: true }
@@ -168,10 +168,10 @@ function showSlamBookConfigurator(existingBook = null) {
   const renderQuestions = () => {
     const listEl = modal.body.querySelector('#sb-question-list');
     if (!listEl) return;
-    
+
     listEl.innerHTML = questions.map((q, index) => {
       const isChoice = q.type === 'radio' || q.type === 'checkbox' || q.type === 'emoji';
-      
+
       return `
       <div class="bg-white border border-gray-200 p-4 rounded-2xl shadow-sm mb-4 relative group">
         <div class="flex items-center justify-between mb-3">
@@ -223,27 +223,27 @@ function showSlamBookConfigurator(existingBook = null) {
   };
 
   window.sbRemoveQ = (i) => { questions.splice(i, 1); renderQuestions(); };
-  window.sbUpdateQ = (i, field, val) => { 
-    questions[i][field] = val; 
+  window.sbUpdateQ = (i, field, val) => {
+    questions[i][field] = val;
     if (field === 'type' && (val === 'radio' || val === 'checkbox' || val === 'emoji') && !questions[i].options) {
       questions[i].options = ['Option 1', 'Option 2'];
     }
-    if (field === 'type') renderQuestions(); 
+    if (field === 'type') renderQuestions();
   };
   window.sbMoveQ = (i, dir) => {
     const temp = questions[i];
-    questions[i] = questions[i+dir];
-    questions[i+dir] = temp;
+    questions[i] = questions[i + dir];
+    questions[i + dir] = temp;
     renderQuestions();
   };
   window.sbDupQ = (i) => {
     const dup = JSON.parse(JSON.stringify(questions[i]));
-    dup.id = 'q'+Date.now();
-    questions.splice(i+1, 0, dup);
+    dup.id = 'q' + Date.now();
+    questions.splice(i + 1, 0, dup);
     renderQuestions();
   };
-  window.sbAddQ = () => { questions.push({ id: 'q'+Date.now(), type: 'text', text: '', isRequired: false }); renderQuestions(); };
-  
+  window.sbAddQ = () => { questions.push({ id: 'q' + Date.now(), type: 'text', text: '', isRequired: false }); renderQuestions(); };
+
   window.sbUpdateOpt = (qIdx, oIdx, val) => { questions[qIdx].options[oIdx] = val; };
   window.sbRemoveOpt = (qIdx, oIdx) => { questions[qIdx].options.splice(oIdx, 1); renderQuestions(); };
   window.sbAddOpt = (qIdx) => { questions[qIdx].options.push('New Option'); renderQuestions(); };
@@ -257,13 +257,13 @@ function showSlamBookConfigurator(existingBook = null) {
           <div class="flex-1 bg-white/10 p-3 rounded-xl border border-white/20">
             <label class="block text-[10px] uppercase text-indigo-200 font-bold mb-1">Visibility</label>
             <select id="sb-priv" class="w-full text-xs font-bold bg-transparent text-white focus:outline-none">
-              <option value="public" class="text-navy-800" ${visibility==='public'?'selected':''}>🌍 Public</option>
-              <option value="friends" class="text-navy-800" ${visibility==='friends'?'selected':''}>👥 Friends Only</option>
+              <option value="public" class="text-navy-800" ${visibility === 'public' ? 'selected' : ''}>🌍 Public</option>
+              <option value="friends" class="text-navy-800" ${visibility === 'friends' ? 'selected' : ''}>👥 Friends Only</option>
             </select>
           </div>
           <div class="flex-1 bg-white/10 p-3 rounded-xl border border-white/20 flex flex-col justify-center items-center cursor-pointer">
             <label class="block text-[10px] uppercase text-indigo-200 font-bold mb-1 text-center cursor-pointer">Allow Anonymous</label>
-            <input type="checkbox" id="sb-anon" ${allowAnonymous?'checked':''} class="w-5 h-5 cursor-pointer"/>
+            <input type="checkbox" id="sb-anon" ${allowAnonymous ? 'checked' : ''} class="w-5 h-5 cursor-pointer"/>
           </div>
         </div>
       </div>
@@ -283,7 +283,7 @@ function showSlamBookConfigurator(existingBook = null) {
       ${existingBook ? `<button id="sb-delete-book" class="w-full py-3 text-red-500 font-bold text-sm bg-red-50 rounded-xl mt-3 hover:bg-red-100 transition-colors">Delete Book</button>` : ''}
     </div>
   `;
-  
+
   renderQuestions();
 
   modal.body.querySelector('#sb-save-config').addEventListener('click', async () => {
@@ -309,17 +309,9 @@ function showSlamBookConfigurator(existingBook = null) {
         await updateDoc(doc(db, 'slambooks', existingBook.id), finalConfig);
         showToast('Book updated!', 'success');
       } else {
-        const existingBooksSnap = await getDocs(query(collection(db, 'slambooks'), where('ownerId', '==', authManager.currentUser.uid), limit(1)));
-        const isFirstBook = existingBooksSnap.empty;
-        
         await addDoc(collection(db, 'slambooks'), finalConfig);
-        
-        if (isFirstBook) {
-          showToast('Slam Book Created! +5 Points Earned 🌟', 'success');
-          awardPoints(authManager.currentUser.uid, 5, 'First Slam Book Created');
-        } else {
-          showToast('Slam Book Created!', 'success');
-        }
+        showToast('Slam Book Created! +5 Points Earned 🌟', 'success');
+        await awardPoints(authManager.currentUser.uid, 5, 'Slam Book Created');
       }
       modal.close();
     } catch (e) {
@@ -340,7 +332,7 @@ function showSlamBookConfigurator(existingBook = null) {
           const deletePromises = [];
           snap.forEach(d => deletePromises.push(deleteDoc(doc(db, 'slambookResponses', d.id))));
           await Promise.all(deletePromises);
-          
+
           // Deduct points and delete book
           await awardPoints(existingBook.ownerId, -5, 'Slam Book Deleted');
           await deleteDoc(doc(db, 'slambooks', existingBook.id));
@@ -358,7 +350,7 @@ function showSlamBookConfigurator(existingBook = null) {
 // -----------------------------------------
 function openOwnerDashboard(book) {
   const modal = router.openModal('slambook-dash', { title: sanitizeHTML(book.title), fullScreen: true });
-  
+
   modal.body.innerHTML = `
     <div class="bg-gray-50 min-h-full pb-20">
       <div class="bg-navy-800 pt-6 pb-12 px-4 rounded-b-[40px] text-center shadow-md">
@@ -392,7 +384,7 @@ function openOwnerDashboard(book) {
     modal.close();
     showSlamBookConfigurator(book);
   });
-  
+
 
 
   const q = query(collection(db, 'slambookResponses'), where('slambookId', '==', book.id));
@@ -420,7 +412,7 @@ function openOwnerDashboard(book) {
       responses.push(data);
       if (data.isPinned) pinnedCount++;
     });
-    
+
     // Sort descending client-side
     responses.sort((a, b) => {
       const ta = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
@@ -474,13 +466,13 @@ function openOwnerDashboard(book) {
 function openResponseReader(response, book) {
   const modal = router.openModal('slambook-reader', { title: '📖 Friend\'s Response' });
   const name = response.authorName || 'Anonymous';
-  
+
   const renderAnswer = (q, ans) => {
     if (!ans && ans !== 0 && ans !== false) return '<span class="text-gray-400 italic">Skipped</span>';
-    
-    switch(q.type) {
-      case 'rating_5': 
-        return '<span class="text-xl text-yellow-400">' + '★'.repeat(parseInt(ans)) + '☆'.repeat(5-parseInt(ans)) + '</span>';
+
+    switch (q.type) {
+      case 'rating_5':
+        return '<span class="text-xl text-yellow-400">' + '★'.repeat(parseInt(ans)) + '☆'.repeat(5 - parseInt(ans)) + '</span>';
       case 'rating_10':
         return `<span class="font-bold text-indigo-600 text-xl">${ans}/10</span>`;
       case 'yes_no':
@@ -497,7 +489,7 @@ function openResponseReader(response, book) {
     const answer = response.answers[q.id];
     return `
       <div class="mb-6 relative">
-        <span class="absolute -left-2 -top-2 text-[40px] text-gray-200 font-bold opacity-30 z-0">${idx+1}</span>
+        <span class="absolute -left-2 -top-2 text-[40px] text-gray-200 font-bold opacity-30 z-0">${idx + 1}</span>
         <div class="relative z-10">
           <p class="text-xs font-bold text-navy-500 uppercase mb-2 ml-4">${sanitizeHTML(q.text)}</p>
           <div class="bg-[#f9f5eb] p-4 rounded-xl border-b-[3px] border-[#e8d5b5] transform rotate-[0.5deg]">
@@ -537,7 +529,7 @@ function openResponseReader(response, book) {
       await updateDoc(doc(db, 'slambookResponses', response.id), { isPinned: newStatus });
       response.isPinned = newStatus;
       showToast(newStatus ? 'Pinned to top!' : 'Unpinned', 'success');
-      
+
       if (newStatus && response.authorId) {
         const { createNotification } = await import('../notifications.js');
         await createNotification('slambook_pinned', response.authorId, { fromName: authManager.userData?.fullName });
@@ -564,16 +556,16 @@ async function openGuestWriter(targetUser, book) {
   if (!myUid) return showToast('Please login to write!', 'warning');
 
   const modal = router.openModal('slambook-writer', { title: '✍️ Writing in Slam Book', fullScreen: true });
-  
+
   const renderInput = (q) => {
     const req = q.isRequired ? 'required' : '';
-    switch(q.type) {
+    switch (q.type) {
       case 'paragraph':
       case 'memory':
-        return `<textarea id="sb-ans-${q.id}" rows="${q.type==='memory'?4:3}" class="w-full bg-transparent border-none focus:ring-0 focus:outline-none font-handwriting text-2xl text-navy-900 resize-none leading-[30px] placeholder-gray-400/50" placeholder="Write here..." ${req}></textarea>`;
+        return `<textarea id="sb-ans-${q.id}" rows="${q.type === 'memory' ? 4 : 3}" class="w-full bg-transparent border-none focus:ring-0 focus:outline-none font-handwriting text-2xl text-navy-900 resize-none leading-[30px] placeholder-gray-400/50" placeholder="Write here..." ${req}></textarea>`;
       case 'radio':
         return `<div class="space-y-2 mt-2" id="sb-ans-${q.id}">
-          ${(q.options||[]).map((opt, i) => `
+          ${(q.options || []).map((opt, i) => `
             <label class="flex items-center gap-3 p-3 bg-white/50 rounded-xl cursor-pointer hover:bg-white transition-colors border border-transparent hover:border-gray-200">
               <input type="radio" name="radio_${q.id}" value="${sanitizeHTML(opt)}" class="w-5 h-5 text-indigo-600 focus:ring-indigo-500" ${req}/>
               <span class="text-sm font-bold text-navy-800">${sanitizeHTML(opt)}</span>
@@ -582,7 +574,7 @@ async function openGuestWriter(targetUser, book) {
         </div>`;
       case 'checkbox':
         return `<div class="space-y-2 mt-2" id="sb-ans-${q.id}">
-          ${(q.options||[]).map((opt, i) => `
+          ${(q.options || []).map((opt, i) => `
             <label class="flex items-center gap-3 p-3 bg-white/50 rounded-xl cursor-pointer hover:bg-white transition-colors border border-transparent hover:border-gray-200">
               <input type="checkbox" name="chk_${q.id}" value="${sanitizeHTML(opt)}" class="w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500"/>
               <span class="text-sm font-bold text-navy-800">${sanitizeHTML(opt)}</span>
@@ -591,7 +583,7 @@ async function openGuestWriter(targetUser, book) {
         </div>`;
       case 'emoji':
         return `<div class="flex flex-wrap gap-2 mt-2" id="sb-ans-${q.id}">
-          ${(q.options||['😀','😎','🤓','😴','👽']).map((opt, i) => `
+          ${(q.options || ['😀', '😎', '🤓', '😴', '👽']).map((opt, i) => `
             <label class="cursor-pointer group relative">
               <input type="radio" name="emoji_${q.id}" value="${sanitizeHTML(opt)}" class="peer sr-only" ${req}/>
               <div class="text-3xl p-2 bg-white/50 rounded-full border-2 border-transparent peer-checked:border-indigo-500 peer-checked:bg-white peer-checked:scale-110 transition-all filter grayscale peer-checked:grayscale-0">${sanitizeHTML(opt)}</div>
@@ -600,7 +592,7 @@ async function openGuestWriter(targetUser, book) {
         </div>`;
       case 'rating_5':
         return `<div class="flex gap-2 mt-2" id="sb-ans-${q.id}">
-          ${[1,2,3,4,5].map(v => `
+          ${[1, 2, 3, 4, 5].map(v => `
             <label class="cursor-pointer">
               <input type="radio" name="star_${q.id}" value="${v}" class="peer sr-only" ${req}/>
               <div class="text-4xl text-gray-300 peer-checked:text-yellow-400 hover:text-yellow-200 transition-colors">★</div>
@@ -630,7 +622,7 @@ async function openGuestWriter(targetUser, book) {
       <div id="sb-guest-form" class="space-y-8">
         ${book.questions.map((q, i) => `
           <div class="sb-q-block relative">
-            <span class="absolute -left-2 -top-4 text-[40px] text-gray-200 font-bold opacity-40 z-0">${i+1}</span>
+            <span class="absolute -left-2 -top-4 text-[40px] text-gray-200 font-bold opacity-40 z-0">${i + 1}</span>
             <div class="relative z-10">
               <p class="text-sm font-bold text-navy-800 font-sans uppercase mb-1 bg-white/50 inline-block px-2 py-0.5 rounded shadow-sm">${sanitizeHTML(q.text)} ${q.isRequired ? '<span class="text-red-500">*</span>' : ''}</p>
               ${renderInput(q)}
@@ -644,20 +636,20 @@ async function openGuestWriter(targetUser, book) {
               <span class="text-sm font-bold text-navy-800">Stay Anonymous 👻</span>
               <input type="checkbox" id="sb-anon-check" class="w-5 h-5 text-indigo-600 rounded cursor-pointer"/>
             </label>
-            <p class="text-[10px] text-gray-500 mt-1">They won't know who wrote this, but you still get +4 points!</p>
+            <p class="text-[10px] text-gray-500 mt-1">They won't know who wrote this, but you still get +5 points!</p>
           </div>
         ` : ''}
       </div>
     </div>
 
     <div class="sticky bottom-0 left-0 right-0 p-4 bg-[#fcf8f2] border-t border-[#e8d5b5] z-10 shadow-[0_-4px_15px_rgba(0,0,0,0.05)]">
-      <button id="sb-submit-btn" class="w-full py-4 bg-navy-800 hover:bg-navy-900 text-white font-bold rounded-2xl shadow-xl transition-all transform active:scale-95 text-lg font-handwriting tracking-wider">Sign & Save (+4 Pts) 📖</button>
+      <button id="sb-submit-btn" class="w-full py-4 bg-navy-800 hover:bg-navy-900 text-white font-bold rounded-2xl shadow-xl transition-all transform active:scale-95 text-lg font-handwriting tracking-wider">Sign & Save ( Pts) 📖</button>
     </div>
   `;
 
   // Fix radio/checkbox logic to only allow 1 star/emoji to be selected visually by standard HTML radio behavior.
   // Note: rating stars are all same name per question so standard radio behavior applies.
-  
+
   modal.body.querySelector('#sb-submit-btn').addEventListener('click', async () => {
     const answers = {};
     let missingRequired = false;
@@ -665,7 +657,7 @@ async function openGuestWriter(targetUser, book) {
     book.questions.forEach(q => {
       let val = null;
       const el = modal.body.querySelector(`#sb-ans-${q.id}`);
-      
+
       if (q.type === 'radio' || q.type === 'emoji' || q.type === 'rating_5' || q.type === 'yes_no') {
         const checked = el.querySelector('input:checked');
         if (checked) val = checked.value;
@@ -685,7 +677,7 @@ async function openGuestWriter(targetUser, book) {
     if (missingRequired) return showToast('Please answer all required questions!', 'warning');
 
     const isAnon = book.allowAnonymous ? modal.body.querySelector('#sb-anon-check').checked : false;
-    
+
     const btn = modal.body.querySelector('#sb-submit-btn');
     btn.disabled = true;
     btn.textContent = 'Saving...';
@@ -725,7 +717,7 @@ async function openGuestWriter(targetUser, book) {
 // -----------------------------------------
 async function shareSlamBook(book) {
   const modal = router.openModal('slambook-share', { title: '📤 Share Slam Book' });
-  
+
   modal.body.innerHTML = `
     <div class="p-6 text-center animate-fadeIn">
       <div class="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-2xl mx-auto mb-4 shadow-inner">📖</div>
@@ -748,7 +740,7 @@ async function shareSlamBook(book) {
     const snap = await getDocs(q);
     const users = [];
     snap.forEach(d => {
-      if (d.id !== authManager.currentUser.uid) users.push({id: d.id, ...d.data()});
+      if (d.id !== authManager.currentUser.uid) users.push({ id: d.id, ...d.data() });
     });
 
     const listEl = modal.body.querySelector('#sb-friends-list');
@@ -782,17 +774,17 @@ async function shareSlamBook(book) {
     btn.addEventListener('click', async () => {
       const selectedIds = checkboxes.filter(c => c.checked).map(c => c.value);
       if (selectedIds.length === 0) return;
-      
+
       btn.disabled = true;
       btn.innerHTML = '<svg class="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg> Sending...';
 
       const { createNotification } = await import('../notifications.js');
-      
+
       try {
-        await Promise.all(selectedIds.map(id => 
+        await Promise.all(selectedIds.map(id =>
           createNotification('slambook_share', id, { fromName: authManager.userData.fullName })
         ));
-        
+
         showToast(`Sent to ${selectedIds.length} friends!`, 'success');
         modal.close();
       } catch (err) {

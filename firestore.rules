@@ -131,6 +131,12 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated();
     }
+    
+    // Points transaction history
+    match /pointsHistory/{docId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+    }
 
     // Games (scores, votes, etc.)
     match /games/{gameId} {

@@ -148,9 +148,11 @@ function updateUI(container, scores) {
 }
 
 function setupRealtimeSync(container) {
+  console.log(`[Leaderboard] Setting up realtime sync...`);
   const q = query(collection(db, 'users'), orderBy('points', 'desc'));
   
   unsubLeaderboard = onSnapshot(q, (snap) => {
+    console.log(`[Leaderboard] Snapshot received. Docs count: ${snap.size}`);
     const scores = [];
     snap.forEach(d => {
       const data = d.data();
@@ -161,10 +163,16 @@ function setupRealtimeSync(container) {
         points: data.points || 0
       });
     });
+    
+    // Log the current user's points from the leaderboard query result
+    const myScore = scores.find(s => s.id === authManager.currentUser?.uid);
+    console.log(`[Leaderboard] Current User (${authManager.currentUser?.uid}) Points in query:`, myScore ? myScore.points : 'Not found');
+    
     updateUI(container, scores);
+    console.log(`[Leaderboard] UI Updated successfully.`);
   }, (error) => {
-    console.error("Leaderboard listener error:", error);
-    container.innerHTML = `<div class="p-8 text-center text-gray-500">Failed to load leaderboard</div>`;
+    console.error("[Leaderboard] listener error:", error);
+    container.innerHTML = `<div class="p-8 text-center text-gray-500">Failed to load leaderboard: ${error.message}</div>`;
   });
 }
 

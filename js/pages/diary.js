@@ -3,7 +3,7 @@ import { db, collection, addDoc, query, orderBy, onSnapshot, doc, updateDoc,
   serverTimestamp, limit, arrayUnion, arrayRemove, getDocs, where, storage,
   storageRef, uploadBytes, getDownloadURL, deleteDoc } from '../firebase-config.js';
 import { showToast, sanitizeHTML, formatDate, MOOD_EMOJIS, timeAgo } from '../utils.js';
-import { authManager } from '../auth.js';
+import { authManager, awardPoints } from '../auth.js';
 import { router } from '../router.js';
 import { showDeleteConfirmation, deleteDocFull } from '../delete-confirm.js';
 
@@ -224,6 +224,7 @@ function createDiaryEntry(entry) {
     e.stopPropagation();
     showDeleteConfirmation('this diary entry', async () => {
       deletedDiaryIds.add(entry.id);
+      await awardPoints(entry.authorId || entry.userId, -1, 'Diary Deleted');
       await deleteDocFull('diary', entry.id, ['replies', 'continuations'], [entry.imageUrl]);
     }, { element: card });
   });
@@ -620,7 +621,8 @@ function showDiaryEntryModal() {
         replyCount: 0,
         createdAt: serverTimestamp()
       });
-      showToast('Diary entry added! 📖', 'success');
+      showToast('Diary entry added! +1 Point 📖', 'success');
+      awardPoints(authManager.currentUser.uid, 1, 'Diary Created');
       modal.close();
     } catch (e) {
       console.error(e);

@@ -245,9 +245,9 @@ function createNotifCard(notif) {
   card.addEventListener('click', async (e) => {
     if (e.target.closest('.notif-delete-btn')) return; // Don't navigate on delete
 
-    if (!notif.read) {
-      await notificationManager.markRead(notif.id);
-    }
+    // Automatically delete notification when clicked (as requested by user)
+    await notificationManager.deleteNotification(notif.id);
+    
     notificationManager.navigateToNotification(notif);
   });
 
@@ -319,6 +319,8 @@ function getDefaultTitle(type) {
     poll_created: '📊 New Poll',
     announcement: '📢 School Announcement',
     diary_entry: '📖 New Diary Entry',
+    slambook_response: '✨ New Slam Book Response',
+    slambook_pinned: '📌 Response Pinned',
     call_incoming: '📞 Incoming Call',
     voice_call_incoming: '📞 Incoming Voice Call',
     video_call_incoming: '📹 Incoming Video Call',
@@ -346,6 +348,8 @@ function getDefaultBody(notif) {
     poll_created: 'Vote in the latest class poll.',
     announcement: 'New announcement available.',
     diary_entry: `${name} wrote in the diary.`,
+    slambook_response: `${name} answered your Slam Book!`,
+    slambook_pinned: `${name} pinned your Slam Book response!`,
     call_incoming: `Incoming call from ${name}.`,
     voice_call_incoming: `Incoming voice call from ${name}.`,
     video_call_incoming: `Incoming video call from ${name}.`,
@@ -357,11 +361,4 @@ function getDefaultBody(notif) {
     miss_you: `${name} misses you ❤️🥺`,
   };
   return bodies[notif.type] || notif.message || 'New notification';
-}
-
-export function destroyNotifications() {
-  if (unsubNotifs) {
-    unsubNotifs();
-    unsubNotifs = null;
-  }
 }

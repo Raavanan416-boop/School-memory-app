@@ -88,7 +88,7 @@ export async function renderProfile(container, data = null) {
   })();
 
   container.innerHTML = `
-    <div class="min-h-screen" style="background:var(--bg, #f5f0ea);">
+    <div class="min-h-screen overflow-y-auto overflow-x-hidden relative" style="background:var(--bg, #f5f0ea);">
     ${viewingOther ? `
       <button id="back-profile-btn" class="profile-back-btn">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/></svg>
@@ -102,8 +102,8 @@ export async function renderProfile(container, data = null) {
         <div class="relative flex-shrink-0">
           <div class="profile-avatar-container ${isBirthday ? 'birthday-ring' : ''}" id="profile-pic-view">
             ${user.profilePic
-              ? `<img src="${user.profilePic}" class="w-full h-full object-cover" alt="${sanitizeHTML(user.fullName || '')}" id="profile-pic-img"/>`
-              : `<div class="w-full h-full flex items-center justify-center text-white text-4xl font-bold">${(user.fullName || '?')[0]}</div>`}
+      ? `<img src="${user.profilePic}" class="w-full h-full object-cover" alt="${sanitizeHTML(user.fullName || '')}" id="profile-pic-img"/>`
+      : `<div class="w-full h-full flex items-center justify-center text-white text-4xl font-bold">${(user.fullName || '?')[0]}</div>`}
           </div>
           <div class="absolute bottom-1 right-1 w-5 h-5 rounded-full ${user.online ? 'bg-green-400' : 'bg-gray-300'} border-3 border-white"></div>
           ${isBirthday ? '<div class="absolute -top-1 -right-1"><span class="birthday-badge">🎂</span></div>' : ''}
@@ -221,8 +221,8 @@ export async function renderProfile(container, data = null) {
               <div class="menu-profile-card" id="menu-go-profile">
                 <div class="menu-profile-avatar-wrap">
                   ${user.profilePic
-                    ? `<img src="${user.profilePic}" class="menu-profile-avatar" alt=""/>`
-                    : `<div class="menu-profile-avatar menu-profile-avatar-placeholder">${(user.fullName || '?')[0]}</div>`}
+        ? `<img src="${user.profilePic}" class="menu-profile-avatar" alt=""/>`
+        : `<div class="menu-profile-avatar menu-profile-avatar-placeholder">${(user.fullName || '?')[0]}</div>`}
                   <span class="menu-profile-online-dot"></span>
                 </div>
                 <div class="menu-profile-info">
@@ -360,6 +360,11 @@ export async function renderProfile(container, data = null) {
     activeTab = tab;
     container.querySelectorAll('.profile-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
 
+    // Smooth transition for tab content
+    tabContent.classList.remove('animate-fadeIn');
+    void tabContent.offsetWidth; // Trigger reflow
+    tabContent.classList.add('animate-fadeIn');
+
     switch (tab) {
       case 'posts': renderPostsTab(tabContent, userPosts, viewingOther, user); break;
       case 'tagged': renderTaggedTab(tabContent, taggedPosts); break;
@@ -434,7 +439,7 @@ export async function renderProfile(container, data = null) {
     item.addEventListener('click', () => {
       const action = item.dataset.action;
       if (!action) return;
-      
+
       // Don't auto-close settings for logout if they are long-pressing it (we'll handle it)
       if (action !== 'logout') closeSettings();
       else if (!item.hasAttribute('data-long-pressing') && !item.hasAttribute('data-long-pressed')) closeSettings();
@@ -449,8 +454,8 @@ export async function renderProfile(container, data = null) {
           case 'privacy-settings': showPrivacySettings(); break;
           case 'close-friends': showCloseFriendsModal(); break;
           case 'theme-settings': showThemePickerModal(); break;
-          case 'logout': 
-            if (!item.hasAttribute('data-long-pressing') && !item.hasAttribute('data-long-pressed')) showLogoutConfirmation(); 
+          case 'logout':
+            if (!item.hasAttribute('data-long-pressing') && !item.hasAttribute('data-long-pressed')) showLogoutConfirmation();
             setTimeout(() => item.removeAttribute('data-long-pressed'), 500);
             break;
         }
@@ -482,12 +487,12 @@ export async function renderProfile(container, data = null) {
         showSecretCodePrompt();
       }, 3000);
     };
-    const cancelPress = () => { 
-      if (pressTimer) { 
-        clearTimeout(pressTimer); 
-        pressTimer = null; 
+    const cancelPress = () => {
+      if (pressTimer) {
+        clearTimeout(pressTimer);
+        pressTimer = null;
         console.log('Long Press Cancelled');
-      } 
+      }
       setTimeout(() => logoutBtn.removeAttribute('data-long-pressing'), 100);
     };
     logoutBtn.addEventListener('mousedown', startPress);
@@ -583,23 +588,8 @@ export async function renderProfile(container, data = null) {
   if (missYouBtn) {
     const targetUidMY = missYouBtn.dataset.uid;
     const targetNameMY = missYouBtn.dataset.name;
-    const cooldownKey = `miss_you_cooldown_${targetUidMY}`;
-    const cooldownMs = 24 * 60 * 60 * 1000; // 24 hours
-
-    // Check initial cooldown state
-    const lastSent = localStorage.getItem(cooldownKey);
-    if (lastSent && (Date.now() - parseInt(lastSent)) < cooldownMs) {
-      missYouBtn.classList.add('cooldown');
-      missYouBtn.innerHTML = '<span class="miss-you-icon">💕</span> Sent';
-    }
 
     missYouBtn.addEventListener('click', async () => {
-      // Check cooldown
-      const last = localStorage.getItem(cooldownKey);
-      if (last && (Date.now() - parseInt(last)) < cooldownMs) {
-        showToast('You already sent a miss you recently 💕', 'info');
-        return;
-      }
       if (!authManager.currentUser) return;
 
       // Vibration feedback
@@ -635,10 +625,6 @@ export async function renderProfile(container, data = null) {
           message: `${authManager.userData?.fullName || 'Someone'} misses you ❤️`
         });
 
-        // Set cooldown
-        localStorage.setItem(cooldownKey, Date.now().toString());
-        missYouBtn.classList.add('cooldown');
-        missYouBtn.innerHTML = '<span class="miss-you-icon">💕</span> Sent';
         showToast(`Miss you sent to ${targetNameMY} ❤️`, 'success');
       } catch (e) {
         console.error('Miss you error:', e);
@@ -793,9 +779,9 @@ function loadSuggestedBadgesRealtime(container, targetUserId, viewingOther) {
       container.innerHTML = `
         <div class="suggested-badges-grid">
           ${visibleBadges.map(b => {
-            const showSuggestor = (b.suggestedBy === myUid || isOwner);
-            const isPending = b.status === 'pending';
-            return `
+        const showSuggestor = (b.suggestedBy === myUid || isOwner);
+        const isPending = b.status === 'pending';
+        return `
               <div class="suggested-badge-card ${b.pinned ? 'pinned' : ''} ${isPending ? 'pending' : ''}" data-badge-id="${b.id}">
                 <div class="badge-icon-glow">${b.icon}</div>
                 <span class="badge-label">${sanitizeHTML(b.badgeName)}</span>
@@ -811,7 +797,7 @@ function loadSuggestedBadgesRealtime(container, targetUserId, viewingOther) {
                 ` : ''}
               </div>
             `;
-          }).join('')}
+      }).join('')}
         </div>
       `;
 
@@ -890,8 +876,8 @@ async function showStatDetailModal(type, userPosts, uid) {
           ${userPosts.map(p => `
             <div class="profile-post-thumb" data-post-id="${p.id}">
               ${p.imageUrl
-                ? `<img src="${p.imageUrl}" alt="" class="w-full h-full object-cover"/>`
-                : `<div class="w-full h-full bg-gradient-to-br from-navy-100 to-navy-200 flex items-center justify-center text-xs text-navy-500 p-2 text-center leading-tight">${sanitizeHTML((p.content || '').slice(0, 60))}</div>`}
+        ? `<img src="${p.imageUrl}" alt="" class="w-full h-full object-cover"/>`
+        : `<div class="w-full h-full bg-gradient-to-br from-navy-100 to-navy-200 flex items-center justify-center text-xs text-navy-500 p-2 text-center leading-tight">${sanitizeHTML((p.content || '').slice(0, 60))}</div>`}
               <div class="profile-post-overlay">
                 <span>❤️ ${p.likes?.length || 0}</span>
                 <span>💬 ${p.commentCount || 0}</span>
@@ -992,8 +978,8 @@ async function showFriendsListModal(uid) {
           <div class="friend-list-item" data-uid="${f.id}">
             <div class="relative">
               ${f.profilePic
-                ? `<img src="${f.profilePic}" class="friend-list-avatar"/>`
-                : `<div class="friend-list-avatar-placeholder">${(f.fullName || '?')[0]}</div>`}
+        ? `<img src="${f.profilePic}" class="friend-list-avatar"/>`
+        : `<div class="friend-list-avatar-placeholder">${(f.fullName || '?')[0]}</div>`}
               <div class="friend-online-dot ${f.online ? 'online' : ''}"></div>
             </div>
             <div class="flex-1 min-w-0">
@@ -1052,12 +1038,12 @@ async function showCloseFriendsModal() {
         <p class="text-xs text-gray-400 mb-4">Select close friends to share private memories and diary entries.</p>
         <div class="space-y-2" id="close-friends-list">
           ${allUsers.map(u => {
-            const isClose = closeFriends.includes(u.id);
-            return `
+      const isClose = closeFriends.includes(u.id);
+      return `
               <label class="close-friend-item ${isClose ? 'selected' : ''}" data-uid="${u.id}">
                 ${u.profilePic
-                  ? `<img src="${u.profilePic}" class="close-friend-avatar"/>`
-                  : `<div class="close-friend-avatar-placeholder">${(u.fullName || '?')[0]}</div>`}
+          ? `<img src="${u.profilePic}" class="close-friend-avatar"/>`
+          : `<div class="close-friend-avatar-placeholder">${(u.fullName || '?')[0]}</div>`}
                 <div class="flex-1 min-w-0">
                   <p class="text-sm font-semibold text-navy-800 truncate">${sanitizeHTML(u.fullName || 'Unknown')}</p>
                   <p class="text-[10px] text-gray-400">${u.nickname ? `"${sanitizeHTML(u.nickname)}"` : u.rollNumber || ''}</p>
@@ -1067,7 +1053,7 @@ async function showCloseFriendsModal() {
                 </div>
               </label>
             `;
-          }).join('')}
+    }).join('')}
         </div>
         <button id="save-close-friends" class="btn-primary btn-shimmer mt-4">💚 Save Close Friends</button>
       </div>
@@ -1140,8 +1126,8 @@ function renderPostsTab(el, posts, viewingOther, user) {
             <div class="rounded-2xl overflow-hidden bg-white shadow-sm border border-gray-50">
               <div class="aspect-[4/3] overflow-hidden bg-cream-100">
                 ${p.imageUrl
-                  ? `<img src="${p.imageUrl}" class="w-full h-full object-cover" alt="" loading="lazy"/>`
-                  : `<div class="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-cream-200 to-cream-300 p-3">
+      ? `<img src="${p.imageUrl}" class="w-full h-full object-cover" alt="" loading="lazy"/>`
+      : `<div class="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-cream-200 to-cream-300 p-3">
                       <span class="text-2xl mb-1">📝</span>
                       <p class="text-[10px] text-gray-500 font-handwriting text-center">${sanitizeHTML((p.caption || '').slice(0, 40))}</p>
                     </div>`}
@@ -1173,8 +1159,8 @@ function renderPostsTab(el, posts, viewingOther, user) {
           ${posts.map(p => `
             <div class="profile-post-cell">
               ${p.imageUrl
-                ? `<img src="${p.imageUrl}" class="w-full h-full object-cover" alt="" loading="lazy"/>`
-                : `<div class="w-full h-full bg-gradient-to-br from-cream-200 to-cream-300 flex flex-col items-center justify-center p-2">
+          ? `<img src="${p.imageUrl}" class="w-full h-full object-cover" alt="" loading="lazy"/>`
+          : `<div class="w-full h-full bg-gradient-to-br from-cream-200 to-cream-300 flex flex-col items-center justify-center p-2">
                     <span class="text-2xl mb-1">📝</span>
                     <p class="text-[10px] text-gray-500 text-center font-handwriting line-clamp-2">${sanitizeHTML((p.caption || '').slice(0, 40))}</p>
                   </div>`}
@@ -1216,8 +1202,8 @@ function renderTaggedTab(el, posts) {
       ${posts.map(p => `
         <div class="profile-post-cell">
           ${p.imageUrl
-            ? `<img src="${p.imageUrl}" class="w-full h-full object-cover" alt="" loading="lazy"/>`
-            : `<div class="w-full h-full bg-cream-200 flex items-center justify-center"><span class="text-2xl">📝</span></div>`}
+      ? `<img src="${p.imageUrl}" class="w-full h-full object-cover" alt="" loading="lazy"/>`
+      : `<div class="w-full h-full bg-cream-200 flex items-center justify-center"><span class="text-2xl">📝</span></div>`}
           <div class="profile-post-overlay">
             <span class="text-white text-[10px] font-medium">${sanitizeHTML(p.authorName || '')}</span>
           </div>
@@ -1227,223 +1213,10 @@ function renderTaggedTab(el, posts) {
 }
 
 async function renderSlamBookTab(el, user, viewingOther) {
-  const sb = user.slamBook || {};
-  const uid = viewingOther ? user.id : authManager.currentUser?.uid;
-
-  // Self-fill questions (profile owner answers about themselves)
-  const selfQuestions = [
-    { key: 'favoriteMemory', label: 'Favorite school memory?', icon: '💭' },
-    { key: 'firstImpression', label: 'First impression of school?', icon: '🏫' },
-    { key: 'funniestMoment', label: 'Funniest classroom moment?', icon: '😂' },
-    { key: 'bestFriend', label: 'Best friend in class?', icon: '👫' },
-    { key: 'favoriteTeacher', label: 'Favorite teacher?', icon: '👨‍🏫' },
-    { key: 'worstSubject', label: 'Most dreaded subject?', icon: '📚' },
-    { key: 'secretCrush', label: 'School crush? 🙈', icon: '💝' },
-    { key: 'afterSchoolDream', label: 'Dream after school?', icon: '🌟' }
-  ];
-
-  // Friend questions (friends answer about this person)
-  const friendQuestions = [
-    { key: 'whatYouLike', label: 'What do you like about this person?', icon: '❤️' },
-    { key: 'favoriteMemoryTogether', label: 'Favorite school memory together?', icon: '📸' },
-    { key: 'funniestMoment', label: 'Funniest moment together?', icon: '🤣' },
-    { key: 'nickname', label: 'Nickname for them?', icon: '🏷️' },
-    { key: 'firstImpression', label: 'First impression?', icon: '👀' },
-    { key: 'bestClassroomMemory', label: 'Best classroom memory?', icon: '🏫' },
-    { key: 'oneWord', label: 'Describe them in one word?', icon: '✍️' },
-    { key: 'message', label: 'A message for them?', icon: '💌' }
-  ];
-
-  el.innerHTML = `
-    <div class="px-4 py-4">
-      <!-- Self answers section -->
-      <div class="mb-6">
-        <div class="flex items-center justify-between mb-3">
-          <p class="text-xs font-semibold text-navy-600 uppercase tracking-wider">
-            ${viewingOther ? sanitizeHTML(user.fullName || 'Their') + "'s Answers" : 'Your Answers'}
-          </p>
-          ${!viewingOther ? '<button id="edit-slambook-tab-btn" class="text-xs text-navy-500 font-semibold px-3 py-1.5 rounded-full bg-navy-50 hover:bg-navy-100 transition-colors">✏️ Edit</button>' : ''}
-        </div>
-        <div class="slam-book-container">
-          ${selfQuestions.map((q, i) => `
-            <div class="slam-question-card animate-fadeIn" style="animation-delay: ${i * 0.03}s">
-              <div class="flex items-center gap-2 mb-1">
-                <span>${q.icon}</span>
-                <p class="text-[11px] text-navy-400 uppercase tracking-wider font-semibold">${q.label}</p>
-              </div>
-              <p class="font-handwriting text-lg text-gray-600 leading-relaxed pl-6">${sanitizeHTML(sb[q.key] || 'Not answered yet...')}</p>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-
-      <!-- Friend entries section -->
-      <div class="mt-6 pt-4 border-t border-gray-100">
-        <div class="flex items-center justify-between mb-3">
-          <p class="text-xs font-semibold text-navy-600 uppercase tracking-wider">
-            📖 Friend Slam Entries
-          </p>
-          ${viewingOther && uid !== authManager.currentUser?.uid ? `
-            <button id="write-slambook-btn" class="text-xs text-white font-semibold px-3 py-1.5 rounded-full bg-navy-500 hover:bg-navy-600 transition-colors">
-              ✍️ Write in Slam Book
-            </button>
-          ` : ''}
-        </div>
-        <div id="friend-slam-entries" class="space-y-3">
-          <div class="text-center py-6 text-gray-400 text-sm">Loading entries...</div>
-        </div>
-      </div>
-    </div>
-  `;
-
-  el.querySelector('#edit-slambook-tab-btn')?.addEventListener('click', () => showEditSlamBookModal());
-
-  // Write slam book for other user
-  el.querySelector('#write-slambook-btn')?.addEventListener('click', () => {
-    showWriteSlamBookModal(uid, user.fullName || 'Friend', friendQuestions);
-  });
-
-  // Load friend slam entries from Firestore
-  loadFriendSlamEntries(el.querySelector('#friend-slam-entries'), uid, friendQuestions);
+  const { renderSlamBookTab: newRenderSlamBookTab } = await import('./slambook.js');
+  await newRenderSlamBookTab(el, user, viewingOther);
 }
 
-async function loadFriendSlamEntries(container, targetUserId, friendQuestions) {
-  try {
-    const q = query(
-      collection(db, 'slambook', targetUserId, 'entries'),
-      orderBy('createdAt', 'desc')
-    );
-    const snap = await getDocs(q);
-
-    if (snap.empty) {
-      container.innerHTML = `
-        <div class="text-center py-8">
-          <div class="text-3xl mb-2">📖</div>
-          <p class="text-sm text-gray-400">No friend entries yet</p>
-          <p class="text-xs text-gray-300 mt-1">Be the first to write something!</p>
-        </div>`;
-      return;
-    }
-
-    container.innerHTML = '';
-    snap.forEach(d => {
-      const entry = { id: d.id, ...d.data() };
-      const card = createSlamEntryCard(entry, targetUserId, friendQuestions);
-      container.appendChild(card);
-    });
-  } catch (e) {
-    console.error('Load slam entries error:', e);
-    container.innerHTML = '<p class="text-center text-gray-400 text-sm py-4">Could not load entries</p>';
-  }
-}
-
-function createSlamEntryCard(entry, targetUserId, friendQuestions) {
-  const card = document.createElement('div');
-  card.className = 'slam-question-card animate-fadeIn';
-
-  const answeredQs = friendQuestions.filter(q => entry.answers?.[q.key]);
-  const reactions = entry.reactions || {};
-  const myUid = authManager.currentUser?.uid;
-  const myReaction = Object.entries(reactions).find(([emoji, users]) => users?.includes(myUid));
-
-  card.innerHTML = `
-    <div class="flex items-center gap-2 mb-3">
-      <div class="w-7 h-7 rounded-full bg-gradient-to-br from-navy-400 to-navy-600 flex items-center justify-center text-white text-xs font-bold">
-        ${(entry.authorName || '?')[0]}
-      </div>
-      <div class="flex-1">
-        <p class="text-sm font-semibold text-navy-800">${sanitizeHTML(entry.authorName || 'A classmate')}</p>
-        <p class="text-[10px] text-gray-400">${entry.createdAt?.toDate ? timeAgo(entry.createdAt.toDate()) : ''}</p>
-      </div>
-    </div>
-    ${answeredQs.map(q => `
-      <div class="mb-2 last:mb-0">
-        <p class="text-[10px] text-navy-400 uppercase tracking-wider font-semibold flex items-center gap-1">${q.icon} ${q.label}</p>
-        <p class="font-handwriting text-base text-gray-600 pl-4 mt-0.5">${sanitizeHTML(entry.answers[q.key])}</p>
-      </div>
-    `).join('')}
-    <div class="flex items-center gap-2 mt-3 pt-2 border-t border-gray-50">
-      ${['❤️','😂','🥺','🔥','👏'].map(emoji => {
-        const count = (reactions[emoji] || []).length;
-        const isActive = (reactions[emoji] || []).includes(myUid);
-        return `<button class="slam-react-btn text-sm px-2 py-1 rounded-full transition-all ${isActive ? 'bg-navy-100' : 'hover:bg-cream-100'}" data-emoji="${emoji}" data-entry="${entry.id}">${emoji}${count > 0 ? ` <span class="text-[10px] text-gray-500">${count}</span>` : ''}</button>`;
-      }).join('')}
-    </div>
-  `;
-
-  // Reaction handlers
-  card.querySelectorAll('.slam-react-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      if (!myUid) return;
-      const emoji = btn.dataset.emoji;
-      const entryId = btn.dataset.entry;
-      try {
-        const ref = doc(db, 'slambook', targetUserId, 'entries', entryId);
-        const isActive = (reactions[emoji] || []).includes(myUid);
-        if (isActive) {
-          await updateDoc(ref, { [`reactions.${emoji}`]: arrayRemove(myUid) });
-        } else {
-          await updateDoc(ref, { [`reactions.${emoji}`]: arrayUnion(myUid) });
-        }
-        showToast(isActive ? 'Reaction removed' : `${emoji} reacted!`, 'info');
-      } catch (e) {
-        showToast('Could not react', 'error');
-      }
-    });
-  });
-
-  return card;
-}
-
-function showWriteSlamBookModal(targetUserId, targetName, friendQuestions) {
-  const modal = router.openModal('', { title: '📖 Write in Slam Book' });
-  modal.body.innerHTML = `
-    <div class="p-4">
-      <p class="text-sm text-gray-500 mb-4">Write something about <strong>${sanitizeHTML(targetName)}</strong></p>
-      <div class="space-y-4">
-        ${friendQuestions.map(q => `
-          <div class="slam-question-card">
-            <label class="flex items-center gap-2 mb-2">
-              <span>${q.icon}</span>
-              <span class="text-xs font-semibold text-navy-600">${q.label}</span>
-            </label>
-            <input type="text" class="slam-input w-full px-3 py-2 border border-gray-200 rounded-xl text-sm font-handwriting text-gray-700 placeholder:text-gray-300 focus:outline-none focus:border-navy-400" data-key="${q.key}" placeholder="Your answer..." maxlength="200"/>
-          </div>
-        `).join('')}
-      </div>
-      <button id="submit-slam-entry" class="btn-primary mt-4">✨ Submit Slam Entry</button>
-      <p class="text-[10px] text-gray-400 text-center mt-2">Answer at least 2 questions</p>
-    </div>
-  `;
-
-  modal.body.querySelector('#submit-slam-entry')?.addEventListener('click', async () => {
-    const answers = {};
-    modal.body.querySelectorAll('.slam-input').forEach(input => {
-      if (input.value.trim()) answers[input.dataset.key] = input.value.trim();
-    });
-
-    if (Object.keys(answers).length < 2) {
-      showToast('Answer at least 2 questions', 'warning');
-      return;
-    }
-
-    try {
-      await addDoc(collection(db, 'slambook', targetUserId, 'entries'), {
-        authorId: authManager.currentUser.uid,
-        authorName: authManager.userData?.fullName || 'A classmate',
-        authorPhoto: authManager.userData?.profilePic || '',
-        answers,
-        reactions: {},
-        createdAt: serverTimestamp()
-      });
-      showToast('Slam book entry added! 📖', 'success');
-      modal.close();
-    } catch (e) {
-      console.error('Slam entry error:', e);
-      showToast('Could not save entry', 'error');
-    }
-  });
-}
 
 function renderHighlightsTab(el, highlights) {
   if (highlights.length === 0) {
@@ -1462,8 +1235,8 @@ function renderHighlightsTab(el, highlights) {
         ${highlights.map(p => `
           <div class="highlight-card">
             ${p.imageUrl
-              ? `<img src="${p.imageUrl}" class="w-full aspect-square object-cover rounded-xl" alt="" loading="lazy"/>`
-              : `<div class="w-full aspect-square bg-gradient-to-br from-warm-100 to-cream-300 rounded-xl flex items-center justify-center text-4xl">📷</div>`}
+      ? `<img src="${p.imageUrl}" class="w-full aspect-square object-cover rounded-xl" alt="" loading="lazy"/>`
+      : `<div class="w-full aspect-square bg-gradient-to-br from-warm-100 to-cream-300 rounded-xl flex items-center justify-center text-4xl">📷</div>`}
             <div class="mt-2">
               <p class="text-xs text-navy-800 font-medium truncate">${sanitizeHTML(p.caption || 'A memory')}</p>
               <p class="text-[10px] text-gray-400 flex items-center gap-1 mt-0.5">
@@ -1511,8 +1284,8 @@ function showEditProfileModal() {
       <div class="flex items-center gap-4">
         <div class="relative">
           ${user.profilePic
-            ? `<img src="${user.profilePic}" class="w-20 h-20 rounded-full object-cover border-3 border-cream-300 shadow-md" alt="" id="edit-pic-preview"/>`
-            : `<div class="w-20 h-20 rounded-full bg-gradient-to-br from-navy-500 to-navy-300 text-white flex items-center justify-center text-2xl font-bold shadow-md" id="edit-pic-preview">${(user.fullName || '?')[0]}</div>`}
+      ? `<img src="${user.profilePic}" class="w-20 h-20 rounded-full object-cover border-3 border-cream-300 shadow-md" alt="" id="edit-pic-preview"/>`
+      : `<div class="w-20 h-20 rounded-full bg-gradient-to-br from-navy-500 to-navy-300 text-white flex items-center justify-center text-2xl font-bold shadow-md" id="edit-pic-preview">${(user.fullName || '?')[0]}</div>`}
           <label class="absolute -bottom-1 -right-1 w-8 h-8 rounded-full bg-navy-500 text-white flex items-center justify-center cursor-pointer shadow-lg border-2 border-white">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"/><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z"/></svg>
             <input type="file" accept="image/*" class="hidden" id="pic-file-input"/>
@@ -1698,45 +1471,6 @@ function showEditProfileModal() {
   });
 }
 
-function showEditSlamBookModal() {
-  const user = authManager.userData || {};
-  const sb = user.slamBook || {};
-  const modal = router.openModal('', { title: '📖 Edit Slam Book' });
-  const questions = [
-    { key: 'favoriteMemory', label: 'Favorite school memory?', icon: '💭' },
-    { key: 'firstImpression', label: 'First impression of school?', icon: '🏫' },
-    { key: 'funniestMoment', label: 'Funniest classroom moment?', icon: '😂' },
-    { key: 'bestFriend', label: 'Best friend in class?', icon: '👫' },
-    { key: 'favoriteTeacher', label: 'Favorite teacher?', icon: '👨‍🏫' },
-    { key: 'worstSubject', label: 'Most dreaded subject?', icon: '📚' },
-    { key: 'secretCrush', label: 'School crush? 🙈', icon: '💝' },
-    { key: 'afterSchoolDream', label: 'Dream after school?', icon: '🌟' }
-  ];
-
-  modal.body.innerHTML = `
-    <div class="p-4 space-y-4">
-      ${questions.map(q => `
-        <div>
-          <label class="text-xs font-semibold text-navy-600 mb-1 flex items-center gap-1">${q.icon} ${q.label}</label>
-          <textarea id="sb-${q.key}" rows="2" placeholder="Your answer..." class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-navy-800 focus:outline-none focus:border-navy-500 bg-white resize-none font-handwriting text-base">${sanitizeHTML(sb[q.key] || '')}</textarea>
-        </div>
-      `).join('')}
-      <button id="save-slambook" class="btn-primary">SAVE SLAM BOOK 📖</button>
-    </div>
-  `;
-
-  modal.body.querySelector('#save-slambook')?.addEventListener('click', async () => {
-    const data = {};
-    questions.forEach(q => {
-      data[q.key] = modal.body.querySelector(`#sb-${q.key}`)?.value.trim() || '';
-    });
-    try {
-      await authManager.updateSlamBook(data);
-      showToast('Slam book saved! 📖', 'success');
-      modal.close();
-    } catch (err) { showToast('Failed to save', 'error'); }
-  });
-}
 
 function showChangePasswordModal() {
   const modal = router.openModal('', { title: '🔐 Change Password' });
@@ -1789,15 +1523,15 @@ function showNotificationSettings() {
   modal.body.innerHTML = `
     <div class="p-4 space-y-3">
       ${[
-        { key: 'likes', label: 'Likes on your posts', icon: '❤️', default: true },
-        { key: 'comments', label: 'Comments on your posts', icon: '💬', default: true },
-        { key: 'messages', label: 'New messages', icon: '✉️', default: true },
-        { key: 'birthdays', label: 'Birthday reminders', icon: '🎂', default: true },
-        { key: 'timeCapsules', label: 'Time capsule unlocks', icon: '🔓', default: true },
-        { key: 'polls', label: 'New polls', icon: '📊', default: true },
-        { key: 'diary', label: 'Diary entries', icon: '📖', default: false },
-        { key: 'games', label: 'Game challenges', icon: '🎮', default: true }
-      ].map(n => `
+      { key: 'likes', label: 'Likes on your posts', icon: '❤️', default: true },
+      { key: 'comments', label: 'Comments on your posts', icon: '💬', default: true },
+      { key: 'messages', label: 'New messages', icon: '✉️', default: true },
+      { key: 'birthdays', label: 'Birthday reminders', icon: '🎂', default: true },
+      { key: 'timeCapsules', label: 'Time capsule unlocks', icon: '🔓', default: true },
+      { key: 'polls', label: 'New polls', icon: '📊', default: true },
+      { key: 'diary', label: 'Diary entries', icon: '📖', default: false },
+      { key: 'games', label: 'Game challenges', icon: '🎮', default: true }
+    ].map(n => `
         <label class="flex items-center justify-between p-3 rounded-xl hover:bg-cream-50 cursor-pointer transition-colors">
           <div class="flex items-center gap-3">
             <span class="text-lg">${n.icon}</span>

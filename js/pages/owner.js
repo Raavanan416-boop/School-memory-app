@@ -272,18 +272,22 @@ window.openOwnerUserEdit = async (uid) => {
   let totalPosts = 0;
   let totalLikes = 0;
   let totalComments = 0;
+  let computedPoints = 0;
 
   // Pre-fetch stats
   try {
-    const postsSnap = await getDocs(query(collection(db, 'posts'), where('authorId', '==', uid)));
-    totalPosts = postsSnap.size;
-    postsSnap.forEach(d => {
-      const p = d.data();
-      totalLikes += (p.likes?.length || 0);
-      totalComments += (p.comments?.length || 0);
-    });
+    const { getLeaderboardScores } = await import('./leaderboard.js');
+    const allScores = await getLeaderboardScores();
+    const userScore = allScores.find(s => s.id === uid);
+    
+    if (userScore) {
+      totalPosts = userScore.postCount || 0;
+      totalLikes = userScore.totalLikes || 0;
+      totalComments = userScore.totalComments || 0;
+      computedPoints = userScore.total || 0;
+    }
   } catch (e) {
-    console.warn("Failed to fetch user stats", e);
+    console.warn("Failed fetching user stats", e);
   }
 
   // Set up real-time listener
@@ -304,13 +308,15 @@ window.openOwnerUserEdit = async (uid) => {
       if (isEditing) {
         if (isStatus) {
           contentHtml = `
-            <div class="mt-2 flex gap-2 w-full animate-fade-in">
-              <select id="input-${key}" class="flex-1 px-3 py-1.5 bg-[#0f172a] border border-blue-500 rounded-lg text-white focus:outline-none text-sm">
+            <div class="mt-2 flex flex-col gap-2 w-full animate-fade-in">
+              <select id="input-${key}" class="w-full px-3 py-1.5 bg-[#0f172a] border border-blue-500 rounded-lg text-white focus:outline-none text-sm">
                 <option value="false" ${!user.flagged ? 'selected' : ''}>✅ Active (Normal)</option>
                 <option value="true" ${user.flagged ? 'selected' : ''}>⚠️ Flagged (Restricted)</option>
               </select>
-              <button onclick="saveInlineField('${key}', '${type}', true)" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors">Save</button>
-              <button onclick="cancelInlineEdit()" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors">Cancel</button>
+              <div class="flex gap-2 justify-end">
+                <button onclick="saveInlineField('${key}', '${type}', true)" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors">Save</button>
+                <button onclick="cancelInlineEdit()" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors">Cancel</button>
+              </div>
             </div>
           `;
         } else if (type === 'textarea') {
@@ -325,10 +331,12 @@ window.openOwnerUserEdit = async (uid) => {
           `;
         } else {
           contentHtml = `
-            <div class="mt-2 flex gap-2 w-full animate-fade-in">
-              <input type="${type}" id="input-${key}" value="${sanitizeHTML(value || '')}" class="flex-1 px-3 py-1.5 bg-[#0f172a] border border-blue-500 rounded-lg text-white focus:outline-none text-sm"/>
-              <button onclick="saveInlineField('${key}', '${type}', false)" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors">Save</button>
-              <button onclick="cancelInlineEdit()" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors">Cancel</button>
+            <div class="mt-2 flex flex-col gap-2 w-full animate-fade-in">
+              <input type="${type}" id="input-${key}" value="${sanitizeHTML(value || '')}" class="w-full px-3 py-1.5 bg-[#0f172a] border border-blue-500 rounded-lg text-white focus:outline-none text-sm"/>
+              <div class="flex gap-2 justify-end">
+                <button onclick="saveInlineField('${key}', '${type}', false)" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors">Save</button>
+                <button onclick="cancelInlineEdit()" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors">Cancel</button>
+              </div>
             </div>
           `;
         }
@@ -389,12 +397,15 @@ window.openOwnerUserEdit = async (uid) => {
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           ${renderField('fullName', 'Full Name', user.fullName)}
           ${renderField('nickname', 'Nickname', user.nickname)}
+          ${renderField('email', 'Email Address', user.email, 'email')}
+          ${renderField('phoneNumber', 'Phone Number', user.phoneNumber)}
           ${renderField('rollNumber', 'Roll Number', user.rollNumber)}
           ${renderField('dateOfBirth', 'Date of Birth (YYYY-MM-DD)', user.dateOfBirth, 'date')}
-          ${renderField('phoneNumber', 'Phone Number', user.phoneNumber)}
-          ${renderField('flagged', 'Account Status', user.flagged, 'select', false, true)}
           ${renderField('joinedYear', 'Join Year', user.joinedYear)}
           ${renderField('endYear', 'End Year', user.endYear)}
+          <div class="sm:col-span-2">
+            ${renderField('flagged', 'Account Status', user.flagged, 'select', false, true)}
+          </div>
           <div class="sm:col-span-2">
             ${renderField('bio', 'Bio', user.bio, 'textarea')}
           </div>
@@ -402,22 +413,22 @@ window.openOwnerUserEdit = async (uid) => {
 
         <!-- Activity Stats -->
         <div class="bg-gradient-to-r from-gray-800/30 to-gray-800/10 p-4 rounded-xl border border-gray-700/30 mt-4">
-          <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3">Database Activity Metrics</h4>
+          <h4 class="text-xs font-bold text-gray-400 uppercase border-b border-gray-700 pb-2 mt-4">Database Activity Metrics</h4>
           <div class="grid grid-cols-4 gap-2">
-            <div class="text-center">
+            <div class="bg-[#0f172a] p-2 rounded-lg text-center border border-gray-800 shadow-inner">
               <p class="text-lg font-bold text-blue-400">${totalPosts}</p>
               <p class="text-[9px] text-gray-500 uppercase">Posts</p>
             </div>
-            <div class="text-center border-l border-gray-700/50">
+            <div class="bg-[#0f172a] p-2 rounded-lg text-center border border-gray-800 shadow-inner">
               <p class="text-lg font-bold text-red-400">${totalLikes}</p>
               <p class="text-[9px] text-gray-500 uppercase">Likes</p>
             </div>
-            <div class="text-center border-l border-gray-700/50">
+            <div class="bg-[#0f172a] p-2 rounded-lg text-center border border-gray-800 shadow-inner">
               <p class="text-lg font-bold text-green-400">${totalComments}</p>
               <p class="text-[9px] text-gray-500 uppercase">Cmnts</p>
             </div>
-            <div class="text-center border-l border-gray-700/50">
-              <p class="text-lg font-bold text-yellow-400">${user.pointsOffset || 0}</p>
+            <div class="bg-[#0f172a] p-2 rounded-lg text-center border border-gray-800 shadow-inner">
+              <p class="text-lg font-bold text-yellow-400">${computedPoints}</p>
               <p class="text-[9px] text-gray-500 uppercase">Points</p>
             </div>
           </div>
@@ -634,6 +645,14 @@ window.loadPosts = async (container) => {
 window.ownerDeletePost = async (postId) => {
   if (!confirm('Delete this post permanently?')) return;
   try {
+    const snap = await getDoc(doc(db, 'posts', postId));
+    if (snap.exists()) {
+      const authorId = snap.data().authorId;
+      if (authorId) {
+        const { awardPoints } = await import('../auth.js');
+        await awardPoints(authorId, -20, 'Post Deleted by Admin');
+      }
+    }
     await deleteDoc(doc(db, 'posts', postId));
     document.getElementById(`owner-post-${postId}`)?.remove();
     showToast('Post deleted', 'success');
@@ -732,17 +751,93 @@ window.executeForceRefresh = async () => {
 };
 
 window.executeRecalcLeaderboard = async () => {
-  if (!confirm('Recalculate leaderboard by resetting points offset?')) return;
+  if (!confirm('Migrate legacy leaderboard points to users collection? This may take a while.')) return;
   
+  const btn = document.querySelector('#btn-recalc-leaderboard');
+  if (btn) btn.textContent = 'MIGRATING...';
+
   try {
+    // Fetch all collections
+    const [usersSnap, postsSnap, pollsSnap, diariesSnap, capsulesSnap, bdaySnap, sbResSnap, sbSnap] = await Promise.all([
+      getDocs(collection(db, 'users')),
+      getDocs(collection(db, 'posts')),
+      getDocs(collection(db, 'polls')),
+      getDocs(collection(db, 'diary')),
+      getDocs(collection(db, 'timeCapsules')),
+      getDocs(collection(db, 'birthdayPoints')),
+      getDocs(collection(db, 'slambookResponses')),
+      getDocs(collection(db, 'slambooks'))
+    ]);
+
+    const posts = []; postsSnap.forEach(d => posts.push({ id: d.id, ...d.data() }));
+    const polls = []; pollsSnap.forEach(d => polls.push({ id: d.id, ...d.data() }));
+    const diaries = []; diariesSnap.forEach(d => diaries.push({ id: d.id, ...d.data() }));
+    const capsules = []; capsulesSnap.forEach(d => capsules.push({ id: d.id, ...d.data() }));
+    const birthdayPointsDocs = []; bdaySnap.forEach(d => birthdayPointsDocs.push({ id: d.id, ...d.data() }));
+    const slambookResponses = []; sbResSnap.forEach(d => slambookResponses.push({ id: d.id, ...d.data() }));
+    const slambooks = []; sbSnap.forEach(d => slambooks.push({ id: d.id, ...d.data() }));
+
     const batch = writeBatch(db);
-    allUsers.forEach(u => {
-      batch.update(doc(db, 'users', u.id), { pointsOffset: 0 });
+    let count = 0;
+
+    usersSnap.forEach(d => {
+      const user = d.data();
+      const id = d.id;
+
+      const userPosts = posts.filter(p => p.authorId === id);
+      const totalLikes = userPosts.reduce((sum, p) => sum + (p.likes?.length || 0), 0);
+      
+      let totalComments = 0;
+      posts.forEach(p => {
+        if (p.comments && Array.isArray(p.comments)) {
+          totalComments += p.comments.filter(c => c.userId === id || c.authorId === id).length;
+        }
+      });
+
+      const userPolls = polls.filter(p => p.authorId === id || p.createdBy === id);
+      const userDiaries = diaries.filter(d => d.authorId === id || d.userId === id);
+      const userCapsules = capsules.filter(c => c.authorId === id || c.createdBy === id);
+
+      const postPoints = userPosts.length * 20;
+      const likePoints = totalLikes * 10;
+      const commentPoints = totalComments * 5;
+      const pollPoints = userPolls.length * 1;
+      const diaryPoints = userDiaries.length * 1;
+      const capsulePoints = userCapsules.length * 1;
+
+      const userBdayPointsReceived = birthdayPointsDocs
+        .filter(bp => bp.targetUserId === id)
+        .reduce((sum, bp) => sum + (bp.points || 0), 0);
+        
+      const userBdayPointsGiven = birthdayPointsDocs
+        .filter(bp => bp.senderId === id && bp.type === 'birthday_gift')
+        .reduce((sum, bp) => sum + (bp.points || 0), 0);
+
+      const userSlambooks = slambooks.filter(b => b.ownerId === id);
+      const slambookConfigPoints = userSlambooks.length * 5;
+
+      const uniqueSlambooksAnswered = new Set();
+      slambookResponses.filter(r => r.authorId === id).forEach(r => {
+        uniqueSlambooksAnswered.add(r.slambookId);
+      });
+      const slambookAnswerPoints = uniqueSlambooksAnswered.size * 3;
+
+      let total = postPoints + likePoints + commentPoints + pollPoints + diaryPoints + capsulePoints + userBdayPointsReceived - userBdayPointsGiven + slambookConfigPoints + slambookAnswerPoints;
+
+      if (user.pointsOffset) {
+        total = Math.max(0, total - user.pointsOffset);
+      }
+
+      batch.update(doc(db, 'users', id), { points: total });
+      count++;
     });
+
     await batch.commit();
-    showToast('Leaderboard recalculated.', 'success');
+    showToast(`Successfully migrated points for ${count} users!`, 'success');
   } catch (e) {
     console.error(e);
-    showToast('Failed to recalculate.', 'error');
+    showToast('Migration failed.', 'error');
   }
+
+  if (btn) btn.innerHTML = '<span class="text-lg">🧮</span> Recalculate Leaderboard';
 };

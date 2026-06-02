@@ -1,7 +1,7 @@
 // Upload page — Premium Instagram-style with drag & drop, carousel preview, time capsule
 import { db, storage, collection, addDoc, serverTimestamp, storageRef, uploadBytesResumable, getDownloadURL, getDocs } from '../firebase-config.js';
 import { showToast, MEMORY_CATEGORIES, compressImage, sanitizeHTML } from '../utils.js';
-import { authManager } from '../auth.js';
+import { authManager, awardPoints } from '../auth.js';
 import { createNotification } from '../notifications.js';
 import { router } from '../router.js';
 
@@ -341,7 +341,8 @@ export async function renderUpload(container) {
           isUnlocked: false,
           createdAt: serverTimestamp()
         });
-        showToast('Time capsule locked! 🔒', 'success');
+        showToast('Time capsule locked! +1 Point 🔒', 'success');
+        awardPoints(authManager.currentUser.uid, 1, 'Time Capsule Created');
       } else {
         const postData = {
           authorId: authManager.currentUser.uid,
@@ -358,7 +359,8 @@ export async function renderUpload(container) {
           createdAt: serverTimestamp()
         };
         await addDoc(collection(db, 'posts'), postData);
-        showToast('Memory posted! 📸', 'success');
+        showToast('Memory posted! +20 Points 📸', 'success');
+        awardPoints(authManager.currentUser.uid, 20, 'Post Created');
 
         // Notify tagged friends
         for (const friend of taggedFriends) {

@@ -2,7 +2,7 @@
 import { db, collection, addDoc, getDocs, query, orderBy, onSnapshot, doc, updateDoc,
   serverTimestamp, limit, deleteDoc } from '../firebase-config.js';
 import { showToast, sanitizeHTML, formatDate } from '../utils.js';
-import { authManager } from '../auth.js';
+import { authManager, awardPoints } from '../auth.js';
 import { router } from '../router.js';
 import { showDeleteConfirmation } from '../delete-confirm.js';
 
@@ -165,6 +165,7 @@ function createCapsuleCard(capsule) {
   card.querySelector('.capsule-delete-btn')?.addEventListener('click', (e) => {
     e.stopPropagation();
     showDeleteConfirmation('this time capsule', async () => {
+      await awardPoints(capsule.authorId || capsule.createdBy, -1, 'Time Capsule Deleted');
       await deleteDoc(doc(db, 'timeCapsules', capsule.id));
     }, { element: card });
   });
@@ -253,7 +254,8 @@ function showCreateCapsuleModal() {
         visibility: selectedVisibility,
         createdAt: serverTimestamp()
       });
-      showToast('Time capsule locked! 🔒', 'success');
+      showToast('Time capsule locked! +1 Point 🔒', 'success');
+      awardPoints(authManager.currentUser.uid, 1, 'Time Capsule Created');
       modal.close();
     } catch (e) {
       console.error(e);

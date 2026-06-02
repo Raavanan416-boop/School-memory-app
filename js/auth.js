@@ -1,7 +1,7 @@
 // Auth module — Full featured with presence, password change, profile updates
 import { auth, db, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail,
   updatePassword, EmailAuthProvider, reauthenticateWithCredential,
-  doc, getDoc, updateDoc, setDoc, serverTimestamp, Timestamp,
+  doc, getDoc, updateDoc, setDoc, serverTimestamp, Timestamp, increment,
   storage, storageRef, uploadBytes, getDownloadURL } from './firebase-config.js';
 
 const OWNER_EMAIL = 'kaviraj@school.com';
@@ -221,3 +221,17 @@ class AuthManager {
 }
 
 export const authManager = new AuthManager();
+
+export async function awardPoints(userId, points, reason) {
+  if (!userId || !points) return;
+  try {
+    const userRef = doc(db, 'users', userId);
+    await updateDoc(userRef, {
+      points: increment(points)
+    });
+    const action = points > 0 ? `Awarded +${points}` : `Deducted ${points}`;
+    console.log(`[Points Engine] ${action} to user ${userId} for: ${reason}. Total points updated via transaction.`);
+  } catch(e) {
+    console.error(`[Points Engine] Error awarding points:`, e);
+  }
+}

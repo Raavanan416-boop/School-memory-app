@@ -110,6 +110,21 @@ const NOTIF_CONFIG = {
     bodyTemplate: (name) => `${name} misses you ❤️🥺`,
     getUrl: (data) => `/?page=profile&userId=${data.fromId || ''}`,
   },
+  slambook_share: {
+    title: '📖 Slam Book Shared',
+    bodyTemplate: (name) => `${name} shared a Slam Book with you!`,
+    getUrl: (data) => `/?page=profile&userId=${data.fromId || ''}&tab=slambook`,
+  },
+  slambook_response: {
+    title: '✍️ Slam Book Signed',
+    bodyTemplate: (name) => `${name} wrote in your Slam Book!`,
+    getUrl: (data) => `/?page=profile&tab=slambook`,
+  },
+  slambook_pinned: {
+    title: '📌 Response Pinned',
+    bodyTemplate: (name) => `${name} pinned your Slam Book response!`,
+    getUrl: (data) => `/?page=profile&userId=${data.fromId || ''}&tab=slambook`,
+  },
 };
 
 class NotificationManager {
@@ -629,8 +644,8 @@ class NotificationManager {
   // ===== CLICK HANDLING / DEEP LINKS =====
 
   _handleNotificationClick(url, notifId) {
-    // Mark notification as read
-    if (notifId) this.markRead(notifId);
+    // Automatically delete notification when clicked (as requested by user)
+    if (notifId) this.deleteNotification(notifId);
 
     // Parse URL and navigate
     const urlObj = new URL(url, window.location.origin);

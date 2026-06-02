@@ -2,7 +2,7 @@
 import { db, collection, addDoc, getDocs, query, orderBy, onSnapshot, doc, updateDoc,
   arrayUnion, serverTimestamp, limit, getDoc, deleteDoc } from '../firebase-config.js';
 import { showToast, sanitizeHTML, formatNumber } from '../utils.js';
-import { authManager } from '../auth.js';
+import { authManager, awardPoints } from '../auth.js';
 import { router } from '../router.js';
 import { createNotification } from '../notifications.js';
 import { showDeleteConfirmation } from '../delete-confirm.js';
@@ -146,6 +146,7 @@ function createPollCard(poll) {
     e.stopPropagation();
     showDeleteConfirmation('this poll', async () => {
       deletedPollIds.add(poll.id);
+      await awardPoints(poll.authorId || poll.createdBy, -1, 'Poll Deleted');
       await deleteDoc(doc(db, 'polls', poll.id));
     }, { element: card });
   });
@@ -293,7 +294,9 @@ function showCreatePollModal() {
         authorName: authManager.userData?.fullName || 'Unknown',
         createdAt: serverTimestamp()
       });
-      showToast('Poll created! 📊', 'success');
+      showToast('Poll created successfully! +1 Point', 'success');
+      awardPoints(authManager.currentUser.uid, 1, 'Poll Created');
+      modal.close();
 
       // Notify all classmates about the new poll
       try {

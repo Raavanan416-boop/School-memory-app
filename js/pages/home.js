@@ -2,7 +2,7 @@
 import { db, collection, query, orderBy, limit, onSnapshot, doc, updateDoc, addDoc,
   arrayUnion, arrayRemove, serverTimestamp, getDocs, where, startAfter, increment, deleteDoc } from '../firebase-config.js';
 import { getTimeSinceSchool, EMOTIONAL_QUOTES, timeAgo, sanitizeHTML, isBirthdayToday, formatNumber } from '../utils.js';
-import { authManager } from '../auth.js';
+import { authManager, awardPoints } from '../auth.js';
 import { router } from '../router.js';
 import { createNotification } from '../notifications.js';
 import { showDeleteConfirmation, deleteDocFull } from '../delete-confirm.js';
@@ -390,15 +390,18 @@ function createPostCard(post) {
   likeBtn?.addEventListener('click', async () => {
     if (!authManager.currentUser) return;
     const uid = authManager.currentUser.uid;
+    const svg = likeBtn.querySelector('svg');
+    const isLiked = post.likes?.includes(uid);
     try {
+      const { arrayUnion, arrayRemove, increment } = await import('../firebase-config.js');
       const postRef = doc(db, 'posts', post.id);
-      const svg = likeBtn.querySelector('svg');
-      if (liked) {
+      if (isLiked) {
+        await awardPoints(post.authorId, -10, 'Like Removed');
         await updateDoc(postRef, { likes: arrayRemove(uid) });
       } else {
+        await awardPoints(post.authorId, 10, 'Post Liked');
         await updateDoc(postRef, { likes: arrayUnion(uid) });
         svg?.classList.add('like-bounce');
-        // Send notification
         if (post.authorId !== uid) {
           createNotification('like', post.authorId, { postId: post.id });
         }
@@ -422,7 +425,9 @@ function createPostCard(post) {
       }
       if (!liked) {
         try {
+          const { arrayUnion } = await import('../firebase-config.js');
           await updateDoc(doc(db, 'posts', post.id), { likes: arrayUnion(authManager.currentUser.uid) });
+          await awardPoints(post.authorId, 10, 'Post Liked (Double Tap)');
           if (post.authorId !== authManager.currentUser.uid) {
             createNotification('like', post.authorId, { postId: post.id });
           }
@@ -452,7 +457,7 @@ function createPostCard(post) {
       if (section) {
         section.classList.toggle('hidden');
         if (!section.classList.contains('hidden')) {
-          loadComments(card, post.id);
+          loadComments(card, post);
         }
       }
     });
@@ -478,6 +483,7 @@ function createPostCard(post) {
       await updateDoc(doc(db, 'posts', post.id), { commentCount: increment(1) });
       if (post.authorId !== authManager.currentUser.uid) {
         createNotification('comment', post.authorId, { postId: post.id, commentText: text });
+        awardPoints(post.authorId, 5, 'Comment Received');
       }
     } catch (e) { console.error('Comment error:', e); }
   };
@@ -523,6 +529,7 @@ function createPostCard(post) {
     e.stopPropagation();
     showDeleteConfirmation('this post', async () => {
       deletedPostIds.add(post.id); // Prevent reappearing via onSnapshot
+      await awardPoints(post.authorId, -20, 'Post Deleted');
       await deleteDocFull('posts', post.id, ['comments'], [post.imageUrl]);
     }, { element: card });
   });
@@ -530,11 +537,11 @@ function createPostCard(post) {
   return card;
 }
 
-function loadComments(card, postId) {
+function loadComments(card, post) {
   const list = card.querySelector('.comments-list');
   if (!list) return;
 
-  const q = query(collection(db, 'posts', postId, 'comments'), orderBy('createdAt', 'asc'), limit(20));
+  const q = query(collection(db, 'posts', post.id, 'comments'), orderBy('createdAt', 'asc'), limit(20));
   onSnapshot(q, (snap) => {
     list.innerHTML = '';
     if (snap.empty) {
@@ -554,15 +561,18 @@ function loadComments(card, postId) {
           <p class="text-xs"><span class="font-semibold text-navy-800">${sanitizeHTML(c.authorName || 'Unknown')}</span> <span class="text-gray-600">${sanitizeHTML(c.text)}</span></p>
           <p class="text-[10px] text-gray-400 mt-0.5">${time}</p>
         </div>
-        ${c.authorId === authManager.currentUser?.uid ? `<button class="delete-comment-btn text-gray-300 hover:text-red-400 text-xs" data-comment-id="${d.id}" data-post-id="${postId}">✕</button>` : ''}
+        ${c.authorId === authManager.currentUser?.uid ? `<button class="delete-comment-btn text-gray-300 hover:text-red-400 text-xs" data-comment-id="${d.id}" data-post-id="${post.id}">✕</button>` : ''}
       `;
       // Delete comment handler
-      div.querySelector('.delete-comment-btn')?.addEventListener('click', async () => {
-        try {
-          const { deleteDoc } = await import('../firebase-config.js');
-          await deleteDoc(doc(db, 'posts', postId, 'comments', d.id));
-          await updateDoc(doc(db, 'posts', postId), { commentCount: increment(-1) });
-        } catch (e) { console.error(e); }
+      div.querySelector('.delete-comment-btn')?.addEventListener('click', () => {
+        showDeleteConfirmation('this comment', async () => {
+          try {
+            const { deleteDoc } = await import('../firebase-config.js');
+            await awardPoints(post.authorId, -5, 'Comment Deleted');
+            await deleteDoc(doc(db, 'posts', post.id, 'comments', d.id));
+            await updateDoc(doc(db, 'posts', post.id), { commentCount: increment(-1) });
+          } catch (e) { console.error(e); }
+        }, { element: div });
       });
       list.appendChild(div);
     });

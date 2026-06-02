@@ -2,7 +2,7 @@
 // Fixed: manual claim, birthday person gifts points to friends, view wishes
 import { db, collection, getDocs, addDoc, doc, getDoc, updateDoc, query, where, orderBy, onSnapshot, serverTimestamp, increment } from '../firebase-config.js';
 import { showToast, sanitizeHTML, isBirthdayToday, getDaysUntil, formatDate, timeAgo } from '../utils.js';
-import { authManager } from '../auth.js';
+import { authManager, awardPoints } from '../auth.js';
 import { router } from '../router.js';
 import { createNotification } from '../notifications.js';
 
@@ -96,9 +96,7 @@ async function claimBirthdayGift(btnElement) {
     });
 
     // Increment user's total points
-    await updateDoc(doc(db, 'users', currentUser.uid), {
-      points: increment(10)
-    });
+    awardPoints(currentUser.uid, 10, 'Birthday Claim');
 
     btnElement.textContent = '✅ Birthday Gift Claimed';
     btnElement.classList.add('opacity-60');
@@ -178,11 +176,14 @@ function showGiftPointsModal(allUsers) {
           return;
         }
 
-        // Check if birthday person has enough points
-        const myDoc = await getDoc(doc(db, 'users', currentUser.uid));
-        const myPoints = myDoc.data()?.points || 0;
+        // Check if birthday person has enough points dynamically
+        const { getLeaderboardScores } = await import('./leaderboard.js');
+        const allScores = await getLeaderboardScores();
+        const myScore = allScores.find(s => s.id === currentUser.uid);
+        const myPoints = myScore ? myScore.total : 0;
+        
         if (myPoints < 5) {
-          showToast('Not enough points! You need at least 5.', 'warning');
+          showToast(`Not enough points! You have ${myPoints} but need at least 5.`, 'warning');
           modal.close();
           return;
         }
@@ -199,14 +200,10 @@ function showGiftPointsModal(allUsers) {
         });
 
         // Deduct 5 from birthday person
-        await updateDoc(doc(db, 'users', currentUser.uid), {
-          points: increment(-5)
-        });
+        awardPoints(currentUser.uid, -5, 'Birthday Gift Given');
 
         // Add 5 to friend
-        await updateDoc(doc(db, 'users', targetId), {
-          points: increment(5)
-        });
+        awardPoints(targetId, 5, 'Birthday Gift Received');
 
         // Send notification to friend
         await createNotification('friend_bonus', targetId, {

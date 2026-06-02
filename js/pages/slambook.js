@@ -77,9 +77,6 @@ function renderOwnerBooksList(el, user, books) {
               
               <div class="flex items-center gap-2">
                 <button class="flex-1 text-xs py-2 bg-indigo-50 text-indigo-700 font-bold rounded-lg btn-dashboard" data-id="${b.id}">View Dashboard</button>
-                <button class="w-10 h-10 flex items-center justify-center bg-gray-50 text-gray-600 rounded-lg hover:bg-gray-100 btn-share" data-id="${b.id}">
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z"/></svg>
-                </button>
               </div>
             </div>
           </div>
@@ -98,13 +95,7 @@ function renderOwnerBooksList(el, user, books) {
     });
   });
 
-  el.querySelectorAll('.btn-share').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const book = books.find(b => b.id === btn.dataset.id);
-      if (book) shareSlamBook(book);
-    });
-  });
+
 
   el.querySelectorAll('.slambook-card').forEach(card => {
     card.addEventListener('click', (e) => {
@@ -318,9 +309,17 @@ function showSlamBookConfigurator(existingBook = null) {
         await updateDoc(doc(db, 'slambooks', existingBook.id), finalConfig);
         showToast('Book updated!', 'success');
       } else {
+        const existingBooksSnap = await getDocs(query(collection(db, 'slambooks'), where('ownerId', '==', authManager.currentUser.uid), limit(1)));
+        const isFirstBook = existingBooksSnap.empty;
+        
         await addDoc(collection(db, 'slambooks'), finalConfig);
-        showToast('Slam Book Created! +5 Points Earned 🌟', 'success');
-        awardPoints(authManager.currentUser.uid, 5, 'Slam Book Created');
+        
+        if (isFirstBook) {
+          showToast('Slam Book Created! +5 Points Earned 🌟', 'success');
+          awardPoints(authManager.currentUser.uid, 5, 'First Slam Book Created');
+        } else {
+          showToast('Slam Book Created!', 'success');
+        }
       }
       modal.close();
     } catch (e) {
@@ -377,8 +376,7 @@ function openOwnerDashboard(book) {
       </div>
       
       <div class="px-4 mt-6 flex gap-3">
-        <button id="db-btn-edit" class="flex-1 py-3 bg-white border border-gray-200 rounded-xl font-bold text-sm text-navy-700 shadow-sm hover:bg-gray-50">⚙️ Edit Settings</button>
-        <button id="db-btn-share" class="flex-1 py-3 bg-indigo-600 rounded-xl font-bold text-sm text-white shadow-sm hover:bg-indigo-700">📤 Share Link</button>
+        <button id="db-btn-edit" class="w-full py-3 bg-white border border-gray-200 rounded-xl font-bold text-sm text-navy-700 shadow-sm hover:bg-gray-50">⚙️ Edit Settings</button>
       </div>
 
       <div class="px-4 mt-8">
@@ -395,7 +393,7 @@ function openOwnerDashboard(book) {
     showSlamBookConfigurator(book);
   });
   
-  modal.body.querySelector('#db-btn-share').addEventListener('click', () => shareSlamBook(book));
+
 
   const q = query(collection(db, 'slambookResponses'), where('slambookId', '==', book.id));
   const unsub = onSnapshot(q, (snap) => {

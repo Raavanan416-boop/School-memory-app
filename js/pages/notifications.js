@@ -20,7 +20,7 @@ export async function renderNotifications(container) {
   if (unsubNotifs) unsubNotifs();
 
   container.innerHTML = `
-    <section class="px-4 pt-4 pb-6">
+    <section class="px-4 pt-4 pb-32 min-h-screen overflow-y-auto">
       <div class="flex items-center gap-3 mb-5">
         <button id="notif-back-btn" class="inner-back-btn">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/></svg>
@@ -245,8 +245,31 @@ function createNotifCard(notif) {
   card.addEventListener('click', async (e) => {
     if (e.target.closest('.notif-delete-btn')) return; // Don't navigate on delete
 
-    // Automatically delete notification when clicked (as requested by user)
-    await notificationManager.deleteNotification(notif.id);
+    // Mark as read instantly to update badge and UI
+    if (!notif.read) {
+      notif.read = true;
+      // Update UI classes immediately
+      card.classList.remove('bg-gradient-to-r', 'from-cream-50', 'to-cream-100/50', 'border-cream-200', 'shadow-sm');
+      card.classList.add('bg-white', 'hover:bg-gray-50');
+      card.querySelector('.text-navy-800')?.classList.replace('text-navy-800', 'text-gray-600');
+      card.querySelector('.font-semibold')?.classList.remove('font-semibold');
+      card.querySelector('.text-navy-600')?.classList.replace('text-navy-600', 'text-gray-400');
+      const dot = card.querySelector('.animate-pulse');
+      if (dot) dot.remove();
+
+      // Decrement unread count instantly
+      if (notificationManager.unreadCount > 0) {
+        notificationManager.unreadCount--;
+        notificationManager._updateBadge();
+        const unreadBanner = document.querySelector('#unread-banner');
+        const unreadCountText = document.querySelector('#unread-count-text');
+        if (unreadCountText) unreadCountText.textContent = notificationManager.unreadCount;
+        if (notificationManager.unreadCount === 0 && unreadBanner) unreadBanner.classList.add('hidden');
+      }
+
+      // Sync to Firebase
+      notificationManager.markRead(notif.id).catch(console.error);
+    }
     
     notificationManager.navigateToNotification(notif);
   });

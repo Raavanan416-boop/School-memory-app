@@ -4,6 +4,120 @@ import { router } from './router.js';
 import { showToast, sanitizeHTML } from './utils.js';
 import { presenceManager } from './presence.js';
 
+// ===== MUSIC PLAYER =====
+const MusicPlayer = {
+  bellAudio: null,
+  bgAudio: null,
+  playlist: [
+    'firstsong.mp3',
+    'secondsong.mp3',
+    'thridsong.mp3',
+    'fourthsong.mp3',
+    'applastsong.mp3'
+  ],
+  currentIndex: 0,
+  isStopped: false,
+  hasStarted: false,
+
+  start() {
+    if (this.isStopped || this.hasStarted) return;
+    this.hasStarted = true;
+
+    // Play bell first
+    this.bellAudio = new Audio('schoolbell.mp3');
+    this.bellAudio.volume = 0.8;
+
+    // Ensure no overlapping audio
+    if (this.bgAudio) {
+      this.bgAudio.pause();
+    }
+
+    const playPromise = this.bellAudio.play();
+    if (playPromise !== undefined) {
+      playPromise.then(() => {
+        this.showStopButton();
+      }).catch(e => {
+        console.log('Audio autoplay blocked. Waiting for user interaction.', e);
+        const unlockAudio = () => {
+          if (!this.isStopped) {
+            this.bellAudio.play().then(() => this.showStopButton()).catch(() => { });
+          }
+          document.removeEventListener('click', unlockAudio);
+        };
+        document.addEventListener('click', unlockAudio, { once: true });
+      });
+    }
+
+    this.bellAudio.onended = () => {
+      if (this.isStopped) return;
+      this.playNextSong();
+    };
+  },
+
+  playNextSong() {
+    if (this.isStopped) return;
+    if (this.currentIndex >= this.playlist.length) {
+      this.stopAll();
+      return;
+    }
+
+    if (this.bgAudio) {
+      this.bgAudio.pause();
+      this.bgAudio.src = '';
+    }
+
+    this.bgAudio = new Audio(this.playlist[this.currentIndex]);
+    this.bgAudio.volume = 0.5;
+    this.bgAudio.play().catch(e => console.log('BGAudio play failed:', e));
+
+    this.bgAudio.onended = () => {
+      if (this.isStopped) return;
+      this.currentIndex++;
+      this.playNextSong();
+    };
+  },
+
+  stopAll() {
+    this.isStopped = true;
+    if (this.bellAudio) {
+      this.bellAudio.pause();
+      this.bellAudio.src = '';
+    }
+    if (this.bgAudio) {
+      this.bgAudio.pause();
+      this.bgAudio.src = '';
+    }
+    this.playlist = [];
+    this.hideStopButton();
+  },
+
+  showStopButton() {
+    let btn = document.getElementById('global-music-stop');
+    if (!btn && !this.isStopped) {
+      btn = document.createElement('button');
+      btn.id = 'global-music-stop';
+      btn.innerHTML = `
+        <span class="relative z-10 flex items-center gap-2">
+          <span class="animate-pulse text-lg">🎵</span> Stop Music
+        </span>
+        <div class="absolute inset-0 h-full w-full bg-gradient-to-r from-transparent via-white/40 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></div>
+      `;
+      btn.className = 'fixed bottom-24 right-4 z-[100] bg-gradient-to-br from-rose-500 via-red-500 to-red-600 text-white font-extrabold px-6 py-3 rounded-full shadow-[0_8px_30px_rgba(225,29,72,0.6)] border border-white/20 hover:shadow-[0_12px_40px_rgba(225,29,72,0.8)] hover:-translate-y-1 transition-all duration-300 transform active:scale-95 flex items-center gap-2 overflow-hidden group tracking-wide text-sm';
+      btn.onclick = () => this.stopAll();
+      document.body.appendChild(btn);
+    }
+  },
+
+  hideStopButton() {
+    const btn = document.getElementById('global-music-stop');
+    if (btn) {
+      btn.style.opacity = '0';
+      btn.style.transform = 'scale(0.8)';
+      setTimeout(() => btn.remove(), 300);
+    }
+  }
+};
+
 // Expose router globally for notification click routing
 window.__appRouter = { router };
 
@@ -76,54 +190,85 @@ function hideSplash() {
 // ===== LOGIN PAGE =====
 function showLogin() {
   const lp = $('#login-page');
-  lp.classList.remove('hidden');
+  lp.className = 'fixed inset-0 z-[90] bg-gradient-to-br from-cream-100 to-amber-50/80 overflow-y-auto';
   lp.innerHTML = `
-    <div class="flex flex-col items-center justify-center min-h-screen px-6 py-10">
+    <div class="flex flex-col items-center justify-center min-h-screen px-6 py-10 relative">
+      <!-- Nostalgic floating particles / bokeh (CSS simulated) -->
+      <div class="absolute inset-0 overflow-hidden pointer-events-none opacity-40">
+         <div class="absolute w-64 h-64 bg-amber-200/30 rounded-full blur-3xl -top-10 -left-10 animate-pulse" style="animation-duration: 8s"></div>
+         <div class="absolute w-72 h-72 bg-orange-200/20 rounded-full blur-3xl bottom-10 right-10 animate-pulse" style="animation-duration: 10s"></div>
+      </div>
+
       <!-- School Crest -->
-      <div class="school-crest mb-6 animate-scaleIn">
-        <span class="text-4xl mb-1">📖</span>
-        <span class="text-[11px] font-bold text-navy-500 tracking-wide">ClassMemories</span>
-        <div class="ribbon">2024 & 2025</div>
+      <div class="school-crest mb-8 animate-scaleIn relative z-10 shadow-xl shadow-amber-900/5 bg-white/60 backdrop-blur-sm border border-white/50 p-6 rounded-3xl transition-transform duration-500 hover:scale-105">
+        <span class="text-5xl mb-2 drop-shadow-md">🏫</span>
+        <span class="text-[12px] font-bold text-navy-800 tracking-widest uppercase">ClassMemories</span>
+        <div class="ribbon shadow-sm">2024 & 2025</div>
       </div>
 
       <!-- Welcome text -->
-      <h1 class="text-2xl font-bold text-navy-800 mb-1 animate-fadeIn">Welcome Back, Class!</h1>
-      <p class="text-sm text-gray-400 mb-8 animate-fadeIn">Only 37 spots. Login below.</p>
+      <h1 class="text-3xl font-display font-extrabold text-navy-900 mb-2 animate-fadeIn relative z-10 drop-shadow-sm tracking-tight">Welcome Back</h1>
+      <p class="text-sm text-navy-600/80 mb-10 animate-fadeIn relative z-10 font-medium tracking-wide">Relive the golden days.</p>
 
       <!-- Login Form -->
-      <div class="w-full max-w-xs animate-slideUp" style="animation-delay:0.2s;opacity:0">
-        <form id="login-form" class="space-y-4" autocomplete="off">
+      <div class="w-full max-w-sm animate-slideUp relative z-10 bg-white/70 backdrop-blur-md p-8 rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white" style="animation-delay:0.2s;opacity:0">
+        <form id="login-form" class="space-y-6" autocomplete="off">
           <!-- Username -->
-          <div>
-            <label class="text-xs font-semibold text-navy-600 mb-1.5 block">Email</label>
-            <div class="relative">
-              <svg class="input-icon" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0"/></svg>
-              <input type="email" id="login-email" placeholder="admin37@classmemories.com" class="input-field" required/>
+          <div class="group">
+            <label class="text-[11px] font-bold text-navy-500 mb-2 block uppercase tracking-wider transition-colors group-focus-within:text-navy-900">Email Address</label>
+            <div class="relative flex items-center transition-transform duration-300 group-focus-within:-translate-y-1">
+              <svg class="absolute left-4 w-5 h-5 text-navy-400 group-focus-within:text-navy-700 transition-colors z-10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0"/></svg>
+              <input type="email" id="login-email" placeholder="admin37@classmemories.com" class="w-full bg-white/60 border border-cream-200 rounded-2xl py-3.5 pl-12 pr-4 text-sm text-navy-900 font-medium focus:outline-none focus:ring-2 focus:ring-navy-200 focus:border-transparent focus:bg-white transition-all shadow-sm" required/>
             </div>
           </div>
 
           <!-- Password -->
-          <div>
-            <label class="text-xs font-semibold text-navy-600 mb-1.5 block">Password</label>
-            <div class="relative">
-              <svg class="input-icon" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>
-              <input type="password" id="login-password" placeholder="school123" class="input-field" required/>
+          <div class="group">
+            <label class="text-[11px] font-bold text-navy-500 mb-2 block uppercase tracking-wider transition-colors group-focus-within:text-navy-900">Password</label>
+            <div class="relative flex items-center transition-transform duration-300 group-focus-within:-translate-y-1">
+              <svg class="absolute left-4 w-5 h-5 text-navy-400 group-focus-within:text-navy-700 transition-colors z-10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>
+              <input type="password" id="login-password" placeholder="school123" class="w-full bg-white/60 border border-cream-200 rounded-2xl py-3.5 pl-12 pr-12 text-sm text-navy-900 font-medium focus:outline-none focus:ring-2 focus:ring-navy-200 focus:border-transparent focus:bg-white transition-all shadow-sm" required/>
+              <button type="button" id="toggle-password-btn" class="absolute right-2 w-10 h-10 flex items-center justify-center rounded-full hover:bg-cream-100 transition-all focus:outline-none z-10" aria-label="Toggle password visibility">
+                <span class="text-xl leading-none transform transition-transform duration-300 inline-block" id="diary-icon">📘</span>
+              </button>
             </div>
           </div>
 
-          <button type="submit" id="login-submit" class="btn-primary mt-2">
-            ENTER THE MEMORY LANE
+          <button type="submit" id="login-submit" class="w-full bg-navy-800 text-white font-bold py-4 rounded-2xl shadow-[0_4px_14px_0_rgb(30,58,95,0.39)] hover:shadow-[0_6px_20px_rgba(30,58,95,0.23)] hover:-translate-y-0.5 transition-all duration-300 mt-4 tracking-wide relative overflow-hidden group">
+            <span class="relative z-10">ENTER THE MEMORY LANE</span>
+            <div class="absolute inset-0 h-full w-full bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700"></div>
           </button>
 
-          <div id="login-error" class="hidden text-center text-red-500 text-xs mt-2 p-2.5 bg-red-50 rounded-xl border border-red-100"></div>
+          <div id="login-error" class="hidden text-center text-red-500 text-xs mt-4 p-3 bg-red-50/80 backdrop-blur-sm rounded-xl border border-red-100 font-medium shadow-inner"></div>
         </form>
 
-        <p class="text-center text-gray-400 text-[11px] mt-6">
-          Login access restricted to authorized alumni.
+        <p class="text-center text-navy-400 text-[11px] font-medium mt-8 flex items-center justify-center gap-2">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+          Restricted to authorized alumni
         </p>
       </div>
     </div>
   `;
+
+  // Password visibility toggle logic
+  const toggleBtn = lp.querySelector('#toggle-password-btn');
+  const passInput = lp.querySelector('#login-password');
+  const diaryIcon = lp.querySelector('#diary-icon');
+
+  if (toggleBtn && passInput) {
+    toggleBtn.addEventListener('click', () => {
+      const isPass = passInput.type === 'password';
+      passInput.type = isPass ? 'text' : 'password';
+
+      // Diary open/close animation
+      diaryIcon.style.transform = 'scale(0.8)';
+      setTimeout(() => {
+        diaryIcon.textContent = isPass ? '📖' : '📘';
+        diaryIcon.style.transform = 'scale(1.1)';
+      }, 150);
+      setTimeout(() => diaryIcon.style.transform = 'scale(1)', 300);
+    });
+  }
 
   // Login submit
   lp.querySelector('#login-form')?.addEventListener('submit', async (e) => {
@@ -145,6 +290,7 @@ async function doLogin(email, password) {
   try {
     await authManager.login(email, password);
     showToast('Welcome back! 🎓', 'success');
+    MusicPlayer.start();
   } catch (err) {
     console.error('Login error:', err);
     let msg = 'Login failed. Please try again.';
@@ -221,26 +367,26 @@ function buildAppShell() {
   $('#btn-notifications')?.addEventListener('click', () => router.navigate('notifications'));
 
   // Set up notification badge + FCM
-    if (notificationManager) {
-      const badge = $('#notif-badge');
-      notificationManager.setBadgeElement(badge);
-      notificationManager.startListening();
-      // Initialize FCM (registers firebase-messaging-sw.js + token)
-      notificationManager.initFCM().then(() => {
-        // Request push permission after FCM is ready
-        if ('Notification' in window && Notification.permission === 'default') {
-          setTimeout(() => notificationManager.requestPushPermission(), 5000);
-        }
-      }).catch(e => console.log('[App] FCM init:', e.message));
-      // Unlock audio on first user touch/click (required by mobile browsers)
-      const unlockAudio = () => {
-        if (notificationManager) notificationManager.unlockAudio();
-        document.removeEventListener('touchstart', unlockAudio);
-        document.removeEventListener('click', unlockAudio);
-      };
-      document.addEventListener('touchstart', unlockAudio, { once: true });
-      document.addEventListener('click', unlockAudio, { once: true });
-    }
+  if (notificationManager) {
+    const badge = $('#notif-badge');
+    notificationManager.setBadgeElement(badge);
+    notificationManager.startListening();
+    // Initialize FCM (registers firebase-messaging-sw.js + token)
+    notificationManager.initFCM().then(() => {
+      // Request push permission after FCM is ready
+      if ('Notification' in window && Notification.permission === 'default') {
+        setTimeout(() => notificationManager.requestPushPermission(), 5000);
+      }
+    }).catch(e => console.log('[App] FCM init:', e.message));
+    // Unlock audio on first user touch/click (required by mobile browsers)
+    const unlockAudio = () => {
+      if (notificationManager) notificationManager.unlockAudio();
+      document.removeEventListener('touchstart', unlockAudio);
+      document.removeEventListener('click', unlockAudio);
+    };
+    document.addEventListener('touchstart', unlockAudio, { once: true });
+    document.addEventListener('click', unlockAudio, { once: true });
+  }
 
   // Start listening for incoming calls
   if (callManager) {
@@ -292,7 +438,7 @@ function buildAppShell() {
       document.body.className = document.body.className.replace(/theme-\w+/g, '').trim();
       if (userTheme !== 'theme-cream') document.body.classList.add(userTheme);
     }
-  } catch(e) { /* non-critical */ }
+  } catch (e) { /* non-critical */ }
 
   // Page cleanup on navigation
   router.onNavigate = async (page) => {
@@ -318,7 +464,7 @@ function buildAppShell() {
         const { destroyBirthday } = await import('./pages/birthday.js').catch(() => ({}));
         if (destroyBirthday) destroyBirthday();
       }
-    } catch(e) { /* non-critical cleanup */ }
+    } catch (e) { /* non-critical cleanup */ }
   };
 
   // PWA Install prompt
@@ -377,11 +523,11 @@ function checkBirthdayCelebration() {
 
   // Spawn confetti
   const confettiBox = overlay.querySelector('#bday-confetti');
-  const colors = ['#ffd700','#ff6b6b','#48dbfb','#ff9ff3','#54a0ff','#5f27cd','#ff8c00','#00d2d3'];
+  const colors = ['#ffd700', '#ff6b6b', '#48dbfb', '#ff9ff3', '#54a0ff', '#5f27cd', '#ff8c00', '#00d2d3'];
   for (let i = 0; i < 60; i++) {
     const piece = document.createElement('div');
     piece.className = 'birthday-confetti-piece';
-    piece.style.cssText = `left:${Math.random()*100}%;background:${colors[Math.floor(Math.random()*colors.length)]};animation-duration:${2+Math.random()*3}s;animation-delay:${Math.random()*2}s;width:${6+Math.random()*8}px;height:${6+Math.random()*8}px;border-radius:${Math.random()>0.5?'50%':'2px'};`;
+    piece.style.cssText = `left:${Math.random() * 100}%;background:${colors[Math.floor(Math.random() * colors.length)]};animation-duration:${2 + Math.random() * 3}s;animation-delay:${Math.random() * 2}s;width:${6 + Math.random() * 8}px;height:${6 + Math.random() * 8}px;border-radius:${Math.random() > 0.5 ? '50%' : '2px'};`;
     confettiBox.appendChild(piece);
   }
 
@@ -462,7 +608,7 @@ function showThrowbackPopup(posts) {
       </div>
       <div class="p-4">
         <p class="font-handwriting text-base text-navy-700 text-center" id="tbt-caption">${posts[0]?.caption || 'A beautiful memory...'}</p>
-        <p class="text-[10px] text-gray-400 text-center mt-1" id="tbt-date">${posts[0]?.createdAt?.toDate ? posts[0].createdAt.toDate().toLocaleDateString('en-IN', {day:'numeric',month:'short',year:'numeric'}) : ''}</p>
+        <p class="text-[10px] text-gray-400 text-center mt-1" id="tbt-date">${posts[0]?.createdAt?.toDate ? posts[0].createdAt.toDate().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}</p>
       </div>
       <div class="flex gap-2 px-4 pb-4">
         <button id="tbt-dismiss" class="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-500">Dismiss</button>
@@ -486,7 +632,7 @@ function showThrowbackPopup(posts) {
     dots[currentSlide]?.classList.add('active');
     if (caption) caption.textContent = posts[currentSlide]?.caption || 'A beautiful memory...';
     if (dateEl && posts[currentSlide]?.createdAt?.toDate) {
-      dateEl.textContent = posts[currentSlide].createdAt.toDate().toLocaleDateString('en-IN', {day:'numeric',month:'short',year:'numeric'});
+      dateEl.textContent = posts[currentSlide].createdAt.toDate().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
     }
   }, 3000);
 
@@ -539,9 +685,9 @@ function showIncomingCallUI(call) {
       <div class="call-info">
         <div class="call-avatar-ring">
           ${call.callerPhoto
-            ? `<img src="${call.callerPhoto}" class="w-20 h-20 rounded-full object-cover" alt="" />`
-            : `<div class="avatar avatar-placeholder text-2xl w-20 h-20">${(call.callerName || '?')[0]}</div>`
-          }
+      ? `<img src="${call.callerPhoto}" class="w-20 h-20 rounded-full object-cover" alt="" />`
+      : `<div class="avatar avatar-placeholder text-2xl w-20 h-20">${(call.callerName || '?')[0]}</div>`
+    }
         </div>
         <h3 class="text-lg font-bold text-white mt-4">${sanitizeHTML(call.callerName || 'Unknown')}</h3>
         <p class="text-sm text-white/70 mt-1">${callTypeIcon} Incoming ${callTypeLabel} Call...</p>
@@ -712,14 +858,14 @@ async function init() {
       buildAppShell();
     } else {
       console.log('[ClassMemories] No user, showing login...');
-        $('#app')?.classList.add('hidden');
-        $('#bottom-nav')?.classList.add('hidden');
-        if (notificationManager) {
-          notificationManager.removeFCMToken();
-          notificationManager.stopListening();
-        }
-        if (callManager) callManager.stopListeningForCalls();
-        showLogin();
+      $('#app')?.classList.add('hidden');
+      $('#bottom-nav')?.classList.add('hidden');
+      if (notificationManager) {
+        notificationManager.removeFCMToken();
+        notificationManager.stopListening();
+      }
+      if (callManager) callManager.stopListeningForCalls();
+      showLogin();
     }
   });
 

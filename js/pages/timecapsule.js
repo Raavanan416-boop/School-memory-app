@@ -1,11 +1,11 @@
 // Time Capsule page — Enhanced with date+time, visibility selection, delete support
 import { db, collection, addDoc, getDocs, query, orderBy, onSnapshot, doc, updateDoc,
-  serverTimestamp, limit, deleteDoc } from '../firebase-config.js';
+  serverTimestamp, limit, deleteDoc, where } from '../firebase-config.js';
 import { showToast, sanitizeHTML, formatDate } from '../utils.js';
 import { authManager, awardPoints } from '../auth.js';
 import { router } from '../router.js';
 import { showDeleteConfirmation } from '../delete-confirm.js';
-
+import { createNotification } from '../notifications.js';
 let unsubCapsules = null;
 let countdownInterval = null;
 
@@ -147,6 +147,10 @@ function createCapsuleCard(capsule) {
             <p class="font-handwriting text-lg text-navy-700">"${sanitizeHTML(capsule.caption)}"</p>
           </div>
         ` : ''}
+        
+        <div class="capsule-messages-container mt-4 border-t border-gray-100 pt-4 hidden">
+          <!-- Messages will be injected here by loadCapsuleMessages -->
+        </div>
       </div>
     `;
   } else {
@@ -197,6 +201,10 @@ function createCapsuleCard(capsule) {
           Opens on ${unlockDate ? unlockDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Unknown date'}
           ${unlockDate ? ' at ' + unlockDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
         </p>
+        
+        <div class="capsule-messages-container mt-4 border-t border-gray-100 pt-4 hidden">
+          <!-- Messages will be injected here by loadCapsuleMessages -->
+        </div>
       </div>
     `;
   }
@@ -209,6 +217,9 @@ function createCapsuleCard(capsule) {
       await deleteDoc(doc(db, 'timeCapsules', capsule.id));
     }, { element: card });
   });
+
+  // Load and render messages dynamically
+  loadCapsuleMessages(capsule, card, isUnlocked, isOwner);
 
   return card;
 }
@@ -345,4 +356,227 @@ function showCapsuleReveal(capsule) {
   overlay.querySelector('#capsule-reveal-close')?.addEventListener('click', dismiss);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) dismiss(); });
   setTimeout(() => { if (document.body.contains(overlay)) dismiss(); }, 12000);
+}
+
+function loadCapsuleMessages(capsule, card, isUnlocked, isOwner) {
+  const container = card.querySelector('.capsule-messages-container');
+  if (!container) return;
+
+  container.classList.remove('hidden');
+
+  if (!isUnlocked) {
+    container.innerHTML = `
+      <div class="text-center p-4">
+        <div class="text-3xl mb-2">🔒</div>
+        <p class="font-bold text-navy-800 text-sm">Time Capsule Locked</p>
+        <p class="text-xs text-gray-400 mt-1">Comments will be available after the capsule opens.</p>
+      </div>
+    `;
+    return;
+  }
+
+  if (isOwner) {
+    container.innerHTML = `
+      <div class="flex items-center justify-between p-2 bg-gray-50 rounded-xl">
+        <span class="text-sm font-bold text-navy-800 flex items-center gap-2">💬 Comments</span>
+        <button class="view-comments-btn px-4 py-2 bg-navy-500 text-white rounded-full text-xs font-semibold hover:bg-navy-600 transition-colors">View Comments</button>
+      </div>
+    `;
+    container.querySelector('.view-comments-btn')?.addEventListener('click', () => {
+      openCommentsModal(capsule.id);
+    });
+    return;
+  }
+
+  // Friend View Unlocked
+  container.innerHTML = `
+    <div class="message-input-section mb-2">
+      <h4 class="text-sm font-bold text-navy-800 mb-2 flex items-center gap-2">💬 Leave a Comment</h4>
+      <div class="flex gap-2">
+        <input type="text" class="tc-msg-input flex-1 bg-gray-50 border border-gray-200 rounded-full px-4 py-2 text-sm focus:outline-none focus:border-navy-400" placeholder="Type a message..." maxlength="200">
+        <button class="tc-msg-send-btn p-2 bg-navy-500 text-white rounded-full hover:bg-navy-600 transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="tc-messages-list space-y-2"></div>
+  `;
+
+  const msgList = container.querySelector('.tc-messages-list');
+  const inputEl = container.querySelector('.tc-msg-input');
+  const sendBtn = container.querySelector('.tc-msg-send-btn');
+  const inputSection = container.querySelector('.message-input-section');
+
+  let editingMsgId = null;
+
+  if (sendBtn && inputEl) {
+    sendBtn.addEventListener('click', async () => {
+      const text = inputEl.value.trim();
+      if (!text) return;
+      
+      inputEl.disabled = true;
+      sendBtn.disabled = true;
+
+      try {
+        if (editingMsgId) {
+          await updateDoc(doc(db, 'timeCapsules', capsule.id, 'messages', editingMsgId), {
+            text
+          });
+          editingMsgId = null;
+          showToast('✅ Your comment has been updated.', 'success');
+        } else {
+          await addDoc(collection(db, 'timeCapsules', capsule.id, 'messages'), {
+            text,
+            authorId: authManager.currentUser.uid,
+            authorName: authManager.userData?.fullName || 'Friend',
+            authorPhoto: authManager.userData?.profilePic || '',
+            createdAt: serverTimestamp()
+          });
+          showToast('✅ Your comment has been submitted.', 'success');
+          
+          // Leaderboard update instantly + Notification
+          await awardPoints(authManager.currentUser.uid, 3, 'Time Capsule Comment');
+          
+          await createNotification('capsule_message', capsule.authorId || capsule.createdBy, {
+            capsuleId: capsule.id,
+            message: `💬 New Capsule Comment: ${authManager.userData?.fullName || 'A friend'} commented on your Time Capsule.`
+          });
+        }
+        inputEl.value = '';
+      } catch (err) {
+        showToast('Failed to send comment.', 'error');
+        console.error(err);
+      } finally {
+        inputEl.disabled = false;
+        sendBtn.disabled = false;
+      }
+    });
+  }
+
+  const q = query(
+    collection(db, 'timeCapsules', capsule.id, 'messages'), 
+    where('authorId', '==', authManager.currentUser.uid),
+    orderBy('createdAt', 'asc')
+  );
+
+  onSnapshot(q, (snap) => {
+    if (!msgList) return;
+    msgList.innerHTML = '';
+    
+    if (!snap.empty) {
+      inputSection.classList.add('hidden'); // Hide input if they already commented
+    } else {
+      inputSection.classList.remove('hidden');
+    }
+
+    snap.forEach(d => {
+      const msg = { id: d.id, ...d.data() };
+      const timeStr = msg.createdAt?.toDate ? formatDate(msg.createdAt.toDate()) : 'Just now';
+      
+      const div = document.createElement('div');
+      div.className = 'bg-gray-50 rounded-xl p-3 relative group';
+      div.innerHTML = `
+        <p class="text-sm text-gray-700">${sanitizeHTML(msg.text)}</p>
+        <p class="text-[10px] text-gray-400 mt-1">${timeStr}</p>
+        <div class="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button class="msg-edit-btn p-1 text-gray-400 hover:text-navy-500" title="Edit">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+          </button>
+          <button class="msg-delete-btn p-1 text-gray-400 hover:text-red-500" title="Delete">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          </button>
+        </div>
+      `;
+      
+      div.querySelector('.msg-edit-btn')?.addEventListener('click', () => {
+        inputSection.classList.remove('hidden');
+        inputEl.value = msg.text;
+        inputEl.focus();
+        editingMsgId = msg.id;
+      });
+
+      div.querySelector('.msg-delete-btn')?.addEventListener('click', async () => {
+        if (confirm('Delete your comment?')) {
+          await awardPoints(authManager.currentUser.uid, -3, 'Time Capsule Comment Deleted');
+          await deleteDoc(doc(db, 'timeCapsules', capsule.id, 'messages', msg.id));
+          editingMsgId = null;
+          inputEl.value = '';
+        }
+      });
+      
+      msgList.appendChild(div);
+    });
+  }, (error) => {});
+}
+
+let unsubModalComments = null;
+
+function openCommentsModal(capsuleId) {
+  const modalHtml = `
+    <div id="tc-comments-modal" class="fixed inset-0 z-[9999] flex flex-col bg-white animate-slideUp">
+      <div class="flex items-center justify-between p-4 border-b border-gray-100">
+        <h2 class="text-lg font-bold text-navy-800 flex items-center gap-2">💬 Comments</h2>
+        <button id="close-comments-modal" class="p-2 text-gray-400 hover:bg-gray-50 rounded-full transition-colors">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div id="tc-comments-list" class="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+        <div class="flex justify-center p-8"><div class="w-6 h-6 border-2 border-navy-500 border-t-transparent rounded-full animate-spin"></div></div>
+      </div>
+    </div>
+  `;
+  document.body.insertAdjacentHTML('beforeend', modalHtml);
+  
+  const modalEl = document.getElementById('tc-comments-modal');
+  const listEl = document.getElementById('tc-comments-list');
+  
+  modalEl.querySelector('#close-comments-modal').addEventListener('click', () => {
+    if (unsubModalComments) {
+      unsubModalComments();
+      unsubModalComments = null;
+    }
+    modalEl.classList.add('translate-y-full');
+    setTimeout(() => modalEl.remove(), 300);
+  });
+
+  const q = query(collection(db, 'timeCapsules', capsuleId, 'messages'), orderBy('createdAt', 'asc'));
+  unsubModalComments = onSnapshot(q, (snap) => {
+    if (snap.empty) {
+      listEl.innerHTML = `
+        <div class="text-center p-8">
+          <div class="text-4xl mb-3 opacity-50">💭</div>
+          <h3 class="font-semibold text-gray-500">No comments yet</h3>
+        </div>
+      `;
+      return;
+    }
+    listEl.innerHTML = '';
+    snap.forEach(d => {
+      const msg = { id: d.id, ...d.data() };
+      const timeStr = msg.createdAt?.toDate ? formatDate(msg.createdAt.toDate()) : 'Just now';
+      
+      const div = document.createElement('div');
+      div.className = 'bg-white p-3 rounded-2xl shadow-sm border border-gray-100 flex gap-3 relative group';
+      div.innerHTML = `
+        <img src="${msg.authorPhoto || 'default-avatar.png'}" class="w-10 h-10 rounded-full object-cover shrink-0 bg-gray-200" onerror="this.src='default-avatar.png'">
+        <div class="flex-1">
+          <div class="flex items-baseline justify-between mb-1">
+            <p class="text-sm font-bold text-navy-800">${sanitizeHTML(msg.authorName || 'Friend')}</p>
+            <p class="text-[10px] text-gray-400">${timeStr}</p>
+          </div>
+          <p class="text-sm text-gray-700">${sanitizeHTML(msg.text)}</p>
+        </div>
+        <button class="msg-delete-btn absolute top-2 right-2 p-1 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity" title="Delete">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+        </button>
+      `;
+      
+      div.querySelector('.msg-delete-btn')?.addEventListener('click', async () => {
+        if (confirm('Delete this comment?')) {
+          await deleteDoc(doc(db, 'timeCapsules', capsuleId, 'messages', msg.id));
+        }
+      });
+      listEl.appendChild(div);
+    });
+  });
 }

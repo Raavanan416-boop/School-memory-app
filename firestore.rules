@@ -79,6 +79,29 @@ service cloud.firestore {
       allow update: if isAuthenticated();
       allow delete: if isAuthenticated()
         && (resource.data.authorId == request.auth.uid || isAdmin());
+
+      // Future Messages
+      match /messages/{messageId} {
+        // Anyone can create a message for a time capsule
+        allow create: if isAuthenticated() && request.resource.data.authorId == request.auth.uid;
+        
+        // You can read your own messages.
+        // Capsule creator can read ALL messages, ONLY IF the capsule is unlocked.
+        allow read: if isAuthenticated() && (
+          resource.data.authorId == request.auth.uid ||
+          (
+            get(/databases/$(database)/documents/timeCapsules/$(capsuleId)).data.authorId == request.auth.uid &&
+            get(/databases/$(database)/documents/timeCapsules/$(capsuleId)).data.isUnlocked == true
+          )
+        );
+        
+        // You can delete your own messages. Creator can delete any message.
+        allow delete: if isAuthenticated() && (
+          resource.data.authorId == request.auth.uid ||
+          get(/databases/$(database)/documents/timeCapsules/$(capsuleId)).data.authorId == request.auth.uid ||
+          isAdmin()
+        );
+      }
     }
 
     // Diary entries

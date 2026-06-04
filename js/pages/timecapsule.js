@@ -7,11 +7,16 @@ import { router } from '../router.js';
 import { showDeleteConfirmation } from '../delete-confirm.js';
 
 let unsubCapsules = null;
+let countdownInterval = null;
 
 export function destroyTimecapsule() {
   if (unsubCapsules) {
     unsubCapsules();
     unsubCapsules = null;
+  }
+  if (countdownInterval) {
+    clearInterval(countdownInterval);
+    countdownInterval = null;
   }
 }
 
@@ -41,6 +46,36 @@ export async function renderTimeCapsule(container) {
   container.querySelector('#tc-back-btn')?.addEventListener('click', () => router.navigateBack());
 
   loadCapsules(container);
+  startCountdownTimer(container);
+}
+
+function startCountdownTimer(container) {
+  if (countdownInterval) clearInterval(countdownInterval);
+  
+  countdownInterval = setInterval(() => {
+    const lockCards = container.querySelectorAll('.capsule-locked');
+    const now = Date.now();
+    
+    lockCards.forEach(card => {
+      const unlockMillis = parseInt(card.dataset.unlockMillis || '0');
+      const diff = Math.max(0, unlockMillis - now);
+      
+      const daysLeft = Math.floor(diff / (1000 * 60 * 60 * 24));
+      const hoursLeft = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const minsLeft = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      const secsLeft = Math.floor((diff % (1000 * 60)) / 1000);
+      
+      const dEl = card.querySelector('.days-left');
+      const hEl = card.querySelector('.hours-left');
+      const mEl = card.querySelector('.mins-left');
+      const sEl = card.querySelector('.secs-left');
+      
+      if (dEl) dEl.textContent = daysLeft;
+      if (hEl) hEl.textContent = hoursLeft;
+      if (mEl) mEl.textContent = minsLeft;
+      if (sEl) sEl.textContent = secsLeft;
+    });
+  }, 1000);
 }
 
 function loadCapsules(container) {
@@ -69,8 +104,13 @@ function loadCapsules(container) {
 }
 
 function createCapsuleCard(capsule) {
-  const unlockDate = capsule.unlockDate ? new Date(capsule.unlockDate) : null;
-  const isUnlocked = capsule.isUnlocked || (unlockDate && unlockDate <= new Date());
+  let unlockMillis = 0;
+  if (capsule.unlockDate) {
+    if (capsule.unlockDate.toMillis) unlockMillis = capsule.unlockDate.toMillis();
+    else unlockMillis = new Date(capsule.unlockDate).getTime();
+  }
+  const unlockDate = unlockMillis ? new Date(unlockMillis) : null;
+  const isUnlocked = capsule.isUnlocked || (unlockMillis && unlockMillis <= Date.now());
   const time = capsule.createdAt?.toDate ? formatDate(capsule.createdAt.toDate()) : '';
   const isOwner = capsule.authorId === authManager.currentUser?.uid;
   const visibilityIcon = capsule.visibility === 'close' ? '👥' : '🌍';
@@ -109,22 +149,17 @@ function createCapsuleCard(capsule) {
         ` : ''}
       </div>
     `;
-
-    // Auto-update if was locked but time has passed
-    if (!capsule.isUnlocked && unlockDate && unlockDate <= new Date()) {
-      updateDoc(doc(db, 'timeCapsules', capsule.id), { isUnlocked: true }).catch(() => {});
-      setTimeout(() => showCapsuleReveal(capsule), 500);
-    }
   } else {
     // Locked capsule — show countdown
-    const now = new Date();
-    const diff = unlockDate ? unlockDate - now : 0;
-    const daysLeft = Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
-    const hoursLeft = Math.max(0, Math.ceil((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)));
-    const minsLeft = Math.max(0, Math.ceil((diff % (1000 * 60 * 60)) / (1000 * 60)));
+    const now = Date.now();
+    const diff = Math.max(0, unlockMillis - now);
+    const daysLeft = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hoursLeft = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minsLeft = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    const secsLeft = Math.floor((diff % (1000 * 60)) / 1000);
 
     card.innerHTML = `
-      <div class="capsule-locked p-6 text-center">
+      <div class="capsule-locked p-6 text-center" data-unlock-millis="${unlockMillis}">
         <div class="flex justify-end mb-2">
           ${isOwner ? `
             <button class="capsule-delete-btn p-1 text-gray-300 hover:text-red-400 transition-colors" data-id="${capsule.id}" title="Delete">
@@ -137,20 +172,25 @@ function createCapsuleCard(capsule) {
         </div>
         <p class="font-semibold text-navy-800">${sanitizeHTML(capsule.authorName || 'A classmate')}'s Capsule</p>
         <p class="text-xs text-gray-400 mt-1">Created ${time} · ${visibilityIcon} ${visibilityLabel}</p>
-        <div class="mt-4 flex items-center justify-center gap-3">
-          <div class="text-center">
-            <p class="text-2xl font-bold text-navy-500">${daysLeft}</p>
+        <div class="mt-4 flex items-center justify-center gap-2">
+          <div class="text-center w-12">
+            <p class="text-2xl font-bold text-navy-500 days-left">${daysLeft}</p>
             <p class="text-[10px] text-gray-400">days</p>
           </div>
           <span class="text-gray-300">:</span>
-          <div class="text-center">
-            <p class="text-2xl font-bold text-navy-500">${hoursLeft}</p>
+          <div class="text-center w-12">
+            <p class="text-2xl font-bold text-navy-500 hours-left">${hoursLeft}</p>
             <p class="text-[10px] text-gray-400">hours</p>
           </div>
           <span class="text-gray-300">:</span>
-          <div class="text-center">
-            <p class="text-2xl font-bold text-navy-500">${minsLeft}</p>
+          <div class="text-center w-12">
+            <p class="text-2xl font-bold text-navy-500 mins-left">${minsLeft}</p>
             <p class="text-[10px] text-gray-400">mins</p>
+          </div>
+          <span class="text-gray-300">:</span>
+          <div class="text-center w-12">
+            <p class="text-2xl font-bold text-navy-500 secs-left">${secsLeft}</p>
+            <p class="text-[10px] text-gray-400">secs</p>
           </div>
         </div>
         <p class="text-xs text-gray-400 mt-3">

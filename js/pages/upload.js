@@ -1,5 +1,5 @@
 // Upload page — Premium Instagram-style with drag & drop, carousel preview, time capsule
-import { db, storage, collection, addDoc, serverTimestamp, storageRef, uploadBytesResumable, getDownloadURL, getDocs } from '../firebase-config.js';
+import { db, storage, collection, addDoc, serverTimestamp, Timestamp, storageRef, uploadBytesResumable, getDownloadURL, getDocs } from '../firebase-config.js';
 import { showToast, MEMORY_CATEGORIES, compressImage, sanitizeHTML } from '../utils.js';
 import { authManager, awardPoints } from '../auth.js';
 import { createNotification } from '../notifications.js';
@@ -337,7 +337,7 @@ export async function renderUpload(container) {
           caption: captionInput.value,
           imageUrl,
           mediaType: file.type.startsWith('video') ? 'video' : 'image',
-          unlockDate: new Date(unlockDate).toISOString(),
+          unlockDate: Timestamp.fromDate(new Date(unlockDate)),
           isUnlocked: false,
           createdAt: serverTimestamp()
         });

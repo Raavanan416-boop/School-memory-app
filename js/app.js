@@ -3,6 +3,7 @@ import { authManager } from './auth.js';
 import { router } from './router.js';
 import { showToast, sanitizeHTML } from './utils.js';
 import { presenceManager } from './presence.js';
+import { timeCapsuleManager } from './timecapsuleManager.js';
 import { db, collection, getDocs, doc, writeBatch } from './firebase-config.js';
 
 window.syncAllLeaderboardPoints = async () => {
@@ -419,6 +420,7 @@ function buildAppShell() {
 
   // Start presence tracking (online/offline status)
   presenceManager.startPresenceTracking();
+  timeCapsuleManager.start();
 
   router.navigate('home');
 

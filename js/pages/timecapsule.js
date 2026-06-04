@@ -60,6 +60,12 @@ function startCountdownTimer(container) {
       const unlockMillis = parseInt(card.dataset.unlockMillis || '0');
       const diff = Math.max(0, unlockMillis - now);
       
+      if (diff > -5000 && diff < 5000) {
+        console.log("Unlock Time:", unlockMillis);
+        console.log("Current Time:", now);
+        console.log("Difference:", unlockMillis - now);
+      }
+      
       const daysLeft = Math.floor(diff / (1000 * 60 * 60 * 24));
       const hoursLeft = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
       const minsLeft = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));

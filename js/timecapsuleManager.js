@@ -42,10 +42,10 @@ class TimeCapsuleManager {
       this.checkExpirations(); // Check immediately on load
     });
 
-    // Background interval check every 30 seconds
+    // Background interval check every 1 second (1000ms) for instant unlock
     this.intervalId = setInterval(() => {
       this.checkExpirations();
-    }, 30000);
+    }, 1000);
   }
 
   stop() {
@@ -70,12 +70,17 @@ class TimeCapsuleManager {
       const unlockMillis = capsule.unlockDate?.toMillis ? capsule.unlockDate.toMillis() : (capsule.unlockDate ? new Date(capsule.unlockDate).getTime() : null);
       
       if (unlockMillis) {
-        console.log("Current Time:", now.getTime());
-        console.log("Unlock Time:", unlockMillis);
-        console.log("Remaining Milliseconds:", Math.max(0, unlockMillis - now.getTime()));
+        // Debug logs as requested
+        const diff = unlockMillis - now.getTime();
+        // Only log when it's very close to unlock to avoid spamming the console every second
+        if (diff > -5000 && diff < 5000) {
+          console.log("Unlock Time:", unlockMillis);
+          console.log("Current Time:", now.getTime());
+          console.log("Difference:", diff);
+        }
       }
       
-      if (unlockMillis && unlockMillis <= now.getTime()) {
+      if (unlockMillis && now.getTime() >= unlockMillis) {
         // Expiry reached!
         
         // 1. Update Firestore immediately. 

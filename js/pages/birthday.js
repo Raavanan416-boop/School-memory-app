@@ -176,18 +176,6 @@ function showGiftPointsModal(allUsers) {
           return;
         }
 
-        // Check if birthday person has enough points dynamically
-        const { getLeaderboardScores } = await import('./leaderboard.js');
-        const allScores = await getLeaderboardScores();
-        const myScore = allScores.find(s => s.id === currentUser.uid);
-        const myPoints = myScore ? myScore.total : 0;
-        
-        if (myPoints < 5) {
-          showToast(`Not enough points! You have ${myPoints} but need at least 5.`, 'warning');
-          modal.close();
-          return;
-        }
-
         // Create birthday gift record
         await addDoc(collection(db, 'birthdayPoints'), {
           type: 'birthday_gift',
@@ -199,8 +187,8 @@ function showGiftPointsModal(allUsers) {
           createdAt: serverTimestamp()
         });
 
-        // Deduct 5 from birthday person
-        awardPoints(currentUser.uid, -5, 'Birthday Gift Given');
+        // Add 5 to birthday person
+        awardPoints(currentUser.uid, 5, 'Birthday Gift Given');
 
         // Add 5 to friend
         awardPoints(targetId, 5, 'Birthday Gift Received');

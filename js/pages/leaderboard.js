@@ -131,11 +131,11 @@ function updateUI(container, scores) {
           <p>📸 Post a memory: <span class="font-semibold text-navy-600">+20 pts</span></p>
           <p>❤️ Each like received: <span class="font-semibold text-navy-600">+10 pts</span></p>
           <p>💬 Each comment: <span class="font-semibold text-navy-600">+5 pts</span></p>
-          <p>📚 Create a Slam Book: <span class="font-semibold text-navy-600">+5 pts</span></p>
+          <p>📚 Create a Slam Book: <span class="font-semibold text-navy-600">+6 pts</span></p>
           <p>📝 Answer a Slam Book: <span class="font-semibold text-navy-600">+3 pts</span></p>
-          <p>📊 Create a poll: <span class="font-semibold text-navy-600">+1 pts</span></p>
-          <p>📖 Diary entry: <span class="font-semibold text-navy-600">+1 pts</span></p>
-          <p>⏳ Time capsule: <span class="font-semibold text-navy-600">+1 pts</span></p>
+          <p>📊 Create a poll: <span class="font-semibold text-navy-600">+2 pts</span></p>
+          <p>📖 Diary entry: <span class="font-semibold text-navy-600">+4 pts</span></p>
+          <p>⏳ Time capsule: <span class="font-semibold text-navy-600">+5 pts</span></p>
           <p>🎂 Birthday gift claim: <span class="font-semibold text-navy-600">+10 pts</span></p>
           <p>🎁 Birthday gift transfer: <span class="font-semibold text-navy-600">+5 pts to receiver</span></p>
         </div>
@@ -162,6 +162,8 @@ function setupRealtimeSync(container) {
         profilePic: data.profilePic || '',
         points: data.points || 0
       });
+      console.log("LEADERBOARD USER:", d.id);
+      console.log("LEADERBOARD POINTS:", data.points || 0);
     });
     
     // Log the current user's points from the leaderboard query result

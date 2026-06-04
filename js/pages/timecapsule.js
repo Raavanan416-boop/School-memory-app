@@ -165,7 +165,7 @@ function createCapsuleCard(capsule) {
   card.querySelector('.capsule-delete-btn')?.addEventListener('click', (e) => {
     e.stopPropagation();
     showDeleteConfirmation('this time capsule', async () => {
-      await awardPoints(capsule.authorId || capsule.createdBy, -1, 'Time Capsule Deleted');
+      await awardPoints(capsule.authorId || capsule.createdBy, -5, 'Time Capsule Deleted');
       await deleteDoc(doc(db, 'timeCapsules', capsule.id));
     }, { element: card });
   });
@@ -254,8 +254,8 @@ function showCreateCapsuleModal() {
         visibility: selectedVisibility,
         createdAt: serverTimestamp()
       });
-      showToast('Time capsule locked! +1 Point 🔒', 'success');
-      awardPoints(authManager.currentUser.uid, 1, 'Time Capsule Created');
+      showToast('Time capsule locked! +5 Points 🔒', 'success');
+      await awardPoints(authManager.currentUser.uid, 5, 'Time Capsule Created');
       modal.close();
     } catch (e) {
       console.error(e);

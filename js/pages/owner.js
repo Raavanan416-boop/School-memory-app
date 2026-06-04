@@ -276,16 +276,23 @@ window.openOwnerUserEdit = async (uid) => {
 
   // Pre-fetch stats
   try {
-    const { getLeaderboardScores } = await import('./leaderboard.js');
-    const allScores = await getLeaderboardScores();
-    const userScore = allScores.find(s => s.id === uid);
+    const { collection, getDocs, query, where } = await import('../firebase-config.js');
+    const postsSnap = await getDocs(query(collection(db, 'posts'), where('authorId', '==', uid)));
     
-    if (userScore) {
-      totalPosts = userScore.postCount || 0;
-      totalLikes = userScore.totalLikes || 0;
-      totalComments = userScore.totalComments || 0;
-      computedPoints = userScore.total || 0;
+    totalPosts = postsSnap.size;
+    postsSnap.forEach(d => {
+      const p = d.data();
+      totalLikes += (p.likes?.length || 0);
+      if (p.comments) {
+        totalComments += p.comments.filter(c => c.authorId === uid || c.userId === uid).length;
+      }
+    });
+
+    const userDoc = await getDoc(doc(db, 'users', uid));
+    if (userDoc.exists()) {
+      computedPoints = userDoc.data().points || 0;
     }
+
   } catch (e) {
     console.warn("Failed fetching user stats", e);
   }
@@ -786,9 +793,9 @@ window.executeRecalcLeaderboard = async () => {
       const postPoints = userPosts.length * 20;
       const likePoints = totalLikes * 10;
       const commentPoints = totalComments * 5;
-      const pollPoints = userPolls.length * 1;
-      const diaryPoints = userDiaries.length * 1;
-      const capsulePoints = userCapsules.length * 1;
+      const pollPoints = userPolls.length * 2;
+      const diaryPoints = userDiaries.length * 4;
+      const capsulePoints = userCapsules.length * 5;
 
       const userBdayPointsReceived = birthdayPointsDocs
         .filter(bp => bp.targetUserId === id)
@@ -799,7 +806,7 @@ window.executeRecalcLeaderboard = async () => {
         .reduce((sum, bp) => sum + (bp.points || 0), 0);
 
       const userSlambooks = slambooks.filter(b => b.ownerId === id);
-      const slambookConfigPoints = userSlambooks.length * 5;
+      const slambookConfigPoints = userSlambooks.length * 6;
 
       const uniqueSlambooksAnswered = new Set();
       slambookResponses.filter(r => r.authorId === id).forEach(r => {
@@ -807,7 +814,7 @@ window.executeRecalcLeaderboard = async () => {
       });
       const slambookAnswerPoints = uniqueSlambooksAnswered.size * 3;
 
-      let total = postPoints + likePoints + commentPoints + pollPoints + diaryPoints + capsulePoints + userBdayPointsReceived - userBdayPointsGiven + slambookConfigPoints + slambookAnswerPoints;
+      let total = postPoints + likePoints + commentPoints + pollPoints + diaryPoints + capsulePoints + userBdayPointsReceived + userBdayPointsGiven + slambookConfigPoints + slambookAnswerPoints;
 
       if (user.pointsOffset) {
         total = Math.max(0, total - user.pointsOffset);

@@ -2,7 +2,7 @@
 import { auth, db, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail,
   updatePassword, EmailAuthProvider, reauthenticateWithCredential,
   doc, getDoc, updateDoc, setDoc, serverTimestamp, Timestamp, increment,
-  storage, storageRef, uploadBytes, getDownloadURL } from './firebase-config.js';
+  storage, storageRef, uploadBytes, getDownloadURL, runTransaction } from './firebase-config.js';
 
 const OWNER_EMAIL = 'kaviraj@school.com';
 
@@ -94,6 +94,7 @@ class AuthManager {
           savedPosts: [],
           slamBook: {},
           role: this._isOwner ? 'admin' : 'user',
+          points: 0,
           createdAt: serverTimestamp()
         };
         await setDoc(doc(db, 'users', uid), defaultData);
@@ -234,37 +235,30 @@ export async function awardPoints(userId, points, reason) {
     const userRef = doc(db, 'users', userId);
     console.log(`[Points Engine] UPDATING USER POINTS`);
     
-    // Check current points (for debugging)
-    const snap = await getDoc(userRef);
-    const currentPoints = snap.exists() ? (snap.data().points || 0) : 0;
-    console.log(`[Points Engine] Current Points: ${currentPoints}`);
+    await runTransaction(db, async (transaction) => {
+      const userDoc = await transaction.get(userRef);
+      if (!userDoc.exists()) {
+        throw "User document does not exist!";
+      }
 
-    await updateDoc(userRef, {
-      points: increment(points)
+      const currentPoints = userDoc.data().points || 0;
+      const newPoints = Math.max(0, currentPoints + points);
+      transaction.update(userRef, { points: newPoints });
+      
+      console.log("POINTS BEFORE:", currentPoints);
+      console.log("POINTS AWARDED:", points);
+      console.log("POINTS AFTER:", newPoints);
+      console.log(`Leaderboard Updated`);
     });
-    
+
     // Update local cache so UI updates instantly without relying on a reload
     if (userId === authManager.currentUser?.uid && authManager.userData) {
-      authManager.userData.points = currentPoints + points;
+      authManager.userData.points = Math.max(0, (authManager.userData.points || 0) + points);
       authManager._notify();
     }
 
     console.log(`[Points Engine] POINT UPDATE SUCCESS`);
-    console.log(`[Points Engine] Updated Points: ${currentPoints + points}`);
     
-    // Save points transaction history
-    /* 
-    console.log(`[Points Engine] Saving transaction record...`);
-    const { collection, addDoc, serverTimestamp } = await import('./firebase-config.js');
-    await addDoc(collection(db, 'pointsHistory'), {
-      userId,
-      points,
-      reason,
-      createdAt: serverTimestamp()
-    });
-    console.log(`[Points Engine] Transaction saved.`);
-    */
-
     const action = points > 0 ? `Awarded +${points}` : `Deducted ${points}`;
     console.log(`[Points Engine] ${action} to user ${userId} for: ${reason}. Total points updated via transaction.`);
   } catch(e) {

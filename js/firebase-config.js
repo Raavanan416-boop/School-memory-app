@@ -6,7 +6,7 @@ import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendP
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc,
   query, where, orderBy, limit, limitToLast, onSnapshot, serverTimestamp, Timestamp,
   arrayUnion, arrayRemove, increment, startAfter, endAt, writeBatch, deleteField,
-  startAt, endBefore, getCountFromServer }
+  startAt, endBefore, getCountFromServer, runTransaction }
   from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 import { getStorage, ref as storageRef, uploadBytes, uploadBytesResumable, getDownloadURL, deleteObject }
   from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js';
@@ -35,6 +35,6 @@ export {
   collection, doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc,
   query, where, orderBy, limit, limitToLast, onSnapshot, serverTimestamp, Timestamp,
   arrayUnion, arrayRemove, increment, startAfter, endAt, writeBatch, deleteField,
-  startAt, endBefore, getCountFromServer,
+  startAt, endBefore, getCountFromServer, runTransaction,
   storageRef, uploadBytes, uploadBytesResumable, getDownloadURL, deleteObject
 };

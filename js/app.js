@@ -3,6 +3,29 @@ import { authManager } from './auth.js';
 import { router } from './router.js';
 import { showToast, sanitizeHTML } from './utils.js';
 import { presenceManager } from './presence.js';
+import { db, collection, getDocs, doc, writeBatch } from './firebase-config.js';
+
+window.syncAllLeaderboardPoints = async () => {
+  console.log("Starting Emergency Sync...");
+  try {
+    const usersSnap = await getDocs(collection(db, 'users'));
+    const batch = writeBatch(db);
+    let count = 0;
+    usersSnap.forEach(snap => {
+      const data = snap.data();
+      const pts = typeof data.points === 'number' ? data.points : 0;
+      console.log(`Syncing user ${snap.id}: ${pts} points`);
+      batch.update(snap.ref, { points: pts });
+      count++;
+    });
+    await batch.commit();
+    console.log(`Emergency Sync Complete. Updated ${count} users.`);
+    showToast(`Emergency Sync Complete. Updated ${count} users.`, 'success');
+  } catch (e) {
+    console.error("Emergency Sync Failed:", e);
+    showToast("Emergency Sync Failed", 'error');
+  }
+};
 
 // ===== MUSIC PLAYER =====
 const MusicPlayer = {
@@ -851,13 +874,19 @@ async function init() {
 
   console.log('[ClassMemories] Splash done, initializing auth...');
 
+  let appShellBuilt = false;
+
   authManager.onChange((user) => {
     if (user) {
       console.log('[ClassMemories] User logged in:', user.email);
       hideLogin();
-      buildAppShell();
+      if (!appShellBuilt) {
+        buildAppShell();
+        appShellBuilt = true;
+      }
     } else {
       console.log('[ClassMemories] No user, showing login...');
+      appShellBuilt = false;
       $('#app')?.classList.add('hidden');
       $('#bottom-nav')?.classList.add('hidden');
       if (notificationManager) {

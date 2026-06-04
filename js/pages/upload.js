@@ -341,8 +341,8 @@ export async function renderUpload(container) {
           isUnlocked: false,
           createdAt: serverTimestamp()
         });
-        showToast('Time capsule locked! +1 Point 🔒', 'success');
-        awardPoints(authManager.currentUser.uid, 1, 'Time Capsule Created');
+        showToast('Time capsule locked! +5 Points 🔒', 'success');
+        await awardPoints(authManager.currentUser.uid, 5, 'Time Capsule Created');
       } else {
         const postData = {
           authorId: authManager.currentUser.uid,
@@ -360,7 +360,7 @@ export async function renderUpload(container) {
         };
         await addDoc(collection(db, 'posts'), postData);
         showToast('Memory posted! +20 Points 📸', 'success');
-        awardPoints(authManager.currentUser.uid, 20, 'Post Created');
+        await awardPoints(authManager.currentUser.uid, 20, 'Post Created');
 
         // Notify tagged friends
         for (const friend of taggedFriends) {
@@ -368,9 +368,23 @@ export async function renderUpload(container) {
         }
       }
 
-      // Success animation then navigate home
+      // Success animation then stay
       submitBtn.innerHTML = '✅ POSTED!';
-      setTimeout(() => router.navigate('home'), 1000);
+      setTimeout(() => {
+        submitBtn.innerHTML = isCapsule ? '🔒 LOCK TIME CAPSULE' : '✨ POST MEMORY';
+        submitBtn.disabled = false;
+        container.querySelector('#upload-form').reset();
+        selectedFiles = [];
+        updatePreview();
+        progressContainer.classList.add('hidden');
+        if (progressBar) progressBar.style.width = '0%';
+        if (progressPercent) progressPercent.textContent = '0%';
+        if (captionCount) captionCount.textContent = '0';
+        taggedFriends = [];
+        taggedChips.innerHTML = '';
+        container.querySelectorAll('.upload-category-pill').forEach(c => c.classList.remove('active'));
+        selectedCat = '';
+      }, 3000);
 
     } catch (err) {
       console.error('Upload error:', err);

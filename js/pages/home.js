@@ -483,8 +483,8 @@ function createPostCard(post) {
       await updateDoc(doc(db, 'posts', post.id), { commentCount: increment(1) });
       if (post.authorId !== authManager.currentUser.uid) {
         createNotification('comment', post.authorId, { postId: post.id, commentText: text });
-        awardPoints(post.authorId, 5, 'Comment Received');
       }
+      awardPoints(authManager.currentUser.uid, 5, 'Comment Created');
     } catch (e) { console.error('Comment error:', e); }
   };
 
@@ -568,7 +568,7 @@ function loadComments(card, post) {
         showDeleteConfirmation('this comment', async () => {
           try {
             const { deleteDoc } = await import('../firebase-config.js');
-            await awardPoints(post.authorId, -5, 'Comment Deleted');
+            await awardPoints(c.authorId, -5, 'Comment Deleted');
             await deleteDoc(doc(db, 'posts', post.id, 'comments', d.id));
             await updateDoc(doc(db, 'posts', post.id), { commentCount: increment(-1) });
           } catch (e) { console.error(e); }

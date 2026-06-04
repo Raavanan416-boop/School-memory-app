@@ -146,7 +146,7 @@ function createPollCard(poll) {
     e.stopPropagation();
     showDeleteConfirmation('this poll', async () => {
       deletedPollIds.add(poll.id);
-      await awardPoints(poll.authorId || poll.createdBy, -1, 'Poll Deleted');
+      await awardPoints(poll.authorId || poll.createdBy, -2, 'Poll Deleted');
       await deleteDoc(doc(db, 'polls', poll.id));
     }, { element: card });
   });
@@ -294,8 +294,8 @@ function showCreatePollModal() {
         authorName: authManager.userData?.fullName || 'Unknown',
         createdAt: serverTimestamp()
       });
-      showToast('Poll created successfully! +1 Point', 'success');
-      awardPoints(authManager.currentUser.uid, 1, 'Poll Created');
+      showToast('Poll created successfully! +2 Points', 'success');
+      await awardPoints(authManager.currentUser.uid, 2, 'Poll Created');
       modal.close();
 
       // Notify all classmates about the new poll

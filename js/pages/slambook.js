@@ -48,7 +48,7 @@ function renderOwnerBooksList(el, user, books) {
         <div class="text-5xl mb-4">📚</div>
         <h3 class="text-xl font-bold text-navy-800 mb-2 font-handwriting">Create Your First Slam Book</h3>
         <p class="text-sm text-gray-500 mb-6">Ask your friends anything! Add custom questions, emojis, and more.</p>
-        <button id="btn-create-slambook" class="px-6 py-3 bg-navy-600 hover:bg-navy-700 text-white font-bold rounded-xl shadow-lg transition-all transform hover:scale-105">+ Build My Slam Book (+5 Pts)</button>
+        <button id="btn-create-slambook" class="px-6 py-3 bg-navy-600 hover:bg-navy-700 text-white font-bold rounded-xl shadow-lg transition-all transform hover:scale-105">+ Build My Slam Book (+6 Pts)</button>
       </div>
     `;
     el.querySelector('#btn-create-slambook')?.addEventListener('click', () => showSlamBookConfigurator());
@@ -310,8 +310,8 @@ function showSlamBookConfigurator(existingBook = null) {
         showToast('Book updated!', 'success');
       } else {
         await addDoc(collection(db, 'slambooks'), finalConfig);
-        showToast('Slam Book Created! +5 Points Earned 🌟', 'success');
-        await awardPoints(authManager.currentUser.uid, 5, 'Slam Book Created');
+        showToast('Slam Book Created! +6 Points Earned 🌟', 'success');
+        await awardPoints(authManager.currentUser.uid, 6, 'Slam Book Created');
       }
       modal.close();
     } catch (e) {
@@ -334,7 +334,7 @@ function showSlamBookConfigurator(existingBook = null) {
           await Promise.all(deletePromises);
 
           // Deduct points and delete book
-          await awardPoints(existingBook.ownerId, -5, 'Slam Book Deleted');
+          await awardPoints(existingBook.ownerId, -6, 'Slam Book Deleted');
           await deleteDoc(doc(db, 'slambooks', existingBook.id));
           modal.close();
         } catch (err) {
@@ -636,14 +636,14 @@ async function openGuestWriter(targetUser, book) {
               <span class="text-sm font-bold text-navy-800">Stay Anonymous 👻</span>
               <input type="checkbox" id="sb-anon-check" class="w-5 h-5 text-indigo-600 rounded cursor-pointer"/>
             </label>
-            <p class="text-[10px] text-gray-500 mt-1">They won't know who wrote this, but you still get +5 points!</p>
+            <p class="text-[10px] text-gray-500 mt-1">They won't know who wrote this, but you still get +3 points!</p>
           </div>
         ` : ''}
       </div>
     </div>
 
     <div class="sticky bottom-0 left-0 right-0 p-4 bg-[#fcf8f2] border-t border-[#e8d5b5] z-10 shadow-[0_-4px_15px_rgba(0,0,0,0.05)]">
-      <button id="sb-submit-btn" class="w-full py-4 bg-navy-800 hover:bg-navy-900 text-white font-bold rounded-2xl shadow-xl transition-all transform active:scale-95 text-lg font-handwriting tracking-wider">Sign & Save ( Pts) 📖</button>
+      <button id="sb-submit-btn" class="w-full py-4 bg-navy-800 hover:bg-navy-900 text-white font-bold rounded-2xl shadow-xl transition-all transform active:scale-95 text-lg font-handwriting tracking-wider">Sign & Save (+3 Pts) 📖</button>
     </div>
   `;
 
@@ -683,6 +683,15 @@ async function openGuestWriter(targetUser, book) {
     btn.textContent = 'Saving...';
 
     try {
+      const existingQ = query(collection(db, 'slambookResponses'), where('slambookId', '==', book.id), where('authorId', '==', myUid));
+      const existingSnap = await getDocs(existingQ);
+      if (!existingSnap.empty) {
+        showToast('You already signed this book!', 'warning');
+        btn.disabled = false;
+        btn.textContent = 'Try Again';
+        return;
+      }
+
       await addDoc(collection(db, 'slambookResponses'), {
         slambookId: book.id,
         targetUserId: targetUser.id,
@@ -701,7 +710,7 @@ async function openGuestWriter(targetUser, book) {
       });
 
       showToast('Slam Book signed! +3 Points earned 🌟', 'success');
-      awardPoints(authManager.currentUser.uid, 3, 'Slam Book Answer Submit');
+      await awardPoints(authManager.currentUser.uid, 3, 'Slam Book Answer Submit');
       modal.close();
     } catch (e) {
       console.error(e);

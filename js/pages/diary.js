@@ -224,7 +224,7 @@ function createDiaryEntry(entry) {
     e.stopPropagation();
     showDeleteConfirmation('this diary entry', async () => {
       deletedDiaryIds.add(entry.id);
-      await awardPoints(entry.authorId || entry.userId, -1, 'Diary Deleted');
+      await awardPoints(entry.authorId || entry.userId, -4, 'Diary Deleted');
       await deleteDocFull('diary', entry.id, ['replies', 'continuations'], [entry.imageUrl]);
     }, { element: card });
   });
@@ -621,8 +621,8 @@ function showDiaryEntryModal() {
         replyCount: 0,
         createdAt: serverTimestamp()
       });
-      showToast('Diary entry added! +1 Point 📖', 'success');
-      awardPoints(authManager.currentUser.uid, 1, 'Diary Created');
+      showToast('Diary entry added! +4 Points 📖', 'success');
+      await awardPoints(authManager.currentUser.uid, 4, 'Diary Created');
       modal.close();
     } catch (e) {
       console.error(e);

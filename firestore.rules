@@ -27,6 +27,18 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['points']);
     }
 
+    // Leaderboard — readable by all, writable by any authenticated user (points sync)
+    match /leaderboard/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    // Presence — online/offline status, readable by all, writable by any authenticated user
+    match /presence/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
     // Posts collection
     match /posts/{postId} {
       allow read: if isAuthenticated();

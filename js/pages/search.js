@@ -1,12 +1,19 @@
 // Search page — Empty initial state, live search with results only after typing
-import { db, collection, getDocs, query, where, orderBy, limit } from '../firebase-config.js';
+import { db, collection, getDocs, query, where, orderBy, limit, doc, onSnapshot } from '../firebase-config.js';
 import { sanitizeHTML, debounce } from '../utils.js';
 import { authManager } from '../auth.js';
 import { router } from '../router.js';
+import { presenceManager } from '../presence.js';
 
 let allUsers = [];
 let allPosts = [];
 let dataLoaded = false;
+let searchPresenceUnsubs = [];
+
+function cleanupSearchPresence() {
+  searchPresenceUnsubs.forEach(u => u());
+  searchPresenceUnsubs = [];
+}
 
 export async function renderSearch(container) {
   container.innerHTML = `
@@ -109,6 +116,7 @@ export async function renderSearch(container) {
     resultsEl.innerHTML = '';
     emptyState.classList.remove('hidden');
     recentEl.classList.add('hidden');
+    cleanupSearchPresence();
   });
 
   // Clear recent searches
@@ -203,6 +211,25 @@ function performSearch(container, searchQuery, tab) {
   }
 
   bindUserCardEvents(results);
+
+  // Real-time presence watchers for people search results
+  if (tab === 'people') {
+    cleanupSearchPresence();
+    const filtered = allUsers.filter(u =>
+      u.fullName?.toLowerCase().includes(q) ||
+      u.rollNumber?.toLowerCase().includes(q) ||
+      u.nickname?.toLowerCase().includes(q)
+    );
+    filtered.forEach(u => {
+      const unsub = onSnapshot(doc(db, 'presence', u.id), (snap) => {
+        const dot = results.querySelector(`#search-presence-${u.id}`);
+        if (dot && snap.exists()) {
+          dot.classList.toggle('online', snap.data().online || false);
+        }
+      });
+      searchPresenceUnsubs.push(unsub);
+    });
+  }
 }
 
 function userCard(u) {
@@ -214,7 +241,7 @@ function userCard(u) {
     <div class="chat-item user-search-card" data-uid="${u.id}" data-name="${sanitizeHTML(u.fullName || '')}">
       <div class="relative">
         ${avatar}
-        <div class="presence-dot-mini ${u.online ? 'online' : ''}"></div>
+        <div class="presence-dot-mini ${u.online ? 'online' : ''}" id="search-presence-${u.id}"></div>
       </div>
       <div class="flex-1 min-w-0">
         <p class="font-semibold text-sm text-navy-800">${sanitizeHTML(u.fullName || 'Unknown')}</p>

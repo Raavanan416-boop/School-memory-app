@@ -1,5 +1,5 @@
 // Leaderboard page — Social activity rankings with real-time sync
-import { db, collection, query, onSnapshot, orderBy } from '../firebase-config.js';
+import { db, collection, query, onSnapshot, orderBy, getDocs, limit, doc, writeBatch } from '../firebase-config.js';
 import { sanitizeHTML, formatNumber } from '../utils.js';
 import { authManager } from '../auth.js';
 import { router } from '../router.js';
@@ -147,12 +147,35 @@ function updateUI(container, scores) {
   container.querySelector('#lb-back-btn')?.addEventListener('click', () => router.navigateBack());
 }
 
-function setupRealtimeSync(container) {
+async function setupRealtimeSync(container) {
   console.log(`[Leaderboard] Setting up realtime sync...`);
-  const q = query(collection(db, 'users'), orderBy('points', 'desc'));
-  
+
+  // One-time migration: if leaderboard collection is empty, seed from users
+  try {
+    const checkSnap = await getDocs(query(collection(db, 'leaderboard'), limit(1)));
+    if (checkSnap.empty) {
+      console.log('[Leaderboard] Migrating from users collection...');
+      const usersSnap = await getDocs(collection(db, 'users'));
+      const batch = writeBatch(db);
+      usersSnap.forEach(d => {
+        const data = d.data();
+        batch.set(doc(db, 'leaderboard', d.id), {
+          fullName: data.fullName || 'Unknown',
+          profilePic: data.profilePic || '',
+          points: data.points || 0
+        });
+      });
+      await batch.commit();
+      console.log('[Leaderboard] Migration complete');
+    }
+  } catch (e) {
+    console.log('[Leaderboard] Migration check skipped:', e.message);
+  }
+
+  // Real-time listener on dedicated leaderboard collection
+  const q = query(collection(db, 'leaderboard'), orderBy('points', 'desc'));
+
   unsubLeaderboard = onSnapshot(q, (snap) => {
-    console.log(`[Leaderboard] Snapshot received. Docs count: ${snap.size}`);
     const scores = [];
     snap.forEach(d => {
       const data = d.data();
@@ -162,16 +185,10 @@ function setupRealtimeSync(container) {
         profilePic: data.profilePic || '',
         points: data.points || 0
       });
-      console.log("LEADERBOARD USER:", d.id);
-      console.log("LEADERBOARD POINTS:", data.points || 0);
     });
-    
-    // Log the current user's points from the leaderboard query result
-    const myScore = scores.find(s => s.id === authManager.currentUser?.uid);
-    console.log(`[Leaderboard] Current User (${authManager.currentUser?.uid}) Points in query:`, myScore ? myScore.points : 'Not found');
-    
+
     updateUI(container, scores);
-    console.log(`[Leaderboard] UI Updated successfully.`);
+    console.log(`[Leaderboard] Updated: ${scores.length} users`);
   }, (error) => {
     console.error("[Leaderboard] listener error:", error);
     container.innerHTML = `<div class="p-8 text-center text-gray-500">Failed to load leaderboard: ${error.message}</div>`;

@@ -138,7 +138,7 @@ async function showNewChatModal() {
                 <p class="font-semibold text-sm text-navy-800">${sanitizeHTML(u.fullName || 'Unknown')}</p>
                 <p class="text-xs text-gray-400">${u.nickname ? `"${sanitizeHTML(u.nickname)}"` : ''}</p>
               </div>
-              <div class="${u.online ? 'online-dot' : 'offline-dot'}"></div>
+              <div class="presence-dot-mini ${u.online ? 'online' : ''}" id="newchat-dot-${u.id}"></div>
             </div>
           `).join('')}
         </div>
@@ -161,6 +161,16 @@ async function showNewChatModal() {
         const targetName = el.dataset.name;
         modal.close();
         await startOrOpenDM(targetUid, targetName);
+      });
+    });
+
+    // Real-time presence watchers for each user in the new chat list
+    users.forEach(u => {
+      presenceManager.watchUser(u.id, (status) => {
+        const dot = modal.body.querySelector(`#newchat-dot-${u.id}`);
+        if (dot) {
+          dot.classList.toggle('online', status.online);
+        }
       });
     });
   } catch (e) {

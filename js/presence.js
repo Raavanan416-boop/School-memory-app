@@ -1,5 +1,5 @@
 // Presence system — Real-time online status & typing indicators
-import { db, doc, updateDoc, onSnapshot, serverTimestamp, deleteField } from './firebase-config.js';
+import { db, doc, updateDoc, setDoc, onSnapshot, serverTimestamp, deleteField } from './firebase-config.js';
 import { authManager } from './auth.js';
 
 class PresenceManager {
@@ -14,10 +14,11 @@ class PresenceManager {
   async setOnline() {
     if (!authManager.currentUser) return;
     try {
-      await updateDoc(doc(db, 'users', authManager.currentUser.uid), {
+      const uid = authManager.currentUser.uid;
+      await setDoc(doc(db, 'presence', uid), {
         online: true,
         lastSeen: serverTimestamp()
-      });
+      }, { merge: true });
     } catch (e) { /* ignore */ }
   }
 
@@ -25,10 +26,11 @@ class PresenceManager {
   async setOffline() {
     if (!authManager.currentUser) return;
     try {
-      await updateDoc(doc(db, 'users', authManager.currentUser.uid), {
+      const uid = authManager.currentUser.uid;
+      await setDoc(doc(db, 'presence', uid), {
         online: false,
         lastSeen: serverTimestamp()
-      });
+      }, { merge: true });
     } catch (e) { /* ignore */ }
   }
 
@@ -94,18 +96,31 @@ class PresenceManager {
       .map(([uid]) => uid);
   }
 
-  // Watch a user's online status
+  // Watch a user's online status (from dedicated presence collection)
   watchUser(userId, callback) {
     if (this.presenceListeners[userId]) return;
-    this.presenceListeners[userId] = onSnapshot(doc(db, 'users', userId), (snap) => {
+    this.presenceListeners[userId] = onSnapshot(doc(db, 'presence', userId), (snap) => {
       if (snap.exists()) {
         const data = snap.data();
         callback({
           online: data.online || false,
           lastSeen: data.lastSeen?.toDate ? data.lastSeen.toDate() : null
         });
+      } else {
+        callback({ online: false, lastSeen: null });
       }
     });
+  }
+
+  // Get human-readable last seen text
+  getLastSeenText(status) {
+    if (status.online) return '🟢 Online';
+    if (!status.lastSeen) return '⚫ Offline';
+    const diff = Date.now() - status.lastSeen.getTime();
+    if (diff < 60000) return '⚫ Last seen just now';
+    if (diff < 3600000) return `⚫ Last seen ${Math.floor(diff / 60000)} min ago`;
+    if (diff < 86400000) return `⚫ Last seen ${Math.floor(diff / 3600000)}h ago`;
+    return `⚫ Last seen ${status.lastSeen.toLocaleDateString()}`;
   }
 
   // Stop watching a user

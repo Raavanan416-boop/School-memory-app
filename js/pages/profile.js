@@ -4,14 +4,27 @@ import { showToast, sanitizeHTML, timeAgo, formatNumber } from '../utils.js';
 import { authManager } from '../auth.js';
 import { router } from '../router.js';
 import { createNotification } from '../notifications.js';
+import { presenceManager } from '../presence.js';
 
-// Track active badge listener for cleanup
+// Track active badge listener and presence listeners for cleanup
 let unsubBadges = null;
+let friendPresenceUnsubs = [];
+let profilePresenceUnsub = null;
+
+function cleanupFriendPresence() {
+  friendPresenceUnsubs.forEach(u => u());
+  friendPresenceUnsubs = [];
+}
 
 export function destroyProfile() {
   if (unsubBadges) {
     unsubBadges();
     unsubBadges = null;
+  }
+  cleanupFriendPresence();
+  if (profilePresenceUnsub) {
+    profilePresenceUnsub();
+    profilePresenceUnsub = null;
   }
 }
 
@@ -105,7 +118,7 @@ export async function renderProfile(container, data = null) {
       ? `<img src="${user.profilePic}" class="w-full h-full object-cover" alt="${sanitizeHTML(user.fullName || '')}" id="profile-pic-img"/>`
       : `<div class="w-full h-full flex items-center justify-center text-white text-4xl font-bold">${(user.fullName || '?')[0]}</div>`}
           </div>
-          <div class="absolute bottom-1 right-1 w-5 h-5 rounded-full ${user.online ? 'bg-green-400' : 'bg-gray-300'} border-3 border-white"></div>
+          <div class="absolute bottom-1 right-1 w-5 h-5 rounded-full ${user.online ? 'bg-green-400' : 'bg-gray-300'} border-3 border-white" id="profile-online-dot"></div>
           ${isBirthday ? '<div class="absolute -top-1 -right-1"><span class="birthday-badge">🎂</span></div>' : ''}
         </div>
 
@@ -583,6 +596,18 @@ export async function renderProfile(container, data = null) {
   if (unsubBadges) { unsubBadges(); unsubBadges = null; }
   loadSuggestedBadgesRealtime(container.querySelector('#suggested-badges-area'), uid, viewingOther);
 
+  // Real-time presence watcher for other user profiles
+  if (viewingOther && data?.userId) {
+    if (profilePresenceUnsub) { profilePresenceUnsub(); profilePresenceUnsub = null; }
+    profilePresenceUnsub = onSnapshot(doc(db, 'presence', data.userId), (snap) => {
+      const dot = container.querySelector('#profile-online-dot');
+      if (dot && snap.exists()) {
+        const isOnline = snap.data().online || false;
+        dot.className = `absolute bottom-1 right-1 w-5 h-5 rounded-full ${isOnline ? 'bg-green-400' : 'bg-gray-300'} border-3 border-white`;
+      }
+    });
+  }
+
   // ===== MISS YOU BUTTON =====
   const missYouBtn = container.querySelector('#miss-you-btn');
   if (missYouBtn) {
@@ -980,11 +1005,11 @@ async function showFriendsListModal(uid) {
               ${f.profilePic
         ? `<img src="${f.profilePic}" class="friend-list-avatar"/>`
         : `<div class="friend-list-avatar-placeholder">${(f.fullName || '?')[0]}</div>`}
-              <div class="friend-online-dot ${f.online ? 'online' : ''}"></div>
+              <div class="friend-online-dot ${f.online ? 'online' : ''}" id="friend-dot-${f.id}"></div>
             </div>
             <div class="flex-1 min-w-0">
               <p class="text-sm font-semibold text-navy-800 truncate">${sanitizeHTML(f.fullName || 'Unknown')}</p>
-              <p class="text-[11px] text-gray-400">${f.rollNumber || ''} · ${f.online ? '🟢 Online' : 'Offline'}</p>
+              <p class="text-[11px] text-gray-400" id="friend-status-${f.id}">${f.rollNumber || ''} · ${f.online ? '🟢 Online' : 'Offline'}</p>
             </div>
             <button class="friend-msg-btn" data-uid="${f.id}" data-name="${sanitizeHTML(f.fullName || '')}">💬</button>
           </div>
@@ -1008,6 +1033,23 @@ async function showFriendsListModal(uid) {
         modal.close();
         router.navigate('chat', { userId: btn.dataset.uid, userName: btn.dataset.name });
       });
+    });
+
+    // Real-time presence watchers for each friend
+    cleanupFriendPresence();
+    friends.forEach(f => {
+      const unsub = onSnapshot(doc(db, 'presence', f.id), (snap) => {
+        const dot = modal.body.querySelector(`#friend-dot-${f.id}`);
+        const statusEl = modal.body.querySelector(`#friend-status-${f.id}`);
+        if (snap.exists()) {
+          const isOnline = snap.data().online || false;
+          if (dot) dot.classList.toggle('online', isOnline);
+          if (statusEl) {
+            statusEl.textContent = `${f.rollNumber || ''} · ${isOnline ? '🟢 Online' : presenceManager.getLastSeenText({ online: false, lastSeen: snap.data().lastSeen?.toDate ? snap.data().lastSeen.toDate() : null })}`;
+          }
+        }
+      });
+      friendPresenceUnsubs.push(unsub);
     });
   } catch (e) {
     console.error('Friends list error:', e);

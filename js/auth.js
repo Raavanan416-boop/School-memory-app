@@ -76,6 +76,13 @@ class AuthManager {
             this.userData.role = 'admin';
           } catch (e) { console.log('Could not upgrade owner role:', e); }
         }
+        // Sync leaderboard doc on login (non-blocking)
+        const ud = snap.data();
+        setDoc(doc(db, 'leaderboard', uid), {
+          fullName: ud.fullName || 'Unknown',
+          profilePic: ud.profilePic || '',
+          points: ud.points || 0
+        }, { merge: true }).catch(() => {});
       } else {
         // Create minimal user document if it doesn't exist
         const defaultData = {
@@ -98,6 +105,9 @@ class AuthManager {
           createdAt: serverTimestamp()
         };
         await setDoc(doc(db, 'users', uid), defaultData);
+        // Create leaderboard + presence entries for new user
+        await setDoc(doc(db, 'leaderboard', uid), { fullName: defaultData.fullName, profilePic: '', points: 0 });
+        await setDoc(doc(db, 'presence', uid), { online: true, lastSeen: serverTimestamp() });
         this.userData = { id: uid, ...defaultData };
       }
     } catch (e) { console.error('Error loading user data:', e); }
@@ -106,10 +116,16 @@ class AuthManager {
   async _setOnline(status) {
     if (!this.currentUser) return;
     try {
-      await updateDoc(doc(db, 'users', this.currentUser.uid), {
+      const uid = this.currentUser.uid;
+      await updateDoc(doc(db, 'users', uid), {
         online: status,
         lastSeen: serverTimestamp()
       });
+      // Dedicated presence collection for real-time online indicators
+      await setDoc(doc(db, 'presence', uid), {
+        online: status,
+        lastSeen: serverTimestamp()
+      }, { merge: true });
       if (this.userData) this.userData.online = status;
     } catch (e) { /* silently fail on disconnect */ }
   }
@@ -224,44 +240,40 @@ class AuthManager {
 export const authManager = new AuthManager();
 
 export async function awardPoints(userId, points, reason) {
-  console.log(`[Points Engine] AWARD POINTS STARTED`);
-  console.log(`[Points Engine] User: ${userId}, Points: ${points}, Reason: ${reason}`);
+  console.log(`[Points] ${reason}: ${points > 0 ? '+' : ''}${points} → ${userId}`);
+  if (!userId || !points) return;
 
-  if (!userId || !points) {
-    console.log(`[Points Engine] FAILED: Missing userId or points`);
-    return;
-  }
   try {
     const userRef = doc(db, 'users', userId);
-    console.log(`[Points Engine] UPDATING USER POINTS`);
-    
+    const lbRef = doc(db, 'leaderboard', userId);
+
     await runTransaction(db, async (transaction) => {
       const userDoc = await transaction.get(userRef);
-      if (!userDoc.exists()) {
-        throw "User document does not exist!";
-      }
+      if (!userDoc.exists()) throw "User document does not exist!";
 
-      const currentPoints = userDoc.data().points || 0;
+      const userData = userDoc.data();
+      const currentPoints = userData.points || 0;
       const newPoints = Math.max(0, currentPoints + points);
+
+      // Update users collection
       transaction.update(userRef, { points: newPoints });
-      
-      console.log("POINTS BEFORE:", currentPoints);
-      console.log("POINTS AWARDED:", points);
-      console.log("POINTS AFTER:", newPoints);
-      console.log(`Leaderboard Updated`);
+
+      // Dual-write to leaderboard collection (single source of truth for rankings)
+      transaction.set(lbRef, {
+        points: newPoints,
+        fullName: userData.fullName || 'Unknown',
+        profilePic: userData.profilePic || ''
+      });
     });
 
-    // Update local cache so UI updates instantly without relying on a reload
+    // Update local cache so UI updates instantly
     if (userId === authManager.currentUser?.uid && authManager.userData) {
       authManager.userData.points = Math.max(0, (authManager.userData.points || 0) + points);
       authManager._notify();
     }
 
-    console.log(`[Points Engine] POINT UPDATE SUCCESS`);
-    
-    const action = points > 0 ? `Awarded +${points}` : `Deducted ${points}`;
-    console.log(`[Points Engine] ${action} to user ${userId} for: ${reason}. Total points updated via transaction.`);
+    console.log(`[Points] ✓ ${reason} complete`);
   } catch(e) {
-    console.error(`[Points Engine] Error awarding points:`, e);
+    console.error(`[Points] Error awarding points:`, e);
   }
 }

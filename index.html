@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-  <meta name="theme-color" content="#f5e8d0"/>
+  <meta name="theme-color" content="#0B1F44"/>
   <meta name="description" content="Class Memories — A private social platform for school alumni. Share memories, chat, play games, and stay connected with your class forever."/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
@@ -11,7 +11,11 @@
   <meta property="og:title" content="Class Memories"/>
   <meta property="og:description" content="A digital home for school memories — Private social platform for our batch"/>
   <meta property="og:type" content="website"/>
+  <meta property="og:image" content="/icons/icon-512.png"/>
   <title>Class Memories — Your School, Forever</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png"/>
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png"/>
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png"/>
   <link rel="manifest" href="/manifest.json"/>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -62,9 +66,31 @@
   <script src="/js/security.js"></script>
   <script type="module" src="/js/app.js"></script>
   <script>
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(e => console.log('SW:', e));
-    }
+    // Force clear all old caches on icon branding update (v2)
+    (async function() {
+      const BRAND_VERSION = 'cm-brand-v2';
+      if (!localStorage.getItem(BRAND_VERSION)) {
+        localStorage.setItem(BRAND_VERSION, '1');
+        // Clear all service worker caches
+        if ('caches' in window) {
+          const names = await caches.keys();
+          await Promise.all(names.map(name => caches.delete(name)));
+          console.log('[ClassMemories] Cleared old caches for branding update:', names);
+        }
+        // Unregister old service workers so they re-register fresh
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          for (const reg of regs) {
+            await reg.unregister();
+            console.log('[ClassMemories] Unregistered old SW');
+          }
+        }
+      }
+      // Register service worker
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').catch(e => console.log('SW:', e));
+      }
+    })();
   </script>
 </body>
 </html>

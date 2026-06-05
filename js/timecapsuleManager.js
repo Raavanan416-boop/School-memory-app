@@ -95,7 +95,7 @@ class TimeCapsuleManager {
         // if 30 clients are online at the same time.
         if (capsule.authorId === authManager.currentUser.uid || capsule.createdBy === authManager.currentUser.uid) {
           try {
-            await createNotification('capsule_unlock', capsule.authorId || capsule.createdBy, {
+            await createNotification('time_capsule_unlock', capsule.authorId || capsule.createdBy, {
               capsuleId: id,
               message: `🔓 Time Capsule Opened: Your capsule "${capsule.caption || 'Memory'}" is now available.`
             });
@@ -147,10 +147,11 @@ class TimeCapsuleManager {
     });
 
     modalEl.querySelector('.open-capsule-btn').addEventListener('click', () => {
+      console.log('Opening Capsule:', capsule.id);
       modalEl.remove();
       // Use dynamic import for router to avoid circular dependencies if any
       import('./router.js').then(m => {
-        m.router.navigate('timecapsule');
+        m.router.navigate('timecapsule', { capsuleId: capsule.id });
       });
     });
   }

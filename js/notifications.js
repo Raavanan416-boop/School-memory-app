@@ -46,7 +46,18 @@ const NOTIF_CONFIG = {
   time_capsule_unlock: {
     title: '📦 Time Capsule Opened',
     bodyTemplate: () => `Your memory capsule is ready.`,
-    getUrl: (data) => `/?page=timecapsule&id=${data.capsuleId || ''}`,
+    getUrl: (data) => `/?page=timecapsule&capsuleId=${data.capsuleId || ''}`,
+  },
+  // Backward compat alias (old notifications may have this type)
+  capsule_unlock: {
+    title: '📦 Time Capsule Opened',
+    bodyTemplate: () => `Your memory capsule is ready.`,
+    getUrl: (data) => `/?page=timecapsule&capsuleId=${data.capsuleId || ''}`,
+  },
+  capsule_message: {
+    title: '💬 Capsule Comment',
+    bodyTemplate: (name) => `${name} commented on your Time Capsule.`,
+    getUrl: (data) => `/?page=timecapsule&capsuleId=${data.capsuleId || ''}`,
   },
   poll_created: {
     title: '📊 New Poll',

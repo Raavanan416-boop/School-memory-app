@@ -20,9 +20,15 @@ export function destroyTimecapsule() {
   }
 }
 
-export async function renderTimeCapsule(container) {
+export async function renderTimeCapsule(container, data) {
   router.registerDestroy('timecapsule', destroyTimecapsule);
   destroyTimecapsule();
+
+  // Store target capsuleId from navigation data (notification/celebration modal click)
+  const targetCapsuleId = data?.capsuleId || null;
+  if (targetCapsuleId) {
+    console.log('Opening Capsule:', targetCapsuleId);
+  }
 
   container.innerHTML = `
     <section class="px-4 pt-4">
@@ -45,7 +51,7 @@ export async function renderTimeCapsule(container) {
   container.querySelector('#create-capsule-btn')?.addEventListener('click', () => showCreateCapsuleModal());
   container.querySelector('#tc-back-btn')?.addEventListener('click', () => router.navigateBack());
 
-  loadCapsules(container);
+  loadCapsules(container, targetCapsuleId);
   startCountdownTimer(container);
 }
 
@@ -84,7 +90,7 @@ function startCountdownTimer(container) {
   }, 1000);
 }
 
-function loadCapsules(container) {
+function loadCapsules(container, targetCapsuleId) {
   const capsuleEl = container.querySelector('#capsules-container');
   try {
     const q = query(collection(db, 'timeCapsules'), orderBy('createdAt', 'desc'), limit(30));
@@ -101,8 +107,32 @@ function loadCapsules(container) {
       capsuleEl.innerHTML = '';
       snap.forEach(d => {
         const capsule = { id: d.id, ...d.data() };
-        capsuleEl.appendChild(createCapsuleCard(capsule));
+        const cardEl = createCapsuleCard(capsule);
+        // Add data-capsule-id for scroll targeting
+        cardEl.setAttribute('data-capsule-id', capsule.id);
+        capsuleEl.appendChild(cardEl);
       });
+
+      // Scroll to target capsule if navigated from notification/celebration
+      if (targetCapsuleId) {
+        requestAnimationFrame(() => {
+          const targetCard = capsuleEl.querySelector(`[data-capsule-id="${targetCapsuleId}"]`);
+          if (targetCard) {
+            console.log('Scrolling to Capsule:', targetCapsuleId);
+            targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            // Highlight animation
+            targetCard.style.transition = 'box-shadow 0.3s, transform 0.3s';
+            targetCard.style.boxShadow = '0 0 0 3px rgba(250, 204, 21, 0.6), 0 8px 25px rgba(250, 204, 21, 0.3)';
+            targetCard.style.transform = 'scale(1.02)';
+            setTimeout(() => {
+              targetCard.style.boxShadow = '';
+              targetCard.style.transform = '';
+            }, 3000);
+          }
+        });
+        // Only scroll on first load, not on subsequent snapshot updates
+        targetCapsuleId = null;
+      }
     });
   } catch (e) {
     capsuleEl.innerHTML = '<p class="text-center text-gray-400 py-8 text-sm">Configure Firebase</p>';
@@ -126,7 +156,11 @@ function createCapsuleCard(capsule) {
   card.className = 'card overflow-hidden animate-fadeIn';
 
   if (isUnlocked) {
-    // Unlocked capsule — show content
+    // Unlocked capsule — show content (entire card clickable)
+    card.style.cursor = 'pointer';
+    card.style.position = 'relative';
+    card.style.zIndex = '1';
+    card.style.pointerEvents = 'auto';
     card.innerHTML = `
       <div class="p-4">
         <div class="flex items-center justify-between mb-3">
@@ -137,11 +171,13 @@ function createCapsuleCard(capsule) {
               <p class="text-[10px] text-gray-400">Created ${time} · Unlocked! · ${visibilityIcon} ${visibilityLabel}</p>
             </div>
           </div>
-          ${isOwner ? `
-            <button class="capsule-delete-btn p-1 text-gray-300 hover:text-red-400 transition-colors" data-id="${capsule.id}" title="Delete">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
-            </button>
-          ` : ''}
+          <div class="flex items-center gap-1">
+            ${isOwner ? `
+              <button class="capsule-delete-btn p-1 text-gray-300 hover:text-red-400 transition-colors" data-id="${capsule.id}" title="Delete">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
+              </button>
+            ` : ''}
+          </div>
         </div>
         ${capsule.imageUrl ? `
           <div class="rounded-xl overflow-hidden border-2 border-warm-300 mb-3">
@@ -154,11 +190,45 @@ function createCapsuleCard(capsule) {
           </div>
         ` : ''}
         
+        <!-- Open Capsule fallback button -->
+        <button class="open-capsule-fallback-btn mt-3 w-full py-2.5 px-4 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-white font-bold rounded-xl text-sm shadow-md transition-all active:scale-95" data-capsule-id="${capsule.id}">
+          🔓 Open Capsule
+        </button>
+
         <div class="capsule-messages-container mt-4 border-t border-gray-100 pt-4 hidden">
           <!-- Messages will be injected here by loadCapsuleMessages -->
         </div>
       </div>
     `;
+
+    // Make entire unlocked card clickable — navigate to this capsule with highlight
+    card.addEventListener('click', (e) => {
+      // Don't navigate if clicking delete btn, comments, input, or fallback button
+      if (e.target.closest('.capsule-delete-btn') || 
+          e.target.closest('.capsule-messages-container') ||
+          e.target.closest('.open-capsule-fallback-btn')) return;
+      console.log('Opening Capsule:', capsule.id);
+      // Scroll to this card with highlight effect
+      card.style.boxShadow = '0 0 0 3px rgba(250, 204, 21, 0.6), 0 8px 25px rgba(250, 204, 21, 0.3)';
+      card.style.transform = 'scale(1.02)';
+      setTimeout(() => {
+        card.style.boxShadow = '';
+        card.style.transform = '';
+      }, 2000);
+    });
+
+    // Fallback "Open Capsule" button click
+    card.querySelector('.open-capsule-fallback-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      console.log('Opening Capsule (fallback button):', capsule.id);
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      card.style.boxShadow = '0 0 0 3px rgba(250, 204, 21, 0.6), 0 8px 25px rgba(250, 204, 21, 0.3)';
+      card.style.transform = 'scale(1.02)';
+      setTimeout(() => {
+        card.style.boxShadow = '';
+        card.style.transform = '';
+      }, 2000);
+    });
   } else {
     // Locked capsule — show countdown
     const now = Date.now();

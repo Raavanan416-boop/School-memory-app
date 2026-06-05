@@ -478,8 +478,8 @@ function buildAppShell() {
         if (destroyPolls) destroyPolls();
       }
       if (page !== 'timecapsule') {
-        const { destroyTimeCapsule } = await import('./pages/timecapsule.js').catch(() => ({}));
-        if (destroyTimeCapsule) destroyTimeCapsule();
+        const { destroyTimecapsule } = await import('./pages/timecapsule.js').catch(() => ({}));
+        if (destroyTimecapsule) destroyTimecapsule();
       }
       if (page !== 'chat') {
         const { destroyChat } = await import('./pages/chat.js').catch(() => ({}));

@@ -61,7 +61,7 @@ export async function renderHome(container) {
     <!-- Timer Section -->
     <section class="px-4 pt-4 pb-3">
       <div class="card p-4">
-        <p class="text-center text-xs text-gray-400 uppercase tracking-widest mb-3">⏳ Time since school ended</p>
+        <p class="text-center text-xs text-gray-400 uppercase tracking-widest mb-3">⏳Time keeps moving forward, while our hearts keep visiting the past⏳✨</p>
         <div id="live-timer" class="flex items-center justify-center gap-2 flex-wrap"></div>
         <p id="emotion-quote" class="text-center font-handwriting text-navy-400 text-base mt-3 transition-opacity duration-500">"${EMOTIONAL_QUOTES[0]}"</p>
       </div>

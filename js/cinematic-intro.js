@@ -135,7 +135,7 @@ export function playCinematicIntro() {
             <div class="intro-gate-bar"></div>
             <div class="intro-gate-bar"></div>
             <div class="intro-gate-bar"></div>
-            <div class="intro-gate-ornament">📖</div>
+            <div class="intro-gate-ornament"><img src="/assets/class-memories-logo.png" alt="" style="width:36px;height:36px;object-fit:contain;border-radius:50%;" /></div>
           </div>
         </div>
         <!-- Right Gate Door -->
@@ -146,7 +146,7 @@ export function playCinematicIntro() {
             <div class="intro-gate-bar"></div>
             <div class="intro-gate-bar"></div>
             <div class="intro-gate-bar"></div>
-            <div class="intro-gate-ornament">🎓</div>
+            <div class="intro-gate-ornament"><img src="/assets/class-memories-logo.png" alt="" style="width:36px;height:36px;object-fit:contain;border-radius:50%;" /></div>
           </div>
         </div>
         <!-- Gate arch text -->
@@ -170,9 +170,11 @@ export function playCinematicIntro() {
 
       <!-- Welcome text overlay -->
       <div class="intro-welcome-text" id="intro-welcome">
+        <img src="/assets/class-memories-logo.png" alt="Class Memories" class="intro-logo-img" />
         <div class="intro-bell-icon" id="intro-bell">🔔</div>
-        <h1 class="intro-title">ClassMemories</h1>
-        <p class="intro-subtitle">Where every moment lives forever</p>
+        <h1 class="intro-title">Class Memories</h1>
+        <p class="intro-subtitle" style="letter-spacing:3px;font-weight:600;color:#b8860b;">2024 & 2025</p>
+        <p class="intro-subtitle" style="margin-top:8px;font-family:'Caveat',cursive;font-size:18px;">"Relive the Golden Days"</p>
       </div>
 
       <!-- Skip button -->

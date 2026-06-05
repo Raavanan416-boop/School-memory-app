@@ -23,16 +23,18 @@
 <body class="bg-cream-100 text-navy-800 font-sans min-h-screen overflow-x-hidden">
   <!-- Splash Screen -->
   <div id="splash-screen" class="fixed inset-0 z-[100] bg-cream-200 flex flex-col items-center justify-center transition-opacity duration-700">
-    <div class="school-crest animate-scaleIn">
-      <span class="text-4xl mb-1">📖</span>
-      <span class="text-[11px] font-bold text-navy-500 tracking-wide">ClassMemories</span>
-      <div class="ribbon">2024 & 2025</div>
+    <div class="splash-logo-container">
+      <div class="splash-logo-glow"></div>
+      <img src="/assets/class-memories-logo.png" alt="Class Memories" class="splash-logo-img" />
     </div>
-    <p class="mt-6 text-navy-500 font-medium text-sm">Loading memories...</p>
-    <div class="mt-4 w-40 h-1.5 bg-cream-300 rounded-full overflow-hidden">
+    <h2 class="splash-title-text">Class Memories</h2>
+    <p class="splash-year-text">2024 & 2025</p>
+    <p class="splash-tagline">"Relive the Golden Days"</p>
+    <div class="mt-8 w-40 h-1.5 bg-cream-300 rounded-full overflow-hidden" style="opacity:0; animation: splashTextFade 1s ease-out 2s forwards;">
       <div id="splash-progress" class="h-full bg-navy-500 rounded-full transition-all duration-300" style="width:0%"></div>
     </div>
   </div>
+
 
   <!-- App Container -->
   <div id="app" class="hidden min-h-screen pb-20"></div>

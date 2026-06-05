@@ -223,11 +223,10 @@ function showLogin() {
          <div class="absolute w-72 h-72 bg-orange-200/20 rounded-full blur-3xl bottom-10 right-10 animate-pulse" style="animation-duration: 10s"></div>
       </div>
 
-      <!-- School Crest -->
-      <div class="school-crest mb-8 animate-scaleIn relative z-10 shadow-xl shadow-amber-900/5 bg-white/60 backdrop-blur-sm border border-white/50 p-6 rounded-3xl transition-transform duration-500 hover:scale-105">
-        <span class="text-5xl mb-2 drop-shadow-md">🏫</span>
-        <span class="text-[12px] font-bold text-navy-800 tracking-widest uppercase">ClassMemories</span>
-        <div class="ribbon shadow-sm">2024 & 2025</div>
+      <!-- School Logo -->
+      <div class="login-logo-wrap relative z-10">
+        <div class="login-logo-glow"></div>
+        <img src="/assets/class-memories-logo.png" alt="Class Memories" class="login-logo-img" />
       </div>
 
       <!-- Welcome text -->
@@ -242,7 +241,7 @@ function showLogin() {
             <label class="text-[11px] font-bold text-navy-500 mb-2 block uppercase tracking-wider transition-colors group-focus-within:text-navy-900">Email Address</label>
             <div class="relative flex items-center transition-transform duration-300 group-focus-within:-translate-y-1">
               <svg class="absolute left-4 w-5 h-5 text-navy-400 group-focus-within:text-navy-700 transition-colors z-10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0"/></svg>
-              <input type="email" id="login-email" placeholder="admin37@classmemories.com" class="w-full bg-white/60 border border-cream-200 rounded-2xl py-3.5 pl-12 pr-4 text-sm text-navy-900 font-medium focus:outline-none focus:ring-2 focus:ring-navy-200 focus:border-transparent focus:bg-white transition-all shadow-sm" required/>
+              <input type="email" id="login-email" placeholder="yourname@school.com" class="w-full bg-white/60 border border-cream-200 rounded-2xl py-3.5 pl-12 pr-4 text-sm text-navy-900 font-medium focus:outline-none focus:ring-2 focus:ring-navy-200 focus:border-transparent focus:bg-white transition-all shadow-sm" required/>
             </div>
           </div>
 
@@ -251,7 +250,7 @@ function showLogin() {
             <label class="text-[11px] font-bold text-navy-500 mb-2 block uppercase tracking-wider transition-colors group-focus-within:text-navy-900">Password</label>
             <div class="relative flex items-center transition-transform duration-300 group-focus-within:-translate-y-1">
               <svg class="absolute left-4 w-5 h-5 text-navy-400 group-focus-within:text-navy-700 transition-colors z-10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>
-              <input type="password" id="login-password" placeholder="school123" class="w-full bg-white/60 border border-cream-200 rounded-2xl py-3.5 pl-12 pr-12 text-sm text-navy-900 font-medium focus:outline-none focus:ring-2 focus:ring-navy-200 focus:border-transparent focus:bg-white transition-all shadow-sm" required/>
+              <input type="password" id="login-password" placeholder="DOB(32062007)" class="w-full bg-white/60 border border-cream-200 rounded-2xl py-3.5 pl-12 pr-12 text-sm text-navy-900 font-medium focus:outline-none focus:ring-2 focus:ring-navy-200 focus:border-transparent focus:bg-white transition-all shadow-sm" required/>
               <button type="button" id="toggle-password-btn" class="absolute right-2 w-10 h-10 flex items-center justify-center rounded-full hover:bg-cream-100 transition-all focus:outline-none z-10" aria-label="Toggle password visibility">
                 <span class="text-xl leading-none transform transition-transform duration-300 inline-block" id="diary-icon">📘</span>
               </button>
@@ -342,7 +341,10 @@ function buildAppShell() {
   app.innerHTML = `
     <header class="sticky top-0 z-50 bg-white/95 backdrop-blur-sm border-b border-gray-100">
       <div class="flex items-center justify-between px-4 py-3">
-        <h1 class="text-lg font-display font-bold text-navy-500">ClassMemories 📷</h1>
+        <div class="header-brand-group">
+          <img src="/assets/class-memories-logo.png" alt="Class Memories" class="header-logo-img" />
+          <h1>ClassMemories</h1>
+        </div>
         <div class="flex items-center gap-1">
           <button id="btn-notifications" class="relative p-2 rounded-full hover:bg-cream-100 transition-colors">
             <svg class="w-5 h-5 text-navy-500" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>

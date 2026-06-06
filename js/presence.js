@@ -5,7 +5,12 @@ import { authManager } from './auth.js';
 class PresenceManager {
   constructor() {
     this.typingTimers = {};
-    this.presenceListeners = {};
+    // Firestore unsubscribe functions keyed by userId
+    this._firestoreUnsubs = {};
+    // Current callbacks keyed by userId — always updated, even if Firestore listener already exists
+    this._callbacks = {};
+    // Latest status cache keyed by userId — so new callbacks get instant data
+    this._statusCache = {};
     this._boundBeforeUnload = null;
     this._boundVisChange = null;
   }
@@ -37,7 +42,6 @@ class PresenceManager {
   // Start listening for browser close/tab switch to update presence
   startPresenceTracking() {
     this._boundBeforeUnload = () => {
-      // Use sendBeacon for reliable offline-set on page close
       this.setOffline();
     };
     this._boundVisChange = () => {
@@ -96,27 +100,59 @@ class PresenceManager {
       .map(([uid]) => uid);
   }
 
-  // Watch a user's online status (from dedicated presence collection)
+  /**
+   * Watch a user's online status (from dedicated presence collection).
+   * 
+   * KEY FIX: The callback is ALWAYS updated even if a Firestore listener
+   * already exists for this userId. This is critical because the chat list
+   * re-renders on every onSnapshot update (innerHTML = ''), destroying DOM.
+   * The new callback references the new DOM elements, so the existing
+   * Firestore listener must invoke the LATEST callback.
+   */
   watchUser(userId, callback) {
-    if (this.presenceListeners[userId]) return;
-    this.presenceListeners[userId] = onSnapshot(doc(db, 'presence', userId), (snap) => {
+    // Always update the callback reference
+    this._callbacks[userId] = callback;
+
+    // If we already have cached status, invoke the new callback immediately
+    // so the UI reflects the current state right away (no flicker)
+    if (this._statusCache[userId]) {
+      callback(this._statusCache[userId]);
+    }
+
+    // Only create ONE Firestore listener per userId
+    if (this._firestoreUnsubs[userId]) return;
+
+    this._firestoreUnsubs[userId] = onSnapshot(doc(db, 'presence', userId), (snap) => {
+      let status;
       if (snap.exists()) {
         const data = snap.data();
-        callback({
-          online: data.online || false,
-          lastSeen: data.lastSeen?.toDate ? data.lastSeen.toDate() : null
-        });
+        const lastSeen = data.lastSeen?.toDate ? data.lastSeen.toDate() : null;
+        let isOnline = data.online || false;
+        // Staleness check: if heartbeat hasn't been received in 2.5 min,
+        // the user likely crashed/force-closed — treat as offline
+        if (isOnline && lastSeen && (Date.now() - lastSeen.getTime() > 150000)) {
+          isOnline = false;
+        }
+        status = { online: isOnline, lastSeen };
       } else {
-        callback({ online: false, lastSeen: null });
+        status = { online: false, lastSeen: null };
+      }
+      // Cache the latest status
+      this._statusCache[userId] = status;
+      // Always invoke the LATEST callback (not the stale one from initial registration)
+      if (this._callbacks[userId]) {
+        this._callbacks[userId](status);
       }
     });
   }
 
   // Get human-readable last seen text
   getLastSeenText(status) {
-    if (status.online) return '🟢 Online';
     if (!status.lastSeen) return '⚫ Offline';
     const diff = Date.now() - status.lastSeen.getTime();
+    // Staleness override: even if status.online is true, if heartbeat is stale (>2.5 min),
+    // show as offline with last seen time
+    if (status.online && diff < 150000) return '🟢 Online';
     if (diff < 60000) return '⚫ Last seen just now';
     if (diff < 3600000) return `⚫ Last seen ${Math.floor(diff / 60000)} min ago`;
     if (diff < 86400000) return `⚫ Last seen ${Math.floor(diff / 3600000)}h ago`;
@@ -125,16 +161,20 @@ class PresenceManager {
 
   // Stop watching a user
   unwatchUser(userId) {
-    if (this.presenceListeners[userId]) {
-      this.presenceListeners[userId]();
-      delete this.presenceListeners[userId];
+    if (this._firestoreUnsubs[userId]) {
+      this._firestoreUnsubs[userId]();
+      delete this._firestoreUnsubs[userId];
     }
+    delete this._callbacks[userId];
+    delete this._statusCache[userId];
   }
 
   // Cleanup all listeners
   cleanup() {
-    Object.values(this.presenceListeners).forEach(unsub => unsub());
-    this.presenceListeners = {};
+    Object.values(this._firestoreUnsubs).forEach(unsub => unsub());
+    this._firestoreUnsubs = {};
+    this._callbacks = {};
+    this._statusCache = {};
     Object.values(this.typingTimers).forEach(t => clearTimeout(t));
     this.typingTimers = {};
   }

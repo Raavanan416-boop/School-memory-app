@@ -37,13 +37,13 @@ class AuthManager {
         this._notify();
         resolve(this.currentUser);
       });
-
-      // Mark offline on page unload
+      // Mark offline on page unload — best effort via SDK
+      // Primary reliability comes from: visibilitychange (tab switch) + heartbeat (every 60s)
+      // If heartbeat stops, the client-side getLastSeenText() will show "offline" after staleness
       window.addEventListener('beforeunload', () => {
         if (this.currentUser) {
-          const data = JSON.stringify({ online: false, lastSeen: new Date().toISOString() });
-          navigator.sendBeacon && navigator.sendBeacon('/api/presence', data);
-          // Also try direct Firestore update
+          // Fire-and-forget SDK calls — may or may not complete before page closes
+          // But visibilitychange (fires before beforeunload) + heartbeat handle most cases
           this._setOnline(false);
         }
       });

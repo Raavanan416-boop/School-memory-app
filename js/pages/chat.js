@@ -846,78 +846,10 @@ export function startCallUI(targetUid, targetName, type) {
   const callOverlay = document.getElementById('call-overlay');
   if (!callOverlay) return;
 
-  // Set up call state tracking
   let callTimer = null;
   let callSeconds = 0;
 
-  // Callback: state changes (dialing → ringing → connected)
-  callManager.onCallStateChange = (state) => {
-    const statusEl = callOverlay.querySelector('#call-status-text');
-    if (statusEl) {
-      if (state === 'dialing') statusEl.textContent = 'Calling...';
-      else if (state === 'ringing') statusEl.textContent = 'Ringing...';
-      else if (state === 'connected') {
-        // Timer starts NOW — only when ICE has truly connected
-        statusEl.textContent = 'Connected · 00:00';
-        if (callTimer) clearInterval(callTimer);
-        callSeconds = 0;
-        callTimer = setInterval(() => {
-          callSeconds++;
-          const mins = Math.floor(callSeconds / 60).toString().padStart(2, '0');
-          const secs = (callSeconds % 60).toString().padStart(2, '0');
-          statusEl.textContent = `Connected · ${mins}:${secs}`;
-        }, 1000);
-      }
-    }
-    // Hide avatar info for video when connected
-    if (state === 'connected' && type === 'video') {
-      const callInfo = callOverlay.querySelector('.call-info');
-      if (callInfo) callInfo.style.display = 'none';
-    }
-  };
-
-  // Callback: remote stream received
-  callManager.onRemoteStream = (userId, stream) => {
-    const container = callOverlay.querySelector('#remote-video-container');
-    if (container && type === 'video') {
-      container.innerHTML = ''; // Clear any previous
-      const video = document.createElement('video');
-      video.srcObject = stream;
-      video.autoplay = true;
-      video.playsInline = true;
-      video.className = 'w-full h-full object-cover';
-      container.appendChild(video);
-    }
-    // For audio-only calls, create an audio element
-    if (type === 'voice') {
-      const existingAudio = callOverlay.querySelector('audio');
-      if (!existingAudio) {
-        const audio = document.createElement('audio');
-        audio.srcObject = stream;
-        audio.autoplay = true;
-        audio.play().catch(console.error);
-        callOverlay.appendChild(audio);
-      }
-    }
-  };
-
-  // Callback: call ended
-  callManager.onCallEnd = (reason) => {
-    if (callTimer) clearInterval(callTimer);
-    callOverlay.classList.add('hidden');
-    callOverlay.innerHTML = '';
-    if (reason === 'no_answer') {
-      showToast('No answer', 'info');
-    } else if (reason === 'rejected') {
-      showToast('Call declined', 'info');
-    } else if (reason === 'disconnected' || reason === 'failed') {
-      showToast('Call disconnected', 'warning');
-    } else {
-      showToast('Call ended', 'info');
-    }
-  };
-
-  // Now show the call UI
+  // Render UI FIRST so callbacks have DOM elements to update
   callOverlay.classList.remove('hidden');
   callOverlay.innerHTML = `
     <div class="call-screen ${type === 'video' ? 'call-video' : 'call-voice'}">
@@ -958,39 +890,14 @@ export function startCallUI(targetUid, targetName, type) {
     </div>
   `;
 
-  // Start the call (async)
-  (async () => {
-    const callId = await callManager.startCall(targetUid, targetName, type);
-    if (!callId) {
-      // Call failed to start
-      callOverlay.classList.add('hidden');
-      callOverlay.innerHTML = '';
-      return;
-    }
-
-    // Show local video preview after stream is ready
-    if (type === 'video' && callManager.localStream) {
-      _showLocalVideo(callOverlay, callManager.localStream);
-    }
-  })();
-
-  // Bind control handlers
-  _bindCallControls(callOverlay, callTimer, type);
-}
-
-// ===== RECEIVER CALL UI (after answerCall completes) =====
-export function showAnsweredCallUI(callerUid, callerName, type) {
-  const callOverlay = document.getElementById('call-overlay');
-  if (!callOverlay) return;
-
-  let callTimer = null;
-  let callSeconds = 0;
-
-  // Callback: state changes
+  // Wire callbacks BEFORE starting the call
   callManager.onCallStateChange = (state) => {
     const statusEl = callOverlay.querySelector('#call-status-text');
     if (statusEl) {
-      if (state === 'connected') {
+      if (state === 'dialing') statusEl.textContent = 'Calling...';
+      else if (state === 'ringing') statusEl.textContent = 'Ringing...';
+      else if (state === 'connecting') statusEl.textContent = 'Connecting...';
+      else if (state === 'connected') {
         statusEl.textContent = 'Connected · 00:00';
         if (callTimer) clearInterval(callTimer);
         callSeconds = 0;
@@ -1008,47 +915,47 @@ export function showAnsweredCallUI(callerUid, callerName, type) {
     }
   };
 
-  // If already connected (ICE completed before UI rendered), start timer
-  if (callManager.callStatus === 'connected') {
-    // Will be handled after UI renders below
-    setTimeout(() => {
-      if (callManager.onCallStateChange) callManager.onCallStateChange('connected');
-    }, 100);
-  }
-
-  // Callback: remote stream
   callManager.onRemoteStream = (userId, stream) => {
-    const container = callOverlay.querySelector('#remote-video-container');
-    if (container && type === 'video') {
-      container.innerHTML = '';
-      const video = document.createElement('video');
-      video.srcObject = stream;
-      video.autoplay = true;
-      video.playsInline = true;
-      video.className = 'w-full h-full object-cover';
-      container.appendChild(video);
-    }
-    if (type === 'voice') {
-      const existingAudio = callOverlay.querySelector('audio');
-      if (!existingAudio) {
-        const audio = document.createElement('audio');
-        audio.srcObject = stream;
-        audio.autoplay = true;
-        audio.play().catch(console.error);
-        callOverlay.appendChild(audio);
-      }
-    }
+    _attachRemoteStream(callOverlay, type, stream);
   };
 
-  // Callback: call ended
   callManager.onCallEnd = (reason) => {
     if (callTimer) clearInterval(callTimer);
     callOverlay.classList.add('hidden');
     callOverlay.innerHTML = '';
-    showToast('Call ended', 'info');
+    if (reason === 'no_answer') showToast('No answer', 'info');
+    else if (reason === 'rejected') showToast('Call declined', 'info');
+    else if (reason === 'disconnected' || reason === 'failed') showToast('Call disconnected', 'warning');
+    else showToast('Call ended', 'info');
   };
 
-  // Render the call UI
+  // Bind control handlers
+  _bindCallControls(callOverlay, () => callTimer, type);
+
+  // Now start the call (async) — callbacks are already wired
+  (async () => {
+    const callId = await callManager.startCall(targetUid, targetName, type);
+    if (!callId) {
+      callOverlay.classList.add('hidden');
+      callOverlay.innerHTML = '';
+      return;
+    }
+    // Show local video preview after stream is ready
+    if (type === 'video' && callManager.localStream) {
+      _showLocalVideo(callOverlay, callManager.localStream);
+    }
+  })();
+}
+
+// ===== RECEIVER CALL UI (renders UI + wires callbacks + calls answerCall) =====
+export function showAnsweredCallUI(callerUid, callerName, type, callId) {
+  const callOverlay = document.getElementById('call-overlay');
+  if (!callOverlay) return;
+
+  let callTimer = null;
+  let callSeconds = 0;
+
+  // 1. Render the full call UI FIRST (so callbacks have DOM elements)
   callOverlay.classList.remove('hidden');
   callOverlay.innerHTML = `
     <div class="call-screen ${type === 'video' ? 'call-video' : 'call-voice'}">
@@ -1056,9 +963,9 @@ export function showAnsweredCallUI(callerUid, callerName, type) {
       <div id="local-video-container" class="call-local-video"></div>
       <div class="call-info">
         <div class="call-avatar-ring">
-          <div class="avatar avatar-placeholder text-2xl w-20 h-20">${callerName[0]}</div>
+          <div class="avatar avatar-placeholder text-2xl w-20 h-20">${(callerName || '?')[0]}</div>
         </div>
-        <h3 class="text-lg font-bold text-white mt-4">${sanitizeHTML(callerName)}</h3>
+        <h3 class="text-lg font-bold text-white mt-4">${sanitizeHTML(callerName || 'Unknown')}</h3>
         <p class="text-sm text-white/70 mt-1" id="call-status-text">Connecting...</p>
       </div>
       <div class="call-controls">
@@ -1089,24 +996,107 @@ export function showAnsweredCallUI(callerUid, callerName, type) {
     </div>
   `;
 
-  // Show local video preview (receiver side)
-  if (type === 'video' && callManager.localStream) {
-    _showLocalVideo(callOverlay, callManager.localStream);
+  // 2. Wire ALL callbacks BEFORE calling answerCall()
+  callManager.onCallStateChange = (state) => {
+    const statusEl = callOverlay.querySelector('#call-status-text');
+    if (statusEl) {
+      if (state === 'connecting') statusEl.textContent = 'Connecting...';
+      else if (state === 'connected') {
+        statusEl.textContent = 'Connected · 00:00';
+        if (callTimer) clearInterval(callTimer);
+        callSeconds = 0;
+        callTimer = setInterval(() => {
+          callSeconds++;
+          const mins = Math.floor(callSeconds / 60).toString().padStart(2, '0');
+          const secs = (callSeconds % 60).toString().padStart(2, '0');
+          statusEl.textContent = `Connected · ${mins}:${secs}`;
+        }, 1000);
+      }
+    }
+    if (state === 'connected' && type === 'video') {
+      const callInfo = callOverlay.querySelector('.call-info');
+      if (callInfo) callInfo.style.display = 'none';
+    }
+  };
+
+  callManager.onRemoteStream = (userId, stream) => {
+    _attachRemoteStream(callOverlay, type, stream);
+  };
+
+  callManager.onCallEnd = (reason) => {
+    if (callTimer) clearInterval(callTimer);
+    callOverlay.classList.add('hidden');
+    callOverlay.innerHTML = '';
+    showToast('Call ended', 'info');
+  };
+
+  // 3. Bind control handlers
+  _bindCallControls(callOverlay, () => callTimer, type);
+
+  // 4. NOW call answerCall() — all callbacks are already wired
+  //    This is the CRITICAL ordering fix. Previously answerCall() was called
+  //    before callbacks were wired, causing ICE connected events to be lost.
+  (async () => {
+    try {
+      await callManager.answerCall(callId);
+
+      // Show local video preview after stream is ready
+      if (type === 'video' && callManager.localStream) {
+        _showLocalVideo(callOverlay, callManager.localStream);
+      }
+
+      // If remote stream already available (race condition), attach it
+      Object.entries(callManager.remoteStreams).forEach(([uid, stream]) => {
+        _attachRemoteStream(callOverlay, type, stream);
+      });
+
+      // If already connected (ICE completed during answerCall), trigger state
+      if (callManager.callStatus === 'connected') {
+        if (callManager.onCallStateChange) callManager.onCallStateChange('connected');
+      }
+    } catch (e) {
+      console.error('[Call] Answer call error:', e);
+      callOverlay.classList.add('hidden');
+      callOverlay.innerHTML = '';
+      showToast('Could not answer call', 'error');
+    }
+  })();
+}
+
+// ===== SHARED: Attach remote stream (audio or video) =====
+function _attachRemoteStream(callOverlay, type, stream) {
+  if (type === 'video') {
+    const container = callOverlay.querySelector('#remote-video-container');
+    if (container) {
+      container.innerHTML = '';
+      const video = document.createElement('video');
+      video.srcObject = stream;
+      video.autoplay = true;
+      video.playsInline = true;
+      video.className = 'w-full h-full object-cover';
+      container.appendChild(video);
+    }
   }
-
-  // If remote stream already available, show it
-  Object.entries(callManager.remoteStreams).forEach(([uid, stream]) => {
-    if (callManager.onRemoteStream) callManager.onRemoteStream(uid, stream);
-  });
-
-  // Bind controls
-  _bindCallControls(callOverlay, callTimer, type);
+  // Always create an audio element for the remote stream (even for video calls)
+  // This ensures audio plays even if video container has issues
+  let existingAudio = callOverlay.querySelector('audio[data-remote]');
+  if (!existingAudio) {
+    const audio = document.createElement('audio');
+    audio.setAttribute('data-remote', 'true');
+    audio.srcObject = stream;
+    audio.autoplay = true;
+    audio.volume = 1.0;
+    audio.play().catch(e => console.warn('[Call] Audio autoplay blocked:', e));
+    callOverlay.appendChild(audio);
+    console.log('[Call] 🔊 Remote audio element created and playing');
+  }
 }
 
 // ===== SHARED: Show local video preview =====
 function _showLocalVideo(callOverlay, stream) {
   const localContainer = callOverlay.querySelector('#local-video-container');
   if (localContainer) {
+    localContainer.innerHTML = ''; // Clear previous
     const video = document.createElement('video');
     video.srcObject = stream;
     video.autoplay = true;
@@ -1118,7 +1108,7 @@ function _showLocalVideo(callOverlay, stream) {
 }
 
 // ===== SHARED: Bind call control buttons =====
-function _bindCallControls(callOverlay, callTimer, type) {
+function _bindCallControls(callOverlay, getTimer, type) {
   callOverlay.querySelector('#toggle-mute')?.addEventListener('click', () => {
     const muted = callManager.toggleMute();
     const btn = callOverlay.querySelector('#toggle-mute');
@@ -1135,7 +1125,6 @@ function _bindCallControls(callOverlay, callTimer, type) {
       btn.classList.toggle('call-control-active', off);
       btn.querySelector('span').textContent = off ? 'Cam On' : 'Camera';
     }
-    // Show/hide local video
     const localContainer = callOverlay.querySelector('#local-video-container');
     if (localContainer) {
       localContainer.style.opacity = off ? '0.3' : '1';
@@ -1147,7 +1136,6 @@ function _bindCallControls(callOverlay, callTimer, type) {
     if (btn) btn.classList.add('call-control-active');
     const facing = await callManager.switchCamera();
     if (facing && callManager.localStream) {
-      // Update local video preview with new stream
       _showLocalVideo(callOverlay, callManager.localStream);
     }
     setTimeout(() => {
@@ -1157,7 +1145,7 @@ function _bindCallControls(callOverlay, callTimer, type) {
 
   callOverlay.querySelector('#toggle-speaker')?.addEventListener('click', () => {
     const btn = callOverlay.querySelector('#toggle-speaker');
-    const audio = callOverlay.querySelector('audio');
+    const audio = callOverlay.querySelector('audio[data-remote]');
     if (audio && btn) {
       const isLoud = btn.classList.toggle('call-control-active');
       audio.volume = isLoud ? 1.0 : 0.5;
@@ -1166,7 +1154,8 @@ function _bindCallControls(callOverlay, callTimer, type) {
   });
 
   callOverlay.querySelector('#end-call-btn')?.addEventListener('click', () => {
-    if (callTimer) clearInterval(callTimer);
+    const timer = getTimer();
+    if (timer) clearInterval(timer);
     callManager.endCall();
   });
 }

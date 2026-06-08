@@ -1,27 +1,60 @@
-// WebRTC Calls — Voice, Video, and Group calls using Firestore signaling
-// Fixed: ICE candidate direction, state machine, stale cleanup, missed calls, camera switch
-import { db, doc, collection, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp, getDoc, getDocs, query, where } from './firebase-config.js';
+// WebRTC Calls — Voice & Video using Firestore signaling
+// v3: Fixed ICE candidate buffering, state machine, SDP exchange ordering, logging
+import { db, doc, collection, addDoc, updateDoc, onSnapshot, serverTimestamp, getDoc, getDocs, query, where } from './firebase-config.js';
 import { authManager } from './auth.js';
 import { createNotification } from './notifications.js';
 import { showToast } from './utils.js';
 
+// ===== ICE Server Configuration =====
+// STUN for discovery + public TURN for relay fallback behind symmetric NATs
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
   { urls: 'stun:stun3.l.google.com:19302' },
-  { urls: 'stun:stun4.l.google.com:19302' }
+  // Open TURN relay for NAT traversal (metered.ca free tier)
+  {
+    urls: 'turn:a.relay.metered.ca:80',
+    username: 'e8dd65a92f3c1e3a5f1b3c0a',
+    credential: 'openrelayproject'
+  },
+  {
+    urls: 'turn:a.relay.metered.ca:443',
+    username: 'e8dd65a92f3c1e3a5f1b3c0a',
+    credential: 'openrelayproject'
+  },
+  {
+    urls: 'turn:a.relay.metered.ca:443?transport=tcp',
+    username: 'e8dd65a92f3c1e3a5f1b3c0a',
+    credential: 'openrelayproject'
+  }
 ];
 
-// Valid call state transitions
+// ===== Call States =====
 const CALL_STATES = {
   IDLE: 'idle',
-  DIALING: 'dialing',    // Caller: initiated call, waiting for answer
-  RINGING: 'ringing',    // Receiver: incoming call shown
-  INCOMING: 'incoming',  // Receiver: sees incoming call UI
-  CONNECTED: 'connected',// Both: WebRTC connection established
-  ENDED: 'ended'         // Both: call has ended
+  DIALING: 'dialing',       // Caller: initiated, waiting for receiver
+  RINGING: 'ringing',       // Caller: receiver's phone is ringing
+  INCOMING: 'incoming',     // Receiver: sees incoming call UI
+  CONNECTING: 'connecting', // Both: SDP exchanged, waiting for ICE
+  CONNECTED: 'connected',   // Both: media flowing
+  ENDED: 'ended'
 };
+
+function _log(...args) {
+  const ts = new Date().toISOString().slice(11, 23);
+  console.log(`[Call ${ts}]`, ...args);
+}
+
+function _warn(...args) {
+  const ts = new Date().toISOString().slice(11, 23);
+  console.warn(`[Call ${ts}]`, ...args);
+}
+
+function _err(...args) {
+  const ts = new Date().toISOString().slice(11, 23);
+  console.error(`[Call ${ts}]`, ...args);
+}
 
 class CallManager {
   constructor() {
@@ -31,32 +64,39 @@ class CallManager {
     this.currentCallId = null;
     this.currentCallType = null; // 'voice' or 'video'
     this.callStatus = CALL_STATES.IDLE;
-    this.callListeners = [];
     this.incomingCallListener = null;
     this.isMuted = false;
     this.isCameraOff = false;
     this.isSpeakerOn = false;
+
+    // Callbacks — set by UI code
     this.onCallStateChange = null;
     this.onRemoteStream = null;
     this.onCallEnd = null;
     this.onIncomingCall = null;
+
+    // Internal state
+    this._isCaller = false;
+    this._connectedTimestamp = null;
     this._candidateListeners = {};
     this._callDocListener = null;
     this._ringTimeout = null;
-    this._isCaller = false; // true = caller, false = receiver
-    this._connectedTimestamp = null;
+    this._answerSet = false;          // Guard: prevent double setRemoteDescription
+    this._pendingCandidates = [];     // Buffer: ICE candidates before remote desc
+    this._remoteDescSet = false;      // Flag: remote description successfully set
+    this._connectionCheckTimer = null;
   }
 
-  // Is the call in an active state (not idle/ended)?
   get isInCall() {
     return this.callStatus !== CALL_STATES.IDLE && this.callStatus !== CALL_STATES.ENDED;
   }
 
-  // Start listening for incoming calls
+  // ===================================================================
+  //  INCOMING CALL LISTENER (runs globally when logged in)
+  // ===================================================================
   listenForIncomingCalls() {
     if (!authManager.currentUser || this.incomingCallListener) return;
 
-    // Clean up stale calls from previous sessions first
     this._cleanupStaleCalls();
 
     const callsCol = collection(db, 'calls');
@@ -65,35 +105,30 @@ class CallManager {
         if (change.type === 'added') {
           const call = { id: change.doc.id, ...change.doc.data() };
 
-          // Only process calls targeting me that are currently ringing
           if (call.targetId === authManager.currentUser.uid &&
               call.status === 'ringing' &&
               !this.isInCall) {
 
-            // Verify the call is fresh (created within last 45 seconds)
             const createdAt = call.createdAt?.toDate ? call.createdAt.toDate() : null;
             if (createdAt) {
               const ageMs = Date.now() - createdAt.getTime();
               if (ageMs > 45000) {
-                console.log('[CallManager] Ignoring stale call:', call.id, 'age:', ageMs);
+                _log('Ignoring stale call:', call.id, 'age:', ageMs + 'ms');
                 return;
               }
             }
 
-            // Show incoming call UI
-            console.log('[CallManager] Incoming call:', call.id, 'from:', call.callerName);
+            _log('📞 Incoming call:', call.id, 'from:', call.callerName, 'type:', call.type);
             if (this.onIncomingCall) this.onIncomingCall(call);
           }
         }
 
-        // Also watch for status changes on calls targeting me
         if (change.type === 'modified') {
           const call = { id: change.doc.id, ...change.doc.data() };
           if (call.targetId === authManager.currentUser.uid) {
-            // If call was cancelled/ended while we're showing incoming UI
-            if ((call.status === 'ended' || call.status === 'no_answer' || call.status === 'cancelled') &&
+            if (['ended', 'no_answer', 'cancelled'].includes(call.status) &&
                 this.callStatus === CALL_STATES.INCOMING) {
-              console.log('[CallManager] Incoming call cancelled:', call.id);
+              _log('Incoming call cancelled by caller:', call.id);
               this._resetCallState('cancelled');
             }
           }
@@ -109,7 +144,6 @@ class CallManager {
     }
   }
 
-  // Clean up stale call documents from previous sessions
   async _cleanupStaleCalls() {
     if (!authManager.currentUser) return;
     try {
@@ -123,9 +157,8 @@ class CallManager {
       snap.forEach(async (d) => {
         const call = d.data();
         const createdAt = call.createdAt?.toDate ? call.createdAt.toDate().getTime() : 0;
-        // If call is older than 60 seconds, auto-reject it
         if (now - createdAt > 60000) {
-          console.log('[CallManager] Cleaning stale call:', d.id);
+          _log('Cleaning stale call:', d.id);
           try {
             await updateDoc(doc(db, 'calls', d.id), {
               status: 'no_answer',
@@ -135,13 +168,14 @@ class CallManager {
         }
       });
     } catch (e) {
-      console.log('[CallManager] Stale call cleanup error:', e.message);
+      _log('Stale call cleanup error:', e.message);
     }
   }
 
-  // ===== START OUTGOING CALL =====
+  // ===================================================================
+  //  START OUTGOING CALL (caller side)
+  // ===================================================================
   async startCall(targetUserId, targetName, type = 'voice') {
-    // Block only if actively in a call
     if (this.isInCall) {
       showToast('Already in a call', 'warning');
       return null;
@@ -154,25 +188,22 @@ class CallManager {
       this.isMuted = false;
       this.isCameraOff = false;
       this._connectedTimestamp = null;
+      this._answerSet = false;
+      this._remoteDescSet = false;
+      this._pendingCandidates = [];
 
+      _log('📱 Starting', type, 'call to', targetName, '(' + targetUserId + ')');
       if (this.onCallStateChange) this.onCallStateChange('dialing');
 
-      // Get local media stream
+      // 1. Get local media
       const constraints = {
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        },
-        video: type === 'video' ? {
-          facingMode: 'user',
-          width: { ideal: 640 },
-          height: { ideal: 480 }
-        } : false
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        video: type === 'video' ? { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } : false
       };
       this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+      _log('✅ Local stream acquired:', this.localStream.getTracks().map(t => t.kind).join(', '));
 
-      // Create call document in Firestore
+      // 2. Create call document in Firestore
       const callDoc = await addDoc(collection(db, 'calls'), {
         callerId: authManager.currentUser.uid,
         callerName: authManager.userData?.fullName || 'Unknown',
@@ -183,60 +214,65 @@ class CallManager {
         status: 'ringing',
         createdAt: serverTimestamp()
       });
-
       this.currentCallId = callDoc.id;
-      console.log('[CallManager] Call created:', callDoc.id);
+      _log('✅ Call document created:', callDoc.id);
 
-      // Create peer connection
+      // 3. Create peer connection
       const pc = this._createPeerConnection(targetUserId);
       this.peerConnections[targetUserId] = pc;
 
-      // Add local tracks to peer connection
+      // 4. Add local tracks
       this.localStream.getTracks().forEach(track => {
         pc.addTrack(track, this.localStream);
       });
+      _log('✅ Local tracks added to PeerConnection');
 
-      // Create SDP offer
+      // 5. Start listening for receiver's ICE candidates BEFORE creating offer
+      //    This ensures we capture candidates even if they arrive very early
+      this._listenForCandidates(targetUserId, 'answer-candidates');
+
+      // 6. Create and set local SDP offer
+      _log('📝 Creating SDP offer...');
       const offer = await pc.createOffer({
         offerToReceiveAudio: true,
         offerToReceiveVideo: type === 'video'
       });
       await pc.setLocalDescription(offer);
+      _log('✅ Local description (offer) set. SDP type:', offer.type);
 
-      // Store offer in Firestore
+      // 7. Store offer in Firestore
       await updateDoc(doc(db, 'calls', this.currentCallId), {
         offer: { type: offer.type, sdp: offer.sdp }
       });
+      _log('✅ Offer written to Firestore');
 
-      // Transition to ringing state
+      // 8. Transition to ringing
       this.callStatus = CALL_STATES.RINGING;
       if (this.onCallStateChange) this.onCallStateChange('ringing');
 
-      // Listen for answer from receiver
+      // 9. Listen for answer from receiver
       this._listenForAnswer(targetUserId);
 
-      // Listen for ICE candidates from receiver (they write to answer-candidates)
-      this._listenForCandidates(targetUserId, 'answer-candidates');
+      // 10. Send notification
+      createNotification(
+        type === 'video' ? 'video_call_incoming' : 'voice_call_incoming',
+        targetUserId,
+        { callId: this.currentCallId, callType: type, message: `${type === 'video' ? '📹' : '📞'} Incoming ${type} call` }
+      );
 
-      // Send notification to receiver
-      createNotification(type === 'video' ? 'video_call_incoming' : 'voice_call_incoming', targetUserId, {
-        callId: this.currentCallId,
-        callType: type,
-        message: `${type === 'video' ? '📹' : '📞'} Incoming ${type} call`
-      });
-
-      // Auto-end if not answered in 35 seconds
+      // 11. Auto-end if not answered in 35s
       if (this._ringTimeout) clearTimeout(this._ringTimeout);
       this._ringTimeout = setTimeout(() => {
         if (this.isInCall && this.callStatus !== CALL_STATES.CONNECTED) {
-          console.log('[CallManager] Call not answered, ending...');
+          _log('⏰ Call not answered after 35s, ending...');
           this.endCall('no_answer');
         }
       }, 35000);
 
       return this.currentCallId;
+
     } catch (e) {
-      console.error('[CallManager] Start call error:', e);
+      _err('Start call error:', e);
       this._resetCallState('error');
       if (e.name === 'NotAllowedError') {
         showToast('Microphone/camera permission denied. Please allow access.', 'error');
@@ -249,16 +285,19 @@ class CallManager {
     }
   }
 
-  // ===== ANSWER INCOMING CALL =====
+  // ===================================================================
+  //  ANSWER INCOMING CALL (receiver side)
+  // ===================================================================
   async answerCall(callId) {
-    // Only allow answering if we're idle or showing incoming UI
     if (this.callStatus === CALL_STATES.CONNECTED) {
       showToast('Already in a call', 'warning');
       return;
     }
 
     try {
-      // Get the call document
+      _log('📞 Answering call:', callId);
+
+      // 1. Get call document
       const callSnap = await getDoc(doc(db, 'calls', callId));
       if (!callSnap.exists()) {
         showToast('Call ended', 'info');
@@ -267,82 +306,100 @@ class CallManager {
       }
 
       const callData = callSnap.data();
+      _log('Call data:', { status: callData.status, type: callData.type, hasOffer: !!callData.offer });
 
-      // Verify call is still ringing
       if (callData.status !== 'ringing') {
         showToast('Call is no longer available', 'info');
         this._resetCallState('ended');
         return;
       }
 
-      // Verify there's an offer to answer
       if (!callData.offer) {
-        console.error('[CallManager] No offer in call document');
+        _err('No offer in call document!');
         showToast('Call data incomplete', 'error');
         this._resetCallState('error');
         return;
       }
 
+      // 2. Set internal state
       this._isCaller = false;
       this.currentCallId = callId;
       this.currentCallType = callData.type;
-      this.callStatus = CALL_STATES.RINGING;
+      this.callStatus = CALL_STATES.CONNECTING;
       this.isMuted = false;
       this.isCameraOff = false;
       this._connectedTimestamp = null;
+      this._answerSet = false;
+      this._remoteDescSet = false;
+      this._pendingCandidates = [];
 
-      // Get local media stream
+      if (this.onCallStateChange) this.onCallStateChange('connecting');
+
+      // 3. Get local media
       const constraints = {
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        },
-        video: callData.type === 'video' ? {
-          facingMode: 'user',
-          width: { ideal: 640 },
-          height: { ideal: 480 }
-        } : false
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        video: callData.type === 'video' ? { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } : false
       };
       this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+      _log('✅ Local stream acquired:', this.localStream.getTracks().map(t => t.kind).join(', '));
 
       const callerId = callData.callerId;
 
-      // Create peer connection
+      // 4. Create peer connection
       const pc = this._createPeerConnection(callerId);
       this.peerConnections[callerId] = pc;
 
-      // Add local tracks to peer connection
+      // 5. Add local tracks
       this.localStream.getTracks().forEach(track => {
         pc.addTrack(track, this.localStream);
       });
+      _log('✅ Local tracks added to PeerConnection');
 
-      // Set remote description (the offer from caller)
+      // 6. Start listening for caller's ICE candidates BEFORE setting remote description
+      //    This ensures we capture all candidates, even those written before we connected
+      this._listenForCandidates(callerId, 'offer-candidates');
+
+      // 7. Set remote description (the offer from caller)
+      _log('📝 Setting remote description (offer)...');
       await pc.setRemoteDescription(new RTCSessionDescription(callData.offer));
+      this._remoteDescSet = true;
+      _log('✅ Remote description (offer) set successfully');
 
-      // Create SDP answer
+      // 8. Flush any buffered ICE candidates that arrived before remote desc was set
+      this._flushPendingCandidates(callerId);
+
+      // 9. Create and set local SDP answer
+      _log('📝 Creating SDP answer...');
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
+      _log('✅ Local description (answer) set. SDP type:', answer.type);
 
-      // Store answer in Firestore — this triggers the caller's _listenForAnswer
+      // 10. Write answer + status to Firestore (triggers caller's _listenForAnswer)
       await updateDoc(doc(db, 'calls', callId), {
         answer: { type: answer.type, sdp: answer.sdp },
         status: 'connected'
       });
+      _log('✅ Answer + status written to Firestore');
 
-      // Listen for ICE candidates from caller (they write to offer-candidates)
-      this._listenForCandidates(callerId, 'offer-candidates');
-
-      // Listen for call status changes (end, etc.)
+      // 11. Listen for call status changes (end, etc.)
       this._listenForCallStatus();
 
-      console.log('[CallManager] Call answered, waiting for ICE connection...');
+      _log('🔄 Waiting for ICE connection...');
 
-      // Note: We do NOT set callStatus to CONNECTED here.
-      // The onconnectionstatechange handler will do that once ICE succeeds.
+      // 12. Connection check — if ICE doesn't connect in 15s after answer, warn
+      this._connectionCheckTimer = setTimeout(() => {
+        if (this.isInCall && this.callStatus !== CALL_STATES.CONNECTED) {
+          _warn('⚠️ ICE still not connected after 15s');
+          const pc = this.peerConnections[callerId];
+          if (pc) {
+            _log('ICE state:', pc.iceConnectionState, '| Connection state:', pc.connectionState);
+            _log('ICE gathering state:', pc.iceGatheringState);
+          }
+        }
+      }, 15000);
 
     } catch (e) {
-      console.error('[CallManager] Answer call error:', e);
+      _err('Answer call error:', e);
       this._resetCallState('error');
       if (e.name === 'NotAllowedError') {
         showToast('Microphone/camera permission denied.', 'error');
@@ -352,42 +409,51 @@ class CallManager {
     }
   }
 
-  // ===== REJECT INCOMING CALL =====
+  // ===================================================================
+  //  REJECT INCOMING CALL
+  // ===================================================================
   async rejectCall(callId) {
     try {
+      _log('❌ Rejecting call:', callId);
       await updateDoc(doc(db, 'calls', callId), {
         status: 'rejected',
         endedAt: serverTimestamp()
       });
       this._resetCallState('rejected');
     } catch (e) {
-      console.error('[CallManager] Reject call error:', e);
+      _err('Reject call error:', e);
     }
   }
 
-  // ===== END CURRENT CALL =====
+  // ===================================================================
+  //  END CURRENT CALL
+  // ===================================================================
   async endCall(reason = 'ended') {
-    console.log('[CallManager] Ending call, reason:', reason);
+    _log('📴 Ending call, reason:', reason);
     clearTimeout(this._ringTimeout);
+    clearTimeout(this._connectionCheckTimer);
 
     const callId = this.currentCallId;
     const wasCaller = this._isCaller;
     const callType = this.currentCallType;
-    const wasConnected = this.callStatus === CALL_STATES.CONNECTED;
 
-    // Close peer connections
-    Object.values(this.peerConnections).forEach(pc => {
+    // Close all peer connections
+    Object.entries(this.peerConnections).forEach(([uid, pc]) => {
+      _log('Closing PeerConnection for:', uid, '| state:', pc.connectionState);
       try { pc.close(); } catch (e) { /* ignore */ }
     });
     this.peerConnections = {};
 
     // Stop local stream
     if (this.localStream) {
-      this.localStream.getTracks().forEach(track => track.stop());
+      this.localStream.getTracks().forEach(track => {
+        track.stop();
+        _log('Stopped local track:', track.kind);
+      });
       this.localStream = null;
     }
 
-    // Stop remote streams
+    // Clear remote streams
     this.remoteStreams = {};
 
     // Clean up Firestore listeners
@@ -400,42 +466,42 @@ class CallManager {
       this._callDocListener = null;
     }
 
-    // Update call status in Firestore
+    // Update Firestore
     if (callId) {
       try {
         await updateDoc(doc(db, 'calls', callId), {
           status: reason,
           endedAt: serverTimestamp()
         });
-      } catch (e) { /* ignore — doc might already be deleted */ }
+        _log('✅ Call status updated to:', reason);
+      } catch (e) { /* doc might already be deleted */ }
 
-      // ===== MISSED CALL NOTIFICATION =====
-      // If call was never connected and caller is ending it (no_answer), send missed call notif
+      // Missed call notification
       if (reason === 'no_answer' && wasCaller) {
         try {
           const callSnap = await getDoc(doc(db, 'calls', callId));
           if (callSnap.exists()) {
             const callData = callSnap.data();
-            const targetId = callData.targetId;
-            const notifType = callType === 'video' ? 'missed_video_call' : 'missed_voice_call';
-            createNotification(notifType, targetId, {
-              callId: callId,
-              callType: callType,
-              message: `Missed ${callType} call`
-            });
+            createNotification(
+              callType === 'video' ? 'missed_video_call' : 'missed_voice_call',
+              callData.targetId,
+              { callId, callType, message: `Missed ${callType} call` }
+            );
           }
         } catch (e) {
-          console.error('[CallManager] Missed call notification error:', e);
+          _err('Missed call notification error:', e);
         }
       }
     }
 
-    // Reset all state
     this._resetCallState(reason);
   }
 
-  // Reset call state to idle
+  // ===================================================================
+  //  RESET STATE
+  // ===================================================================
   _resetCallState(reason) {
+    _log('🔄 Reset call state. Reason:', reason);
     this.currentCallId = null;
     this.currentCallType = null;
     this.callStatus = CALL_STATES.IDLE;
@@ -443,21 +509,28 @@ class CallManager {
     this.isMuted = false;
     this.isCameraOff = false;
     this._connectedTimestamp = null;
+    this._answerSet = false;
+    this._remoteDescSet = false;
+    this._pendingCandidates = [];
 
     clearTimeout(this._ringTimeout);
     this._ringTimeout = null;
+    clearTimeout(this._connectionCheckTimer);
+    this._connectionCheckTimer = null;
 
     if (this.onCallEnd) this.onCallEnd(reason);
   }
 
-  // ===== AUDIO/VIDEO CONTROLS =====
-
+  // ===================================================================
+  //  AUDIO/VIDEO CONTROLS
+  // ===================================================================
   toggleMute() {
     if (!this.localStream) return false;
     this.isMuted = !this.isMuted;
     this.localStream.getAudioTracks().forEach(track => {
       track.enabled = !this.isMuted;
     });
+    _log('🔇 Mute:', this.isMuted);
     return this.isMuted;
   }
 
@@ -467,183 +540,230 @@ class CallManager {
     this.localStream.getVideoTracks().forEach(track => {
       track.enabled = !this.isCameraOff;
     });
+    _log('📷 Camera off:', this.isCameraOff);
     return this.isCameraOff;
   }
 
-  // Switch between front and back camera
   async switchCamera() {
     if (!this.localStream || this.currentCallType !== 'video') return;
-
     const videoTrack = this.localStream.getVideoTracks()[0];
     if (!videoTrack) return;
 
-    // Get current facing mode
     const settings = videoTrack.getSettings();
     const currentFacing = settings.facingMode || 'user';
     const newFacing = currentFacing === 'user' ? 'environment' : 'user';
 
     try {
-      // Get new stream with opposite camera
       const newStream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: newFacing, width: { ideal: 640 }, height: { ideal: 480 } }
       });
       const newVideoTrack = newStream.getVideoTracks()[0];
 
-      // Replace track in peer connection
       Object.values(this.peerConnections).forEach(pc => {
         const sender = pc.getSenders().find(s => s.track?.kind === 'video');
-        if (sender) {
-          sender.replaceTrack(newVideoTrack);
-        }
+        if (sender) sender.replaceTrack(newVideoTrack);
       });
 
-      // Stop old track and replace in local stream
       videoTrack.stop();
       this.localStream.removeTrack(videoTrack);
       this.localStream.addTrack(newVideoTrack);
 
+      _log('📷 Camera switched to:', newFacing);
       return newFacing;
     } catch (e) {
-      console.error('[CallManager] Camera switch error:', e);
+      _err('Camera switch error:', e);
       showToast('Could not switch camera', 'error');
       return null;
     }
   }
 
-  // ===== PRIVATE: Create RTCPeerConnection =====
+  // ===================================================================
+  //  CREATE RTCPeerConnection
+  // ===================================================================
   _createPeerConnection(remoteUserId) {
+    _log('🔗 Creating RTCPeerConnection for:', remoteUserId);
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
-    // Handle ICE candidates — direction depends on role (caller vs receiver)
+    // --- ICE Candidate Generation ---
     pc.onicecandidate = (event) => {
       if (event.candidate && this.currentCallId) {
-        // CRITICAL FIX: Caller writes to offer-candidates, Receiver writes to answer-candidates
         const subcollection = this._isCaller ? 'offer-candidates' : 'answer-candidates';
+        _log('🧊 Generated ICE candidate →', subcollection, '| type:', event.candidate.type || 'unknown', '| protocol:', event.candidate.protocol || 'unknown');
 
         addDoc(collection(db, 'calls', this.currentCallId, subcollection), {
           ...event.candidate.toJSON()
-        }).catch(err => console.error('[CallManager] ICE candidate write error:', err));
+        }).catch(err => _err('ICE candidate write error:', err));
+      }
+      if (!event.candidate) {
+        _log('🧊 ICE gathering complete (null candidate)');
       }
     };
 
-    // Handle remote tracks (audio/video from the other side)
+    // --- ICE Gathering State ---
+    pc.onicegatheringstatechange = () => {
+      _log('🧊 ICE gathering state:', pc.iceGatheringState);
+    };
+
+    // --- Remote Track Received ---
     pc.ontrack = (event) => {
-      console.log('[CallManager] Remote track received:', event.track.kind);
+      _log('🎵 Remote track received:', event.track.kind, '| readyState:', event.track.readyState);
       if (event.streams && event.streams[0]) {
         this.remoteStreams[remoteUserId] = event.streams[0];
+        _log('🎵 Remote stream tracks:', event.streams[0].getTracks().map(t => `${t.kind}(${t.readyState})`).join(', '));
         if (this.onRemoteStream) this.onRemoteStream(remoteUserId, event.streams[0]);
       }
     };
 
-    // Handle ICE connection state changes
+    // --- ICE Connection State ---
     pc.oniceconnectionstatechange = () => {
       const state = pc.iceConnectionState;
-      console.log('[CallManager] ICE connection state:', state);
+      _log('🔌 ICE connection state:', state);
 
       if (state === 'connected' || state === 'completed') {
-        // ICE has successfully connected — this is the REAL connection
-        if (this.callStatus !== CALL_STATES.CONNECTED) {
-          console.log('[CallManager] ICE connected — call is truly connected now');
-          this.callStatus = CALL_STATES.CONNECTED;
-          this._connectedTimestamp = Date.now();
-          if (this.onCallStateChange) this.onCallStateChange('connected');
-          if (this._ringTimeout) {
-            clearTimeout(this._ringTimeout);
-            this._ringTimeout = null;
-          }
-        }
+        this._handleConnected();
       } else if (state === 'disconnected') {
-        console.log('[CallManager] ICE disconnected — will wait for recovery...');
-        // Don't end immediately — ICE can recover
+        _warn('⚠️ ICE disconnected — waiting 5s for recovery...');
         setTimeout(() => {
           if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+            _err('ICE did not recover, ending call');
             this.endCall('disconnected');
           }
         }, 5000);
       } else if (state === 'failed') {
-        console.log('[CallManager] ICE failed — ending call');
+        _err('❌ ICE connection failed');
         this.endCall('failed');
       }
     };
 
-    // Handle peer connection state changes (overall state)
+    // --- Overall Connection State (backup) ---
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState;
-      console.log('[CallManager] Peer connection state:', state);
+      _log('🔗 PeerConnection state:', state);
 
       if (state === 'connected') {
-        // Backup: also trigger connected from here
-        if (this.callStatus !== CALL_STATES.CONNECTED) {
-          this.callStatus = CALL_STATES.CONNECTED;
-          this._connectedTimestamp = Date.now();
-          if (this.onCallStateChange) this.onCallStateChange('connected');
-          if (this._ringTimeout) {
-            clearTimeout(this._ringTimeout);
-            this._ringTimeout = null;
-          }
-        }
+        this._handleConnected();
       } else if (state === 'failed' || state === 'closed') {
         if (this.isInCall) {
+          _err('PeerConnection', state, '— ending call');
           this.endCall('disconnected');
         }
       }
     };
 
+    // --- Signaling State ---
+    pc.onsignalingstatechange = () => {
+      _log('📡 Signaling state:', pc.signalingState);
+    };
+
     return pc;
   }
 
-  // ===== PRIVATE: Listen for SDP answer (caller-side) =====
+  // ===================================================================
+  //  HANDLE CONNECTED STATE (called from ICE/connection state handlers)
+  // ===================================================================
+  _handleConnected() {
+    if (this.callStatus === CALL_STATES.CONNECTED) return; // Already connected
+
+    _log('✅✅✅ CALL CONNECTED! Media should be flowing.');
+    this.callStatus = CALL_STATES.CONNECTED;
+    this._connectedTimestamp = Date.now();
+
+    // Clear ring/connection timeouts
+    if (this._ringTimeout) {
+      clearTimeout(this._ringTimeout);
+      this._ringTimeout = null;
+    }
+    if (this._connectionCheckTimer) {
+      clearTimeout(this._connectionCheckTimer);
+      this._connectionCheckTimer = null;
+    }
+
+    // Log stream status for debugging
+    if (this.localStream) {
+      _log('📤 Local tracks:', this.localStream.getTracks().map(t => `${t.kind}(enabled=${t.enabled}, readyState=${t.readyState})`).join(', '));
+    }
+    Object.entries(this.remoteStreams).forEach(([uid, stream]) => {
+      _log('📥 Remote tracks from', uid + ':', stream.getTracks().map(t => `${t.kind}(enabled=${t.enabled}, readyState=${t.readyState})`).join(', '));
+    });
+
+    // Notify UI
+    if (this.onCallStateChange) this.onCallStateChange('connected');
+  }
+
+  // ===================================================================
+  //  LISTEN FOR SDP ANSWER (caller side)
+  // ===================================================================
   _listenForAnswer(remoteUserId) {
     if (!this.currentCallId) return;
+    _log('👂 Listening for answer on call:', this.currentCallId);
 
-    const unsub = onSnapshot(doc(db, 'calls', this.currentCallId), (snap) => {
+    const unsub = onSnapshot(doc(db, 'calls', this.currentCallId), async (snap) => {
       const data = snap.data();
       if (!data) return;
 
-      // When receiver sends their answer — set it as remote description
-      if (data.answer && this.peerConnections[remoteUserId]) {
+      // Process the answer SDP
+      if (data.answer && !this._answerSet) {
+        this._answerSet = true; // Guard: prevent double-processing
         const pc = this.peerConnections[remoteUserId];
-        if (!pc.currentRemoteDescription) {
-          console.log('[CallManager] Received answer, setting remote description...');
-          pc.setRemoteDescription(new RTCSessionDescription(data.answer))
-            .then(() => {
-              console.log('[CallManager] Remote description set successfully');
-              // NOTE: We do NOT set callStatus to CONNECTED here.
-              // Wait for ICE to actually connect (oniceconnectionstatechange).
-            })
-            .catch(err => console.error('[CallManager] setRemoteDescription error:', err));
 
-          // Clear ring timeout — call was answered (even if ICE hasn't connected yet)
-          if (this._ringTimeout) {
-            clearTimeout(this._ringTimeout);
-            this._ringTimeout = null;
+        if (pc && pc.signalingState === 'have-local-offer') {
+          _log('📨 Received answer from receiver, setting remote description...');
+          try {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+            this._remoteDescSet = true;
+            _log('✅ Remote description (answer) set successfully');
+
+            // Flush any buffered ICE candidates
+            this._flushPendingCandidates(remoteUserId);
+
+            // Clear ring timeout — call was answered
+            if (this._ringTimeout) {
+              clearTimeout(this._ringTimeout);
+              this._ringTimeout = null;
+            }
+
+            // Move to connecting state
+            if (this.callStatus !== CALL_STATES.CONNECTED) {
+              this.callStatus = CALL_STATES.CONNECTING;
+              if (this.onCallStateChange) this.onCallStateChange('connecting');
+            }
+          } catch (err) {
+            _err('setRemoteDescription error:', err);
+            this._answerSet = false; // Allow retry
           }
+        } else {
+          _warn('Cannot set answer — PC missing or wrong signaling state:', pc?.signalingState);
+          this._answerSet = false;
         }
       }
 
       // Handle remote-side ending the call
-      if (data.status === 'rejected' || data.status === 'ended' || data.status === 'no_answer' || data.status === 'cancelled') {
-        if (this.isInCall) {
+      if (['rejected', 'ended', 'no_answer', 'cancelled'].includes(data.status)) {
+        if (this.isInCall && data.status !== 'connected') {
+          _log('Call ended remotely, status:', data.status);
           this.endCall(data.status);
+          unsub();
         }
-        unsub();
       }
     });
 
     this._candidateListeners['call-doc'] = unsub;
   }
 
-  // ===== PRIVATE: Listen for call status changes (receiver-side) =====
+  // ===================================================================
+  //  LISTEN FOR CALL STATUS (receiver side)
+  // ===================================================================
   _listenForCallStatus() {
     if (!this.currentCallId) return;
+    _log('👂 Listening for call status changes...');
 
     const unsub = onSnapshot(doc(db, 'calls', this.currentCallId), (snap) => {
       const data = snap.data();
       if (!data) return;
 
-      // Handle caller ending the call
-      if (data.status === 'ended' || data.status === 'cancelled') {
+      if (['ended', 'cancelled'].includes(data.status)) {
         if (this.isInCall) {
+          _log('Call ended by caller, status:', data.status);
           this.endCall(data.status);
         }
         unsub();
@@ -653,11 +773,12 @@ class CallManager {
     this._callDocListener = unsub;
   }
 
-  // ===== PRIVATE: Listen for ICE candidates =====
+  // ===================================================================
+  //  LISTEN FOR ICE CANDIDATES (both sides)
+  // ===================================================================
   _listenForCandidates(remoteUserId, subcollection) {
     if (!this.currentCallId) return;
-
-    console.log('[CallManager] Listening for ICE candidates in:', subcollection);
+    _log('👂 Listening for ICE candidates in:', subcollection);
 
     const unsub = onSnapshot(
       collection(db, 'calls', this.currentCallId, subcollection),
@@ -667,24 +788,48 @@ class CallManager {
             const candidateData = change.doc.data();
             const candidate = new RTCIceCandidate(candidateData);
             const pc = this.peerConnections[remoteUserId];
-            if (pc && pc.remoteDescription) {
-              pc.addIceCandidate(candidate)
-                .then(() => console.log('[CallManager] Added ICE candidate from', subcollection))
-                .catch(err => console.warn('[CallManager] ICE candidate add error:', err));
-            } else if (pc) {
-              // Queue candidate — remote description not set yet
-              // This happens when candidates arrive before the answer
-              console.log('[CallManager] Queuing ICE candidate (no remote desc yet)');
-              // RTCPeerConnection will queue it internally if setRemoteDescription hasn't been called
-              pc.addIceCandidate(candidate).catch(() => {
-                // Expected if remote desc isn't set — will be re-tried by WebRTC internally
-              });
+
+            if (!pc) {
+              _warn('No PeerConnection for', remoteUserId, '— buffering candidate');
+              this._pendingCandidates.push(candidate);
+              return;
             }
+
+            if (!this._remoteDescSet) {
+              // Remote description not set yet — buffer the candidate
+              _log('🧊 Buffering ICE candidate (remote desc not set yet) from', subcollection);
+              this._pendingCandidates.push(candidate);
+              return;
+            }
+
+            // Remote description is set — add candidate directly
+            pc.addIceCandidate(candidate)
+              .then(() => _log('🧊 ✅ Added ICE candidate from', subcollection, '| type:', candidateData.type || 'unknown'))
+              .catch(err => _warn('🧊 ❌ ICE candidate add error:', err.message));
           }
         });
       }
     );
     this._candidateListeners[subcollection] = unsub;
+  }
+
+  // ===================================================================
+  //  FLUSH BUFFERED ICE CANDIDATES
+  // ===================================================================
+  _flushPendingCandidates(remoteUserId) {
+    const pc = this.peerConnections[remoteUserId];
+    if (!pc || this._pendingCandidates.length === 0) return;
+
+    _log('🧊 Flushing', this._pendingCandidates.length, 'buffered ICE candidates...');
+
+    const candidates = [...this._pendingCandidates];
+    this._pendingCandidates = [];
+
+    candidates.forEach((candidate, i) => {
+      pc.addIceCandidate(candidate)
+        .then(() => _log(`🧊 ✅ Flushed candidate ${i + 1}/${candidates.length}`))
+        .catch(err => _warn(`🧊 ❌ Flush candidate ${i + 1} error:`, err.message));
+    });
   }
 }
 

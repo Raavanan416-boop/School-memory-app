@@ -776,27 +776,14 @@ async function handleAcceptCall(call) {
     callOverlay._autoDismissTimer = null;
   }
 
-  // Show "Connecting..." state while answering
-  callOverlay.classList.remove('hidden');
-  callOverlay.innerHTML = `
-    <div class="call-screen">
-      <div class="call-info">
-        <div class="call-avatar-ring">
-          <div class="avatar avatar-placeholder text-2xl w-20 h-20">${(call.callerName || '?')[0]}</div>
-        </div>
-        <h3 class="text-lg font-bold text-white mt-4">${sanitizeHTML(call.callerName || 'Unknown')}</h3>
-        <p class="text-sm text-white/70 mt-1">Connecting...</p>
-      </div>
-    </div>
-  `;
-
   try {
-    // Answer the call first (establishes WebRTC connection)
-    await callManager.answerCall(call.id);
-
-    // Then transition to the full call UI (with controls)
+    // CRITICAL FIX: Import the UI module and render the full call UI BEFORE
+    // calling answerCall(). This ensures onCallStateChange/onRemoteStream
+    // callbacks are wired before ICE events fire.
     const { showAnsweredCallUI } = await import('./pages/chat.js');
-    showAnsweredCallUI(call.callerId, call.callerName, call.type);
+
+    // showAnsweredCallUI wires callbacks + renders controls + then we call answerCall
+    showAnsweredCallUI(call.callerId || call.id, call.callerName, call.type, call.id);
   } catch (e) {
     console.error('Accept call error:', e);
     callOverlay.classList.add('hidden');

@@ -6763,86 +6763,44 @@ body > * {
   z-index: 1;
 }
 
-/* --- Splash Screen Logo --- */
-.splash-logo-container {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+/* --- Magical Welcome Screen Animations --- */
+
+/* Camera zoom on campus */
+.welcome-campus-zoom {
+  transform: scale(1.15) !important;
 }
 
-.splash-logo-glow {
+/* Left gate opening */
+.welcome-gate-left-open {
+  transform: rotateY(-95deg) !important;
+}
+
+/* Right gate opening */
+.welcome-gate-right-open {
+  transform: rotateY(95deg) !important;
+}
+
+/* Floating particles */
+.magical-particle {
   position: absolute;
-  width: 260px;
-  height: 260px;
+  background: radial-gradient(circle, #FFFDE7 0%, #FFD700 40%, transparent 80%);
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(212, 175, 55, 0.35) 0%, rgba(212, 175, 55, 0.12) 40%, transparent 70%);
-  animation: splashGoldenGlow 2.5s ease-in-out infinite alternate;
-  z-index: 0;
-  filter: blur(20px);
-}
-
-@keyframes splashGoldenGlow {
-  0% { transform: scale(0.9); opacity: 0.5; }
-  100% { transform: scale(1.15); opacity: 1; }
-}
-
-.splash-logo-img {
-  width: 180px;
-  height: 180px;
-  object-fit: contain;
-  border-radius: 50%;
-  position: relative;
-  z-index: 1;
-  filter: drop-shadow(0 8px 24px rgba(30, 58, 95, 0.25)) drop-shadow(0 2px 8px rgba(212, 175, 55, 0.3));
-  animation: splashLogoZoom 2.8s ease-out forwards;
-}
-
-@keyframes splashLogoZoom {
-  0% { transform: scale(0.6); opacity: 0; }
-  30% { transform: scale(1.08); opacity: 1; }
-  50% { transform: scale(0.97); }
-  70% { transform: scale(1.03); }
-  100% { transform: scale(1); opacity: 1; }
-}
-
-.splash-title-text {
-  font-family: 'Playfair Display', serif;
-  font-size: 28px;
-  font-weight: 700;
-  color: #1e3a5f;
-  letter-spacing: 3px;
-  text-transform: uppercase;
-  margin-top: 20px;
+  animation: floatParticle 4s infinite ease-in-out alternate;
   opacity: 0;
-  animation: splashTextFade 1s ease-out 0.8s forwards;
+  pointer-events: none;
 }
 
-.splash-year-text {
-  font-family: 'Plus Jakarta Sans', sans-serif;
-  font-size: 16px;
-  font-weight: 600;
-  color: #b8860b;
-  letter-spacing: 4px;
-  margin-top: 6px;
-  opacity: 0;
-  animation: splashTextFade 1s ease-out 1.2s forwards;
+@keyframes floatParticle {
+  0% { transform: translateY(0) scale(0.8); opacity: 0; }
+  20% { opacity: 0.8; }
+  80% { opacity: 0.8; }
+  100% { transform: translateY(-60px) scale(1.2); opacity: 0; }
 }
 
-.splash-tagline {
-  font-family: 'Caveat', cursive;
-  font-size: 20px;
-  color: #7998c4;
-  margin-top: 12px;
-  opacity: 0;
-  animation: splashTextFade 1s ease-out 1.6s forwards;
-  font-style: italic;
-}
-
-@keyframes splashTextFade {
-  0% { opacity: 0; transform: translateY(10px); }
-  100% { opacity: 1; transform: translateY(0); }
+/* Fade in for logo and text */
+.welcome-content-show {
+  opacity: 1 !important;
+  transform: scale(1) translateY(-20px) !important;
 }
 
 /* --- Login Page Logo --- */

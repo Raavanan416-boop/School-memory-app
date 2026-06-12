@@ -25,17 +25,48 @@
   <link rel="stylesheet" href="/css/styles.css"/>
 </head>
 <body class="bg-cream-100 text-navy-800 font-sans min-h-screen overflow-x-hidden">
-  <!-- Splash Screen -->
-  <div id="splash-screen" class="fixed inset-0 z-[100] bg-cream-200 flex flex-col items-center justify-center transition-opacity duration-700">
-    <div class="splash-logo-container">
-      <div class="splash-logo-glow"></div>
-      <img src="/assets/class-memories-logo.png" alt="Class Memories" class="splash-logo-img" />
+  <!-- App-wide Background Watermark -->
+  <img src="/assets/class-memories-logo.png" alt="" class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-72 object-contain opacity-[0.04] pointer-events-none z-0 mix-blend-multiply" />
+
+  <!-- Animated Welcome Screen -->
+  <div id="splash-screen" class="fixed inset-0 z-[100] bg-black overflow-hidden flex items-center justify-center transition-opacity duration-1000">
+    
+    <!-- Campus Background (starts normal, scales up slowly) -->
+    <div class="welcome-campus-bg absolute inset-0 bg-[url('/assets/campus-bg.png')] bg-cover bg-center transition-transform duration-[5000ms] ease-out scale-100"></div>
+
+    <!-- The Magical Gates -->
+    <div class="welcome-gates-container absolute inset-0 flex" style="perspective: 1500px;">
+      <!-- Left Gate -->
+      <div id="welcome-gate-left" class="w-1/2 h-full bg-[#0a1526] border-r-[3px] border-[#D4AF37] relative flex items-center justify-end transform-gpu origin-left transition-transform duration-[3000ms] ease-in-out shadow-[15px_0_40px_rgba(0,0,0,0.9)]">
+        <!-- Details -->
+        <div class="absolute inset-4 border border-[#D4AF37]/30 rounded-sm"></div>
+        <div class="absolute inset-8 border-y border-l border-[#D4AF37]/20 flex items-center justify-center">
+          <div class="w-16 h-64 border border-[#D4AF37]/40 rounded-t-full rounded-b-full"></div>
+        </div>
+        <!-- Handle -->
+        <div class="w-2.5 h-20 bg-gradient-to-b from-[#B8860B] via-[#FFDF00] to-[#DAA520] rounded-l-lg mr-1.5 border-y border-l border-[#FFD700]/60 shadow-[0_0_10px_rgba(218,165,32,0.5)]"></div>
+      </div>
+      
+      <!-- Right Gate -->
+      <div id="welcome-gate-right" class="w-1/2 h-full bg-[#0a1526] border-l-[3px] border-[#D4AF37] relative flex items-center justify-start transform-gpu origin-right transition-transform duration-[3000ms] ease-in-out shadow-[-15px_0_40px_rgba(0,0,0,0.9)]">
+        <!-- Details -->
+        <div class="absolute inset-4 border border-[#D4AF37]/30 rounded-sm"></div>
+        <div class="absolute inset-8 border-y border-r border-[#D4AF37]/20 flex items-center justify-center">
+          <div class="w-16 h-64 border border-[#D4AF37]/40 rounded-t-full rounded-b-full"></div>
+        </div>
+        <!-- Handle -->
+        <div class="w-2.5 h-20 bg-gradient-to-b from-[#B8860B] via-[#FFDF00] to-[#DAA520] rounded-r-lg ml-1.5 border-y border-r border-[#FFD700]/60 shadow-[0_0_10px_rgba(218,165,32,0.5)]"></div>
+      </div>
     </div>
-    <h2 class="splash-title-text">Class Memories</h2>
-    <p class="splash-year-text">2024 & 2025</p>
-    <p class="splash-tagline">"Relive the Golden Days"</p>
-    <div class="mt-8 w-40 h-1.5 bg-cream-300 rounded-full overflow-hidden" style="opacity:0; animation: splashTextFade 1s ease-out 2s forwards;">
-      <div id="splash-progress" class="h-full bg-navy-500 rounded-full transition-all duration-300" style="width:0%"></div>
+
+    <!-- Particles Layer -->
+    <div id="welcome-particles" class="absolute inset-0 pointer-events-none z-[102] overflow-hidden"></div>
+    
+    <!-- Welcome Content (Fades in) -->
+    <div id="welcome-content" class="welcome-content z-[103] flex flex-col items-center opacity-0 transform scale-95 transition-all duration-1000 ease-out mt-12">
+      <img src="/assets/class-memories-logo.png" alt="Class Memories" class="w-36 h-36 drop-shadow-[0_0_30px_rgba(255,255,255,0.4)] mb-6"/>
+      <h2 class="font-playfair text-4xl font-bold text-white tracking-wider mb-3 drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)] text-center px-4">Class Memories</h2>
+      <p class="font-caveat text-3xl text-[#FFDF00] drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] text-center px-4 font-semibold">"Every Memory Begins Here"</p>
     </div>
   </div>
 

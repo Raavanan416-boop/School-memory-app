@@ -198,67 +198,151 @@ const AUTO_LOGIN_PASSWORD = 'school123';
 // ===== SPLASH =====
 function animateSplash() {
   return new Promise(resolve => {
-    const bar = $('#splash-progress');
-    let w = 0;
-    const iv = setInterval(() => {
-      w += Math.random() * 18 + 6;
-      if (w >= 100) { w = 100; clearInterval(iv); setTimeout(resolve, 300); }
-      if (bar) bar.style.width = w + '%';
-    }, 180);
+    const leftGate = $('#welcome-gate-left');
+    const rightGate = $('#welcome-gate-right');
+    const campusBg = $('.welcome-campus-bg');
+    const content = $('#welcome-content');
+    
+    // Create particles
+    const particlesContainer = $('#welcome-particles');
+    if (particlesContainer && particlesContainer.children.length === 0) {
+      for (let i = 0; i < 50; i++) {
+        const p = document.createElement('div');
+        p.className = 'magical-particle';
+        const size = Math.random() * 8 + 4;
+        p.style.width = size + 'px';
+        p.style.height = size + 'px';
+        p.style.left = Math.random() * 100 + '%';
+        p.style.top = Math.random() * 100 + '%';
+        p.style.animationDelay = (Math.random() * 2) + 's';
+        p.style.animationDuration = (Math.random() * 3 + 3) + 's';
+        particlesContainer.appendChild(p);
+      }
+    }
+
+    // Sequence timeline
+    setTimeout(() => {
+      // Open gates
+      if (leftGate) leftGate.classList.add('welcome-gate-left-open');
+      if (rightGate) rightGate.classList.add('welcome-gate-right-open');
+    }, 500);
+
+    setTimeout(() => {
+      // Zoom campus
+      if (campusBg) campusBg.classList.add('welcome-campus-zoom');
+    }, 1500);
+
+    setTimeout(() => {
+      // Show content
+      if (content) content.classList.add('welcome-content-show');
+    }, 2500);
+
+    // Resolve after full animation ends (4 seconds total)
+    setTimeout(resolve, 4000);
   });
 }
 function hideSplash() {
   const el = $('#splash-screen');
-  if (el) { el.style.opacity = '0'; setTimeout(() => el.remove(), 700); }
+  if (el) { 
+    el.style.opacity = '0'; 
+    setTimeout(() => {
+      el.classList.add('hidden');
+    }, 1000); 
+  }
 }
+
+// ===== LOGOUT ANIMATION =====
+window.animateLogout = function() {
+  return new Promise(resolve => {
+    // Hide the app container with a blur
+    const appContainer = $('#app');
+    if (appContainer) {
+      appContainer.style.transition = 'all 1s ease';
+      appContainer.style.opacity = '0';
+      appContainer.style.filter = 'blur(10px)';
+    }
+
+    const splash = $('#splash-screen');
+    const leftGate = $('#welcome-gate-left');
+    const rightGate = $('#welcome-gate-right');
+    const campusBg = $('.welcome-campus-bg');
+    const content = $('#welcome-content');
+
+    if (!splash) return resolve();
+
+    // Reset splash text to emotional message
+    if (content) {
+      content.innerHTML = `
+        <p class="font-caveat text-4xl text-[#FFDF00] drop-shadow-[0_4px_12px_rgba(0,0,0,0.9)] text-center px-6 leading-relaxed font-semibold">
+          "School may end,<br/>memories never will."
+        </p>
+      `;
+    }
+
+    // Show splash with gates already open
+    splash.classList.remove('hidden');
+    splash.style.opacity = '1';
+
+    // Wait a brief moment for the user to see the open gates and message
+    setTimeout(() => {
+      // Close the gates
+      if (leftGate) leftGate.classList.remove('welcome-gate-left-open');
+      if (rightGate) rightGate.classList.remove('welcome-gate-right-open');
+      if (campusBg) campusBg.classList.remove('welcome-campus-zoom');
+      if (content) content.classList.remove('welcome-content-show');
+      
+      // Wait for gates to fully close, then resolve
+      setTimeout(() => {
+        resolve();
+      }, 3000);
+    }, 2000);
+  });
+};
 
 // ===== LOGIN PAGE =====
 function showLogin() {
   const lp = $('#login-page');
-  lp.className = 'fixed inset-0 z-[90] bg-gradient-to-br from-cream-100 to-amber-50/80 overflow-y-auto';
+  lp.className = 'fixed inset-0 z-[90] bg-gradient-to-br from-cream-100 to-amber-50/80 overflow-y-auto transition-opacity duration-1000';
   lp.innerHTML = `
-    <div class="flex flex-col items-center justify-center min-h-screen px-6 py-10 relative">
-      <!-- Nostalgic floating particles / bokeh (CSS simulated) -->
-      <div class="absolute inset-0 overflow-hidden pointer-events-none opacity-40">
-         <div class="absolute w-64 h-64 bg-amber-200/30 rounded-full blur-3xl -top-10 -left-10 animate-pulse" style="animation-duration: 8s"></div>
-         <div class="absolute w-72 h-72 bg-orange-200/20 rounded-full blur-3xl bottom-10 right-10 animate-pulse" style="animation-duration: 10s"></div>
-      </div>
-
+    <div class="flex flex-col items-center justify-center min-h-screen px-6 py-10 relative z-10">
+      
       <!-- School Logo -->
-      <div class="login-logo-wrap relative z-10">
-        <div class="login-logo-glow"></div>
-        <img src="/assets/class-memories-logo.png" alt="Class Memories" class="login-logo-img" />
+      <div class="relative flex flex-col items-center mb-10 animate-fadeIn" style="animation-delay: 0.1s; opacity: 0;">
+        <div class="absolute w-40 h-40 bg-gradient-radial from-[#D4AF37]/20 to-transparent rounded-full blur-xl animate-pulse"></div>
+        <div class="w-32 h-32 bg-white rounded-full flex items-center justify-center overflow-hidden shadow-md border-2 border-[#D4AF37]/30 relative z-10 drop-shadow-[0_8px_20px_rgba(30,58,95,0.15)]">
+          <img src="/assets/class-memories-logo.png" alt="Class Memories" class="w-full h-full object-cover" />
+        </div>
       </div>
 
       <!-- Welcome text -->
-      <h1 class="text-3xl font-display font-extrabold text-navy-900 mb-2 animate-fadeIn relative z-10 drop-shadow-sm tracking-tight">Welcome Back</h1>
-      <p class="text-sm text-navy-600/80 mb-10 animate-fadeIn relative z-10 font-medium tracking-wide">Relive the golden days.</p>
+      <h1 class="text-4xl font-playfair font-bold text-[#1E3A5F] mb-2 animate-fadeIn relative z-10 drop-shadow-sm tracking-wide" style="animation-delay: 0.2s; opacity: 0;">Welcome Back</h1>
+      <p class="text-lg text-[#D4AF37] mb-10 animate-fadeIn relative z-10 font-caveat tracking-wide drop-shadow-sm" style="animation-delay: 0.3s; opacity: 0;">Relive the golden days.</p>
 
-      <!-- Login Form -->
-      <div class="w-full max-w-sm animate-slideUp relative z-10 bg-white/70 backdrop-blur-md p-8 rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white" style="animation-delay:0.2s;opacity:0">
+      <!-- Clean Glassmorphism Login Form -->
+      <div class="w-full max-w-sm animate-slideUp relative z-10 bg-white/70 backdrop-blur-xl p-8 rounded-[2.5rem] shadow-[0_20px_40px_rgba(30,58,95,0.08)] border border-white/50" style="animation-delay:0.4s;opacity:0">
         <form id="login-form" class="space-y-6" autocomplete="off">
           <!-- Username -->
           <div class="group">
-            <label class="text-[11px] font-bold text-navy-500 mb-2 block uppercase tracking-wider transition-colors group-focus-within:text-navy-900">Email Address</label>
+            <label class="text-[10px] font-bold text-[#1E3A5F]/70 mb-2 block uppercase tracking-widest transition-colors group-focus-within:text-[#1E3A5F]">Email Address</label>
             <div class="relative flex items-center transition-transform duration-300 group-focus-within:-translate-y-1">
-              <svg class="absolute left-4 w-5 h-5 text-navy-400 group-focus-within:text-navy-700 transition-colors z-10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0"/></svg>
-              <input type="email" id="login-email" placeholder="yourname@school.com" class="w-full bg-white/60 border border-cream-200 rounded-2xl py-3.5 pl-12 pr-4 text-sm text-navy-900 font-medium focus:outline-none focus:ring-2 focus:ring-navy-200 focus:border-transparent focus:bg-white transition-all shadow-sm" required/>
+              <svg class="absolute left-4 w-5 h-5 text-gray-400 group-focus-within:text-[#D4AF37] transition-colors z-10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0"/></svg>
+              <input type="email" id="login-email" placeholder="yourname@school.com" class="w-full bg-white/60 border border-gray-200 rounded-2xl py-3.5 pl-12 pr-4 text-sm text-[#1E3A5F] placeholder-gray-400 font-medium focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 focus:border-transparent focus:bg-white transition-all shadow-sm" required/>
             </div>
           </div>
 
           <!-- Password -->
           <div class="group">
-            <label class="text-[11px] font-bold text-navy-500 mb-2 block uppercase tracking-wider transition-colors group-focus-within:text-navy-900">Password</label>
+            <label class="text-[10px] font-bold text-[#1E3A5F]/70 mb-2 block uppercase tracking-widest transition-colors group-focus-within:text-[#1E3A5F]">Password</label>
             <div class="relative flex items-center transition-transform duration-300 group-focus-within:-translate-y-1">
-              <svg class="absolute left-4 w-5 h-5 text-navy-400 group-focus-within:text-navy-700 transition-colors z-10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>
-              <input type="password" id="login-password" placeholder="DOB(32062007)" class="w-full bg-white/60 border border-cream-200 rounded-2xl py-3.5 pl-12 pr-12 text-sm text-navy-900 font-medium focus:outline-none focus:ring-2 focus:ring-navy-200 focus:border-transparent focus:bg-white transition-all shadow-sm" required/>
+              <svg class="absolute left-4 w-5 h-5 text-gray-400 group-focus-within:text-[#D4AF37] transition-colors z-10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>
+              <input type="password" id="login-password" placeholder="DOB(32062007)" class="w-full bg-white/60 border border-gray-200 rounded-2xl py-3.5 pl-12 pr-12 text-sm text-[#1E3A5F] placeholder-gray-400 font-medium focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/50 focus:border-transparent focus:bg-white transition-all shadow-sm" required/>
               <button type="button" id="toggle-password-btn" class="absolute right-2 w-10 h-10 flex items-center justify-center rounded-full hover:bg-cream-100 transition-all focus:outline-none z-10" aria-label="Toggle password visibility">
                 <span class="text-xl leading-none transform transition-transform duration-300 inline-block" id="diary-icon">📘</span>
               </button>
             </div>
           </div>
 
-          <button type="submit" id="login-submit" class="w-full bg-navy-800 text-white font-bold py-4 rounded-2xl shadow-[0_4px_14px_0_rgb(30,58,95,0.39)] hover:shadow-[0_6px_20px_rgba(30,58,95,0.23)] hover:-translate-y-0.5 transition-all duration-300 mt-4 tracking-wide relative overflow-hidden group">
+          <button type="submit" id="login-submit" class="w-full bg-gradient-to-r from-[#1E3A5F] to-[#2A4D7C] text-white font-bold py-4 rounded-2xl shadow-[0_4px_15px_rgba(30,58,95,0.3)] hover:shadow-[0_8px_25px_rgba(30,58,95,0.4)] hover:-translate-y-1 transition-all duration-300 mt-6 tracking-wider relative overflow-hidden group">
             <span class="relative z-10">ENTER THE MEMORY LANE</span>
             <div class="absolute inset-0 h-full w-full bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700"></div>
           </button>
@@ -266,7 +350,7 @@ function showLogin() {
           <div id="login-error" class="hidden text-center text-red-500 text-xs mt-4 p-3 bg-red-50/80 backdrop-blur-sm rounded-xl border border-red-100 font-medium shadow-inner"></div>
         </form>
 
-        <p class="text-center text-navy-400 text-[11px] font-medium mt-8 flex items-center justify-center gap-2">
+        <p class="text-center text-[#1E3A5F]/50 text-[10px] font-medium mt-8 flex items-center justify-center gap-2 uppercase tracking-wider">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
           Restricted to authorized alumni
         </p>

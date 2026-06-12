@@ -880,8 +880,18 @@ function showLogoutConfirmation() {
   overlay.querySelector('.logout-cancel-btn').addEventListener('click', close);
   overlay.querySelector('.logout-confirm-btn').addEventListener('click', async () => {
     close();
+    if (window.animateLogout) {
+      await window.animateLogout();
+    }
     await authManager.logout();
     showToast('See you soon! 👋', 'info');
+    
+    // Remove the blur from app container in case user logs in again
+    const appContainer = document.getElementById('app');
+    if (appContainer) {
+      appContainer.style.filter = '';
+      appContainer.style.opacity = '1';
+    }
   });
 }
 

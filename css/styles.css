@@ -971,7 +971,26 @@ img { -webkit-user-drag: none; user-drag: none; }
 }
 @media (min-width: 768px) {
   #page-container { max-width: 600px; margin: 0 auto; }
-  #bottom-nav > div { max-width: 600px; }
+  
+  /* Desktop layout centered with proper max-width */
+  #bottom-nav {
+    max-width: 600px;
+    margin: 0 auto;
+    left: 0;
+    right: 0;
+    border-radius: 24px 24px 0 0;
+    border-left: 1px solid rgba(0,0,0,0.05);
+    border-right: 1px solid rgba(0,0,0,0.05);
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.03);
+  }
+  
+  /* Evenly spaced icons without clipping badges */
+  #bottom-nav > div {
+    max-width: 100% !important;
+    justify-content: space-evenly !important;
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
 }
 
 /* ===== INNER BACK BUTTON ===== */

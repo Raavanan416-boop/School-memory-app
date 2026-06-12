@@ -7,7 +7,7 @@ import { authManager } from '../auth.js';
 import { presenceManager } from '../presence.js';
 import { callManager } from '../calls.js';
 import { router } from '../router.js';
-import { createNotification } from '../notifications.js';
+import { createNotification, notificationManager } from '../notifications.js';
 
 let unsubChats = null;
 let unsubMessages = null;
@@ -983,6 +983,27 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false, fro
     updateDoc(doc(db, 'chats', chatId), {
       [`unreadCount.${authManager.currentUser.uid}`]: 0
     }).catch(() => {});
+    
+    // Also mark global chat push notifications as read
+    if (otherUid) {
+      const q = query(
+        collection(db, 'notifications'), 
+        where('userId', '==', authManager.currentUser.uid), 
+        where('fromId', '==', otherUid),
+        where('type', '==', 'chat_message'),
+        where('read', '==', false)
+      );
+      getDocs(q).then(snap => {
+        snap.forEach(d => {
+          updateDoc(doc(db, 'notifications', d.id), { read: true }).catch(() => {});
+          // Decrement global badge immediately
+          if (notificationManager.unreadCount > 0) {
+            notificationManager.unreadCount--;
+            notificationManager._updateBadge();
+          }
+        });
+      }).catch(err => console.warn('Failed to clear chat notifs:', err));
+    }
   }
 
   // Send message

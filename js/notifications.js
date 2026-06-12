@@ -797,7 +797,7 @@ class NotificationManager {
     // For calls, use callId as the dedup key
     const dedupKey = data.deduplicationKey ||
       data.callId ||
-      `${type}_${authManager.currentUser.uid}_${targetUserId}_${data.postId || data.pollId || data.capsuleId || ''}`;
+      `${type}_${authManager.currentUser.uid}_${targetUserId}_${data.postId || data.pollId || data.capsuleId || (type === 'chat_message' ? Date.now() : '')}`;
 
     // Check for existing duplicate within last 60 seconds (skip for calls — they need to be fast)
     const isCallType = type.includes('call');

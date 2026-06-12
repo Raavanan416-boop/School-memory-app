@@ -124,6 +124,15 @@ class CallManager {
             }
 
             _log('📞 Incoming call:', call.id, 'from:', call.callerName, 'type:', call.type);
+            
+            // Check if we came from a deep link to accept this call (from a background push notification)
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('acceptCallId') === call.id) {
+              call.autoAccept = true;
+              // Clean up URL so we don't auto-accept again on refresh
+              window.history.replaceState({}, '', window.location.pathname + '?page=chat');
+            }
+
             if (this.onIncomingCall) this.onIncomingCall(call);
           }
         }

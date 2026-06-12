@@ -18,7 +18,7 @@
     { "src": "/icons/icon-384.png", "sizes": "384x384", "type": "image/png", "purpose": "any" },
     { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
   ],
-  "gcm_sender_id": "103953800507",
+  "gcm_sender_id": "310068830991",
   "shortcuts": [
     {
       "name": "New Memory",

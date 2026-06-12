@@ -1,7 +1,7 @@
 // Chat page — WhatsApp-style with typing, presence, images, voice msgs, call buttons
 import { db, storage, collection, doc, query, orderBy, onSnapshot, addDoc, getDocs, updateDoc,
   serverTimestamp, where, setDoc, arrayUnion, limit, deleteDoc, getDoc, increment, deleteField,
-  storageRef, uploadBytes, getDownloadURL } from '../firebase-config.js';
+  storageRef, uploadBytes, uploadBytesResumable, getDownloadURL } from '../firebase-config.js';
 import { showToast, timeAgo, sanitizeHTML, debounce } from '../utils.js';
 import { authManager } from '../auth.js';
 import { presenceManager } from '../presence.js';
@@ -32,7 +32,7 @@ export function destroyChat() {
 // Store container reference for reliable DOM access
 let chatContainer = null;
 
-export async function renderChat(container) {
+export async function renderChat(container, data) {
   router.registerDestroy('chat', destroyChat);
   destroyChat();
   chatContainer = container;
@@ -53,10 +53,10 @@ export async function renderChat(container) {
         <h3 class="section-title mb-3">Group Chat</h3>
         <div id="group-chats" class="space-y-1">
           <div class="chat-item" id="core37-chat">
-            <div class="avatar avatar-placeholder text-sm">37</div>
+            <div class="avatar avatar-placeholder text-sm" id="core37-avatar">37</div>
             <div class="flex-1 min-w-0">
               <div class="flex items-center justify-between">
-                <p class="font-semibold text-sm text-navy-800">Core 37 <span class="text-[10px] text-gray-400 font-normal">(Group)</span></p>
+                <p class="font-semibold text-sm text-navy-800"><span id="core37-name">Core 37</span> <span class="text-[10px] text-gray-400 font-normal">(Group)</span></p>
               </div>
               <p class="text-xs text-gray-400 truncate" id="core37-last-msg">Tap to open group chat</p>
             </div>
@@ -94,6 +94,9 @@ export async function renderChat(container) {
           </button>
           <input type="text" id="msg-input" class="chat-msg-input" placeholder="Type a message..." autocomplete="off"/>
           <input type="file" id="chat-file-input" accept="image/*" class="hidden"/>
+          <button id="voice-record-btn" class="voice-record-btn" title="Hold to record">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"/></svg>
+          </button>
           <button id="send-msg-btn" class="chat-send-btn">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>
           </button>
@@ -114,6 +117,11 @@ export async function renderChat(container) {
   });
 
   loadChatList(container);
+
+  // Auto-open DM when navigating from profile (data.userId provided)
+  if (data?.userId) {
+    await startOrOpenDM(data.userId, data.userName || 'Friend', data.fromProfile);
+  }
 }
 
 async function showNewChatModal() {
@@ -178,7 +186,7 @@ async function showNewChatModal() {
   }
 }
 
-async function startOrOpenDM(targetUid, targetName) {
+async function startOrOpenDM(targetUid, targetName, fromProfile = false) {
   if (!authManager.currentUser) return;
   const myUid = authManager.currentUser.uid;
 
@@ -197,7 +205,7 @@ async function startOrOpenDM(targetUid, targetName) {
 
     if (existingChatId) {
       const chatSection = document.querySelector('#chat-section');
-      openChat(chatSection?.parentElement || document.querySelector('#page-container'), existingChatId, targetName, targetUid);
+      openChat(chatSection?.parentElement || document.querySelector('#page-container'), existingChatId, targetName, targetUid, false, fromProfile);
     } else {
       // Create new chat
       const chatRef = await addDoc(collection(db, 'chats'), {
@@ -211,7 +219,7 @@ async function startOrOpenDM(targetUid, targetName) {
         unreadCount: { [myUid]: 0, [targetUid]: 0 }
       });
       const chatSection = document.querySelector('#chat-section');
-      openChat(chatSection?.parentElement || document.querySelector('#page-container'), chatRef.id, targetName, targetUid);
+      openChat(chatSection?.parentElement || document.querySelector('#page-container'), chatRef.id, targetName, targetUid, false, fromProfile);
     }
   } catch (e) {
     console.error(e);
@@ -255,7 +263,26 @@ function loadChatList(container) {
       const chats = [];
       snap.forEach(d => {
         const chat = { id: d.id, ...d.data() };
-        if (chat.type === 'group' && chat.id === 'core37') return; // Skip group
+        if (chat.type === 'group' && chat.id === 'core37') {
+          const nameEl = container.querySelector('#core37-name');
+          const avatarEl = container.querySelector('#core37-avatar');
+          const msgEl = container.querySelector('#core37-last-msg');
+          
+          if (nameEl) nameEl.textContent = chat.name || 'Core 37';
+          if (msgEl && chat.lastMessage) msgEl.textContent = chat.lastMessage;
+          if (avatarEl) {
+            if (chat.profilePic) {
+              avatarEl.innerHTML = `<img src="${chat.profilePic}" class="w-full h-full object-cover rounded-full" alt="Group"/>`;
+              avatarEl.classList.remove('avatar-placeholder', 'text-sm');
+              avatarEl.classList.add('p-0');
+            } else {
+              avatarEl.innerHTML = '37';
+              avatarEl.classList.add('avatar-placeholder', 'text-sm');
+              avatarEl.classList.remove('p-0');
+            }
+          }
+          return; // Skip group
+        }
         chats.push(chat);
       });
 
@@ -327,6 +354,8 @@ function loadChatList(container) {
 
 async function openGroupChat(container) {
   const groupId = 'core37';
+  let groupName = 'Core 37';
+  let groupPic = null;
   // Ensure group chat doc exists
   try {
     const snap = await getDoc(doc(db, 'chats', groupId));
@@ -341,8 +370,10 @@ async function openGroupChat(container) {
         typing: {}
       });
     } else {
-      // Add current user to participants if not already
       const data = snap.data();
+      if (data.name) groupName = data.name;
+      if (data.profilePic) groupPic = data.profilePic;
+      // Add current user to participants if not already
       if (!data.participants?.includes(authManager.currentUser.uid)) {
         await updateDoc(doc(db, 'chats', groupId), {
           participants: arrayUnion(authManager.currentUser.uid)
@@ -351,10 +382,10 @@ async function openGroupChat(container) {
     }
   } catch (e) { }
 
-  openChat(container, groupId, 'Core 37', null, true);
+  openChat(container, groupId, groupName, null, true, false, groupPic);
 }
 
-function openChat(container, chatId, name, otherUid = null, isGroup = false) {
+function openChat(container, chatId, name, otherUid = null, isGroup = false, fromProfile = false, groupPic = null) {
   currentChatId = chatId;
   chatViewOpen = true;
   
@@ -377,11 +408,11 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
       <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/></svg>
     </button>
     ${isGroup
-      ? `<div class="avatar avatar-placeholder text-sm">37</div>`
+      ? (groupPic ? `<div class="avatar p-0"><img src="${groupPic}" class="w-full h-full object-cover rounded-full"/></div>` : `<div class="avatar avatar-placeholder text-sm">37</div>`)
       : `<div class="avatar avatar-placeholder text-sm">${name[0]}</div>`}
-    <div class="flex-1">
-      <p class="font-semibold text-sm text-navy-800">${sanitizeHTML(name)}</p>
-      <p class="text-[10px] text-gray-400" id="chat-status">${isGroup ? 'Group Chat' : 'Checking status...'}</p>
+    <div class="flex-1 ${isGroup ? 'cursor-pointer hover:bg-black/5 rounded-lg px-2 -mx-2 transition-colors' : ''}" id="chat-header-info">
+      <p class="font-semibold text-sm text-navy-800 group-name-header">${sanitizeHTML(name)}</p>
+      <p class="text-[10px] text-gray-400" id="chat-status">${isGroup ? 'Tap here for group info' : 'Checking status...'}</p>
     </div>
     ${!isGroup ? `
       <button id="voice-call-btn" class="p-2 text-navy-500 hover:text-navy-700 transition-colors" title="Voice Call">
@@ -403,6 +434,10 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
     presenceManager.setTyping(chatId, false);
     // Restore bottom nav
     if (bottomNav) bottomNav.style.display = '';
+    
+    if (fromProfile) {
+      router.navigateBack();
+    }
   };
   header.querySelector('#back-chat-btn').addEventListener('click', closeChat);
 
@@ -414,6 +449,142 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
     if (otherUid) startCallUI(otherUid, name, 'video');
   });
 
+  // Group Info Modal (Photo & Name change)
+  if (isGroup) {
+    const headerInfo = header.querySelector('.flex-1');
+    headerInfo.classList.add('cursor-pointer');
+    headerInfo.title = "Tap to edit group settings";
+    
+    headerInfo.addEventListener('click', async () => {
+      try {
+        const snap = await getDoc(doc(db, 'chats', chatId));
+        const data = snap.data();
+        if (!data) return;
+
+        const currentName = data.groupName || name;
+        const currentPhoto = data.groupPhoto || '';
+        
+        const m = document.createElement('div');
+        m.className = 'modal active';
+        m.innerHTML = `
+          <div class="modal-content animate-pop text-center relative" style="max-width:320px;">
+            <button class="absolute top-2 right-2 p-2 text-gray-400 hover:text-gray-600 modal-close-btn">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+            <h3 class="font-bold text-lg text-navy-800 mb-4">Group Settings</h3>
+            
+            <div class="flex justify-center mb-4 relative">
+              ${currentPhoto 
+                ? `<img src="${currentPhoto}" class="group-info-photo" id="group-photo-preview" alt="Group Photo">`
+                : `<div class="group-info-photo-placeholder" id="group-photo-preview">37</div>`
+              }
+              <input type="file" id="group-photo-input" accept="image/*" class="hidden">
+            </div>
+            
+            <input type="text" id="group-name-input" class="group-name-input mb-6" value="${currentName}" placeholder="Group Name">
+            
+            <button id="save-group-btn" class="w-full py-3 bg-navy-600 text-white rounded-xl font-semibold shadow-md hover:bg-navy-700 transition-colors">
+              Save Changes
+            </button>
+          </div>
+        `;
+        document.body.appendChild(m);
+
+        m.querySelector('.modal-close-btn').addEventListener('click', () => m.remove());
+        m.addEventListener('click', (e) => { if (e.target === m) m.remove(); });
+
+        const photoInput = m.querySelector('#group-photo-input');
+        const photoPreview = m.querySelector('#group-photo-preview');
+        let newPhotoFile = null;
+
+        photoPreview.addEventListener('click', () => photoInput.click());
+        photoInput.addEventListener('change', (e) => {
+          const f = e.target.files?.[0];
+          if (f) {
+            newPhotoFile = f;
+            const reader = new FileReader();
+            reader.onload = (re) => {
+              const p = m.querySelector('.flex.justify-center');
+              p.innerHTML = `<img src="${re.target.result}" class="group-info-photo" id="group-photo-preview" alt="Group Photo"><input type="file" id="group-photo-input" accept="image/*" class="hidden">`;
+              p.querySelector('#group-photo-preview').addEventListener('click', () => p.querySelector('#group-photo-input').click());
+            };
+            reader.readAsDataURL(f);
+          }
+        });
+
+        m.querySelector('#save-group-btn').addEventListener('click', async () => {
+          const newName = m.querySelector('#group-name-input').value.trim();
+          if (!newName) {
+            showToast('Group name cannot be empty', 'warning');
+            return;
+          }
+
+          const btn = m.querySelector('#save-group-btn');
+          btn.textContent = 'Saving...';
+          btn.disabled = true;
+
+          try {
+            const updates = {};
+            let photoUrl = currentPhoto;
+
+            if (newPhotoFile) {
+              const path = `group-photos/${chatId}/${Date.now()}_${newPhotoFile.name}`;
+              const sRef = storageRef(storage, path);
+              await uploadBytes(sRef, newPhotoFile);
+              photoUrl = await getDownloadURL(sRef);
+              updates.groupPhoto = photoUrl;
+            }
+
+            if (newName !== currentName) {
+              updates.groupName = newName;
+            }
+
+            if (Object.keys(updates).length > 0) {
+              await updateDoc(doc(db, 'chats', chatId), updates);
+              
+              const sysText = [];
+              if (updates.groupName) sysText.push(`changed the group name to "${newName}"`);
+              if (updates.groupPhoto) sysText.push('changed the group photo');
+              
+              if (sysText.length > 0) {
+                const userName = authManager.userData?.fullName || 'Someone';
+                await addDoc(collection(db, 'chats', chatId, 'messages'), {
+                  type: 'system',
+                  text: `${userName} ${sysText.join(' and ')}`,
+                  createdAt: serverTimestamp()
+                });
+              }
+
+              // Update header locally instantly
+              header.querySelector('.font-semibold').textContent = newName;
+              if (photoUrl) {
+                const av = header.querySelector('.avatar');
+                if (av) {
+                  av.outerHTML = `<img src="${photoUrl}" class="w-8 h-8 rounded-full object-cover">`;
+                } else {
+                  const img = header.querySelector('img');
+                  if (img) img.src = photoUrl;
+                }
+              }
+
+              showToast('Group updated', 'success');
+            }
+            m.remove();
+          } catch (err) {
+            console.error(err);
+            showToast('Failed to update group', 'error');
+            btn.textContent = 'Save Changes';
+            btn.disabled = false;
+          }
+        });
+
+      } catch (err) {
+        console.error(err);
+        showToast('Could not load group info', 'error');
+      }
+    });
+  }
+
   // Watch presence for DMs
   if (otherUid) {
     presenceManager.watchUser(otherUid, (status) => {
@@ -422,6 +593,16 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
         el.textContent = status.online ? 'Online' : (status.lastSeen ? `Last seen ${timeAgo(status.lastSeen)}` : 'Offline');
         el.className = `text-[10px] ${status.online ? 'text-green-500' : 'text-gray-400'}`;
       }
+    });
+  }
+
+  // Group settings
+  if (isGroup) {
+    header.querySelector('#chat-header-info')?.addEventListener('click', () => {
+      showGroupSettingsModal(chatId, name, groupPic);
+    });
+    header.querySelector('.avatar')?.addEventListener('click', () => {
+      showGroupSettingsModal(chatId, name, groupPic);
     });
   }
 
@@ -487,6 +668,42 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
             msgContainer.appendChild(dateEl);
           }
 
+        // ===== SYSTEM MESSAGES (call history + group events) =====
+        if (msg.type === 'system' || msg.type === 'system_call') {
+          const sysEl = document.createElement('div');
+          sysEl.className = 'msg-system msg-animate';
+          let icon = 'ℹ️';
+          let text = msg.text || '';
+          const timeStr = msgTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+          if (msg.type === 'system_call') {
+            const dur = msg.duration || 0;
+            const durStr = dur > 0 ? ` • ${Math.floor(dur / 60)}m ${dur % 60}s` : '';
+            if (msg.callStatus === 'ended') {
+              icon = msg.callType === 'video' ? '📹' : '📞';
+              text = `${msg.callType === 'video' ? 'Video' : 'Voice'} Call${durStr}`;
+            } else if (msg.callStatus === 'no_answer' || msg.callStatus === 'missed') {
+              icon = '❌';
+              text = `Missed ${msg.callType === 'video' ? 'Video' : 'Voice'} Call`;
+            } else if (msg.callStatus === 'rejected') {
+              icon = '❌';
+              text = 'Rejected Call';
+            } else {
+              icon = msg.callType === 'video' ? '📹' : '📞';
+              text = `${msg.callType === 'video' ? 'Video' : 'Voice'} Call`;
+            }
+          }
+
+          sysEl.innerHTML = `
+            <div class="msg-system-bubble">
+              <span class="system-icon">${icon}</span>
+              <span class="system-text">${sanitizeHTML(text)}</span>
+              <span class="system-time">${timeStr}</span>
+            </div>`;
+          msgContainer.appendChild(sysEl);
+          return; // Skip normal message rendering
+        }
+
         // Consecutive same-sender: tighter spacing
         const sameSender = msg.senderId === lastSender;
         lastSender = msg.senderId;
@@ -549,6 +766,25 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
 
         const msgEl = document.createElement('div');
         msgEl.className = `flex ${isMine ? 'justify-end' : 'justify-start'} ${sameSender ? 'mt-0.5' : 'mt-2'} msg-animate msg-wrapper`;
+        
+        // Voice Message rendering
+        let contentHTML = '';
+        if (msg.audioUrl) {
+          const duration = msg.duration || 0;
+          const durStr = duration ? `${Math.floor(duration/60)}:${(duration%60).toString().padStart(2,'0')}` : '';
+          contentHTML = `
+            <div class="voice-msg-player" data-audio="${msg.audioUrl}">
+              <button class="voice-play-btn">▶️</button>
+              <div class="voice-waveform">
+                ${Array(15).fill(0).map(() => `<div class="voice-waveform-bar" style="height: ${20 + Math.random() * 80}%"></div>`).join('')}
+              </div>
+              <span class="voice-duration">${durStr}</span>
+            </div>
+          `;
+        } else if (msg.text) {
+          contentHTML = `<p class="text-sm leading-relaxed msg-text-content">${sanitizeHTML(msg.text)}</p>`;
+        }
+
         msgEl.innerHTML = `
           <div class="relative msg-bubble-wrap">
             <div class="${isMine ? 'msg-sent' : 'msg-received'} ${msg.imageUrl ? 'p-1' : ''}" data-msgid="${msgId}">
@@ -556,7 +792,7 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
               ${forwardedHTML}
               ${replyHTML}
               ${msg.imageUrl ? `<img src="${msg.imageUrl}" class="rounded-xl max-w-full max-h-60 mb-1" alt="Shared image" loading="lazy"/>` : ''}
-              ${msg.text ? `<p class="text-sm leading-relaxed msg-text-content">${sanitizeHTML(msg.text)}</p>` : ''}
+              ${contentHTML}
               <div class="flex items-center justify-end gap-1 mt-0.5">
                 <p class="text-[9px] ${isMine ? 'text-white/50' : 'text-gray-400'}">${msgTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
                 ${tickHTML}
@@ -569,6 +805,51 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
             </button>
           </div>
         `;
+
+        // Voice message player logic
+        if (msg.audioUrl) {
+          const btn = msgEl.querySelector('.voice-play-btn');
+          const bars = msgEl.querySelectorAll('.voice-waveform-bar');
+          let audio = null;
+          let isPlaying = false;
+          let interval = null;
+
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (!audio) {
+              audio = new Audio(msg.audioUrl);
+              audio.onended = () => {
+                isPlaying = false;
+                btn.textContent = '▶️';
+                clearInterval(interval);
+                bars.forEach(b => b.classList.remove('voice-bar-played'));
+              };
+            }
+            if (isPlaying) {
+              audio.pause();
+              btn.textContent = '▶️';
+              clearInterval(interval);
+            } else {
+              // Pause all other audios on the page
+              document.querySelectorAll('audio').forEach(a => a.pause());
+              document.querySelectorAll('.voice-play-btn').forEach(b => b.textContent = '▶️');
+              
+              audio.play().catch(console.error);
+              btn.textContent = '⏸️';
+              
+              interval = setInterval(() => {
+                if(!audio.duration) return;
+                const progress = audio.currentTime / audio.duration;
+                const activeBars = Math.floor(progress * bars.length);
+                bars.forEach((b, i) => {
+                  if (i < activeBars) b.classList.add('voice-bar-played');
+                  else b.classList.remove('voice-bar-played');
+                });
+              }, 100);
+            }
+            isPlaying = !isPlaying;
+          });
+        }
 
         // Bind context menu for this message
         const bubble = msgEl.querySelector('.msg-sent, .msg-received');
@@ -740,15 +1021,166 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false) {
     }, 300);
   });
 
-  // Typing indicator on input
-  msgInput?.addEventListener('input', debounce(() => {
+  // Voice Recording and Send buttons toggle
+  const voiceBtn = chatView.querySelector('#voice-record-btn');
+  
+  const toggleInputButtons = () => {
+    const text = msgInput.value.trim();
+    if (text.length > 0) {
+      voiceBtn.style.display = 'none';
+      sendBtn.style.display = 'flex';
+    } else {
+      voiceBtn.style.display = 'flex';
+      sendBtn.style.display = 'none';
+    }
+  };
+  msgInput?.addEventListener('input', () => {
+    toggleInputButtons();
     presenceManager.setTyping(chatId, msgInput.value.trim().length > 0);
-  }, 500));
+  });
+  toggleInputButtons(); // Initial state
+
+  // Voice recording logic
+  let mediaRecorder = null;
+  let audioChunks = [];
+  let recordTimer = null;
+  let recordSeconds = 0;
+  
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorder = new MediaRecorder(stream);
+      audioChunks = [];
+      
+      mediaRecorder.ondataavailable = e => {
+        if (e.data.size > 0) audioChunks.push(e.data);
+      };
+      
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+        stream.getTracks().forEach(t => t.stop());
+        
+        // Hide recording UI
+        const recBar = chatView.querySelector('.voice-recording-bar');
+        if (recBar) recBar.remove();
+        msgInput.style.display = '';
+        attachBtn.style.display = '';
+        voiceBtn.classList.remove('recording');
+        clearInterval(recordTimer);
+        
+        if (recordSeconds < 1) return; // Too short
+
+        try {
+          showToast('Sending voice message...', 'info');
+          const path = `chat-audio/${currentChatId}/${Date.now()}.webm`;
+          const sRef = storageRef(storage, path);
+          await uploadBytes(sRef, audioBlob);
+          const audioUrl = await getDownloadURL(sRef);
+
+          const msgData = {
+            audioUrl,
+            duration: recordSeconds,
+            senderId: authManager.currentUser.uid,
+            senderName: authManager.userData?.fullName || 'Unknown',
+            createdAt: serverTimestamp(),
+            status: 'sent'
+          };
+          
+          await addDoc(collection(db, 'chats', currentChatId, 'messages'), msgData);
+          await updateDoc(doc(db, 'chats', currentChatId), {
+            lastMessage: '🎤 Voice message',
+            lastMessageAt: serverTimestamp()
+          });
+
+          if (otherUid) {
+            await updateDoc(doc(db, 'chats', currentChatId), {
+              [`unreadCount.${otherUid}`]: increment(1)
+            });
+            createNotification('chat_message', otherUid, { chatId: currentChatId, message: '🎤 Voice message', messagePreview: '🎤 Voice message' });
+          }
+        } catch (err) {
+          console.error(err);
+          showToast('Failed to send voice message', 'error');
+        }
+      };
+      
+      mediaRecorder.start();
+      
+      // UI Update
+      msgInput.style.display = 'none';
+      attachBtn.style.display = 'none';
+      voiceBtn.classList.add('recording');
+      
+      const recBar = document.createElement('div');
+      recBar.className = 'voice-recording-bar';
+      recBar.innerHTML = `
+        <div class="voice-recording-dot"></div>
+        <span class="voice-recording-time">0:00</span>
+        <span class="voice-recording-cancel">Slide to cancel ⟨</span>
+      `;
+      msgInput.parentNode.insertBefore(recBar, msgInput);
+      
+      recordSeconds = 0;
+      recordTimer = setInterval(() => {
+        recordSeconds++;
+        const mins = Math.floor(recordSeconds / 60);
+        const secs = (recordSeconds % 60).toString().padStart(2, '0');
+        recBar.querySelector('.voice-recording-time').textContent = `${mins}:${secs}`;
+      }, 1000);
+      
+    } catch (e) {
+      console.error('Microphone error:', e);
+      showToast('Microphone access denied', 'error');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+      mediaRecorder.stop();
+    }
+  };
+
+  // Touch and mouse events for recording
+  let isRecording = false;
+  let startX = 0;
+
+  voiceBtn?.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    isRecording = true;
+    startX = e.touches[0].clientX;
+    startRecording();
+  }, { passive: false });
+
+  voiceBtn?.addEventListener('touchmove', (e) => {
+    if (!isRecording) return;
+    const currentX = e.touches[0].clientX;
+    if (startX - currentX > 50) { // Cancel on slide left
+      isRecording = false;
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        recordSeconds = 0; // Force cancel
+        mediaRecorder.stop();
+      }
+    }
+  });
+
+  voiceBtn?.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    if (isRecording) {
+      isRecording = false;
+      stopRecording();
+    }
+  });
+  
+  // Mouse fallback
+  voiceBtn?.addEventListener('mousedown', () => { isRecording = true; startRecording(); });
+  voiceBtn?.addEventListener('mouseup', () => { if (isRecording) { isRecording = false; stopRecording(); }});
+  voiceBtn?.addEventListener('mouseleave', () => { if (isRecording) { isRecording = false; recordSeconds = 0; stopRecording(); }});
 
   const sendMessage = async () => {
     const text = msgInput.value.trim();
     if (!text || !currentChatId || !authManager.currentUser) return;
     msgInput.value = '';
+    toggleInputButtons();
     presenceManager.setTyping(chatId, false);
 
     // Build message data
@@ -842,6 +1274,7 @@ async function markMessagesAsRead(chatId, otherUid) {
   } catch (e) { /* non-critical */ }
 }
 
+// ===== CALLER CALL UI (renders UI + wires callbacks + calls startCall) =====
 export function startCallUI(targetUid, targetName, type) {
   const callOverlay = document.getElementById('call-overlay');
   if (!callOverlay) return;
@@ -849,64 +1282,96 @@ export function startCallUI(targetUid, targetName, type) {
   let callTimer = null;
   let callSeconds = 0;
 
-  // Render UI FIRST so callbacks have DOM elements to update
   callOverlay.classList.remove('hidden');
   callOverlay.innerHTML = `
     <div class="call-screen ${type === 'video' ? 'call-video' : 'call-voice'}">
       <div id="remote-video-container" class="call-remote-video"></div>
       <div id="local-video-container" class="call-local-video"></div>
+      
+      <div class="call-network-indicator" style="display:none;">
+        <div class="call-quality-dot call-quality-good"></div>
+        <span class="call-quality-label">Good</span>
+      </div>
+
       <div class="call-info">
         <div class="call-avatar-ring">
-          <div class="avatar avatar-placeholder text-2xl w-20 h-20">${targetName[0]}</div>
+          <div class="avatar avatar-placeholder text-2xl w-full h-full">${(targetName || '?')[0]}</div>
         </div>
-        <h3 class="text-lg font-bold text-white mt-4">${sanitizeHTML(targetName)}</h3>
-        <p class="text-sm text-white/70 mt-1" id="call-status-text">Calling...</p>
+        <h3 class="text-xl font-bold text-white mt-6">${sanitizeHTML(targetName || 'Unknown')}</h3>
+        <p class="text-sm text-white/70 mt-2 font-medium" id="call-status-text">Calling...</p>
+        <p class="call-timer mt-1" style="display:none;" id="call-timer-text">00:00</p>
       </div>
+
       <div class="call-controls">
         <button class="call-control-btn" id="toggle-mute">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"/></svg>
-          <span class="text-[10px] mt-1">Mute</span>
+          <span>Mute</span>
         </button>
         ${type === 'video' ? `
           <button class="call-control-btn" id="toggle-camera">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9.75a2.25 2.25 0 002.25-2.25V7.5a2.25 2.25 0 00-2.25-2.25H4.5A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z"/></svg>
-            <span class="text-[10px] mt-1">Camera</span>
+            <span>Camera</span>
           </button>
           <button class="call-control-btn" id="switch-camera">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182M2.985 19.644V14.652"/></svg>
-            <span class="text-[10px] mt-1">Flip</span>
+            <span>Flip</span>
           </button>
         ` : `
           <button class="call-control-btn" id="toggle-speaker">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z"/></svg>
-            <span class="text-[10px] mt-1">Speaker</span>
+            <span>Speaker</span>
           </button>
         `}
         <button class="call-control-btn call-end-btn" id="end-call-btn">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15.536a5 5 0 010-7.072m-2.828 9.9a9 9 0 010-12.728"/></svg>
-          <span class="text-[10px] mt-1">End</span>
+          <span>End</span>
         </button>
       </div>
     </div>
   `;
 
-  // Wire callbacks BEFORE starting the call
+  // Fetch target user's actual profile photo
+  getDoc(doc(db, 'users', targetUid)).then(snap => {
+    if (snap.exists() && snap.data().profilePic) {
+      const ring = callOverlay.querySelector('.call-avatar-ring');
+      if (ring) {
+        ring.innerHTML = `<img src="${snap.data().profilePic}" alt="Avatar"/>`;
+      }
+    }
+  }).catch(() => {});
+
+  // Wire callbacks
   callManager.onCallStateChange = (state) => {
     const statusEl = callOverlay.querySelector('#call-status-text');
+    const timerEl = callOverlay.querySelector('#call-timer-text');
+    const netInd = callOverlay.querySelector('.call-network-indicator');
+    
     if (statusEl) {
-      if (state === 'dialing') statusEl.textContent = 'Calling...';
-      else if (state === 'ringing') statusEl.textContent = 'Ringing...';
-      else if (state === 'connecting') statusEl.textContent = 'Connecting...';
+      if (state === 'connecting') {
+        if (callTimer) {
+          statusEl.textContent = 'Reconnecting...';
+          statusEl.className = 'call-reconnecting mt-2 font-medium';
+        } else {
+          statusEl.textContent = 'Connecting...';
+        }
+      }
       else if (state === 'connected') {
-        statusEl.textContent = 'Connected · 00:00';
-        if (callTimer) clearInterval(callTimer);
-        callSeconds = 0;
-        callTimer = setInterval(() => {
-          callSeconds++;
-          const mins = Math.floor(callSeconds / 60).toString().padStart(2, '0');
-          const secs = (callSeconds % 60).toString().padStart(2, '0');
-          statusEl.textContent = `Connected · ${mins}:${secs}`;
-        }, 1000);
+        statusEl.textContent = 'Connected';
+        statusEl.className = 'text-sm text-green-400 mt-2 font-medium';
+        
+        if (netInd) netInd.style.display = 'flex';
+        if (timerEl) timerEl.style.display = 'block';
+
+        if (!callTimer) {
+          callSeconds = 0;
+          timerEl.textContent = '00:00';
+          callTimer = setInterval(() => {
+            callSeconds++;
+            const mins = Math.floor(callSeconds / 60).toString().padStart(2, '0');
+            const secs = (callSeconds % 60).toString().padStart(2, '0');
+            timerEl.textContent = `${mins}:${secs}`;
+          }, 1000);
+        }
       }
     }
     if (state === 'connected' && type === 'video') {
@@ -955,62 +1420,97 @@ export function showAnsweredCallUI(callerUid, callerName, type, callId) {
   let callTimer = null;
   let callSeconds = 0;
 
-  // 1. Render the full call UI FIRST (so callbacks have DOM elements)
+  // 1. Render the full call UI FIRST
   callOverlay.classList.remove('hidden');
   callOverlay.innerHTML = `
     <div class="call-screen ${type === 'video' ? 'call-video' : 'call-voice'}">
       <div id="remote-video-container" class="call-remote-video"></div>
       <div id="local-video-container" class="call-local-video"></div>
+      
+      <div class="call-network-indicator" style="display:none;">
+        <div class="call-quality-dot call-quality-good"></div>
+        <span class="call-quality-label">Good</span>
+      </div>
+
       <div class="call-info">
         <div class="call-avatar-ring">
-          <div class="avatar avatar-placeholder text-2xl w-20 h-20">${(callerName || '?')[0]}</div>
+          <div class="avatar avatar-placeholder text-2xl w-full h-full">${(callerName || '?')[0]}</div>
         </div>
-        <h3 class="text-lg font-bold text-white mt-4">${sanitizeHTML(callerName || 'Unknown')}</h3>
-        <p class="text-sm text-white/70 mt-1" id="call-status-text">Connecting...</p>
+        <h3 class="text-xl font-bold text-white mt-6">${sanitizeHTML(callerName || 'Unknown')}</h3>
+        <p class="text-sm text-white/70 mt-2 font-medium" id="call-status-text">Connecting...</p>
+        <p class="call-timer mt-1" style="display:none;" id="call-timer-text">00:00</p>
       </div>
+
       <div class="call-controls">
         <button class="call-control-btn" id="toggle-mute">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"/></svg>
-          <span class="text-[10px] mt-1">Mute</span>
+          <span>Mute</span>
         </button>
         ${type === 'video' ? `
           <button class="call-control-btn" id="toggle-camera">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9.75a2.25 2.25 0 002.25-2.25V7.5a2.25 2.25 0 00-2.25-2.25H4.5A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z"/></svg>
-            <span class="text-[10px] mt-1">Camera</span>
+            <span>Camera</span>
           </button>
           <button class="call-control-btn" id="switch-camera">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182M2.985 19.644V14.652"/></svg>
-            <span class="text-[10px] mt-1">Flip</span>
+            <span>Flip</span>
           </button>
         ` : `
           <button class="call-control-btn" id="toggle-speaker">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z"/></svg>
-            <span class="text-[10px] mt-1">Speaker</span>
+            <span>Speaker</span>
           </button>
         `}
         <button class="call-control-btn call-end-btn" id="end-call-btn">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15.536a5 5 0 010-7.072m-2.828 9.9a9 9 0 010-12.728"/></svg>
-          <span class="text-[10px] mt-1">End</span>
+            <span>End</span>
         </button>
       </div>
     </div>
   `;
 
+  // Fetch caller's actual profile photo
+  getDoc(doc(db, 'users', callerUid)).then(snap => {
+    if (snap.exists() && snap.data().profilePic) {
+      const ring = callOverlay.querySelector('.call-avatar-ring');
+      if (ring) {
+        ring.innerHTML = `<img src="${snap.data().profilePic}" alt="Avatar"/>`;
+      }
+    }
+  }).catch(() => {});
+
   // 2. Wire ALL callbacks BEFORE calling answerCall()
   callManager.onCallStateChange = (state) => {
     const statusEl = callOverlay.querySelector('#call-status-text');
+    const timerEl = callOverlay.querySelector('#call-timer-text');
+    const netInd = callOverlay.querySelector('.call-network-indicator');
+    
     if (statusEl) {
-      if (state === 'connecting') statusEl.textContent = 'Connecting...';
+      if (state === 'connecting') {
+        if (callTimer) {
+          statusEl.textContent = 'Reconnecting...';
+          statusEl.className = 'call-reconnecting mt-2 font-medium';
+        } else {
+          statusEl.textContent = 'Connecting...';
+        }
+      }
       else if (state === 'connected') {
-        statusEl.textContent = 'Connected · 00:00';
-        if (callTimer) clearInterval(callTimer);
-        callSeconds = 0;
-        callTimer = setInterval(() => {
-          callSeconds++;
-          const mins = Math.floor(callSeconds / 60).toString().padStart(2, '0');
-          const secs = (callSeconds % 60).toString().padStart(2, '0');
-          statusEl.textContent = `Connected · ${mins}:${secs}`;
-        }, 1000);
+        statusEl.textContent = 'Connected';
+        statusEl.className = 'text-sm text-green-400 mt-2 font-medium';
+        
+        if (netInd) netInd.style.display = 'flex';
+        if (timerEl) timerEl.style.display = 'block';
+
+        if (!callTimer) {
+          callSeconds = 0;
+          timerEl.textContent = '00:00';
+          callTimer = setInterval(() => {
+            callSeconds++;
+            const mins = Math.floor(callSeconds / 60).toString().padStart(2, '0');
+            const secs = (callSeconds % 60).toString().padStart(2, '0');
+            timerEl.textContent = `${mins}:${secs}`;
+          }, 1000);
+        }
       }
     }
     if (state === 'connected' && type === 'video') {
@@ -1033,24 +1533,19 @@ export function showAnsweredCallUI(callerUid, callerName, type, callId) {
   // 3. Bind control handlers
   _bindCallControls(callOverlay, () => callTimer, type);
 
-  // 4. NOW call answerCall() — all callbacks are already wired
-  //    This is the CRITICAL ordering fix. Previously answerCall() was called
-  //    before callbacks were wired, causing ICE connected events to be lost.
+  // 4. NOW call answerCall()
   (async () => {
     try {
       await callManager.answerCall(callId);
 
-      // Show local video preview after stream is ready
       if (type === 'video' && callManager.localStream) {
         _showLocalVideo(callOverlay, callManager.localStream);
       }
 
-      // If remote stream already available (race condition), attach it
       Object.entries(callManager.remoteStreams).forEach(([uid, stream]) => {
         _attachRemoteStream(callOverlay, type, stream);
       });
 
-      // If already connected (ICE completed during answerCall), trigger state
       if (callManager.callStatus === 'connected') {
         if (callManager.onCallStateChange) callManager.onCallStateChange('connected');
       }
@@ -1107,13 +1602,13 @@ function _showLocalVideo(callOverlay, stream) {
   }
 }
 
-// ===== SHARED: Bind call control buttons =====
+// ===== SHARED: Bind call control buttons (WhatsApp-style glow states) =====
 function _bindCallControls(callOverlay, getTimer, type) {
   callOverlay.querySelector('#toggle-mute')?.addEventListener('click', () => {
     const muted = callManager.toggleMute();
     const btn = callOverlay.querySelector('#toggle-mute');
     if (btn) {
-      btn.classList.toggle('call-control-active', muted);
+      btn.classList.toggle('active-mute', muted);
       btn.querySelector('span').textContent = muted ? 'Unmute' : 'Mute';
     }
   });
@@ -1122,7 +1617,7 @@ function _bindCallControls(callOverlay, getTimer, type) {
     const off = callManager.toggleCamera();
     const btn = callOverlay.querySelector('#toggle-camera');
     if (btn) {
-      btn.classList.toggle('call-control-active', off);
+      btn.classList.toggle('active-camera-off', off);
       btn.querySelector('span').textContent = off ? 'Cam On' : 'Camera';
     }
     const localContainer = callOverlay.querySelector('#local-video-container');
@@ -1133,13 +1628,13 @@ function _bindCallControls(callOverlay, getTimer, type) {
 
   callOverlay.querySelector('#switch-camera')?.addEventListener('click', async () => {
     const btn = callOverlay.querySelector('#switch-camera');
-    if (btn) btn.classList.add('call-control-active');
+    if (btn) btn.style.transform = 'rotate(180deg)';
     const facing = await callManager.switchCamera();
     if (facing && callManager.localStream) {
       _showLocalVideo(callOverlay, callManager.localStream);
     }
     setTimeout(() => {
-      if (btn) btn.classList.remove('call-control-active');
+      if (btn) btn.style.transform = '';
     }, 500);
   });
 
@@ -1147,9 +1642,9 @@ function _bindCallControls(callOverlay, getTimer, type) {
     const btn = callOverlay.querySelector('#toggle-speaker');
     const audio = callOverlay.querySelector('audio[data-remote]');
     if (audio && btn) {
-      const isLoud = btn.classList.toggle('call-control-active');
-      audio.volume = isLoud ? 1.0 : 0.5;
-      btn.querySelector('span').textContent = isLoud ? 'Earpiece' : 'Speaker';
+      const isActive = btn.classList.toggle('active-speaker');
+      audio.volume = isActive ? 1.0 : 0.5;
+      btn.querySelector('span').textContent = isActive ? 'Speaker ON' : 'Speaker';
     }
   });
 
@@ -1158,6 +1653,60 @@ function _bindCallControls(callOverlay, getTimer, type) {
     if (timer) clearInterval(timer);
     callManager.endCall();
   });
+
+  // Network quality monitoring (poll every 5s when connected)
+  let netQualityTimer = null;
+  const startNetworkMonitor = () => {
+    const indicator = callOverlay.querySelector('.call-network-indicator');
+    if (!indicator) return;
+    
+    netQualityTimer = setInterval(async () => {
+      try {
+        const pcs = Object.values(callManager.peerConnections);
+        if (pcs.length === 0) return;
+        const stats = await pcs[0].getStats();
+        let packetsLost = 0;
+        let jitter = 0;
+        stats.forEach(report => {
+          if (report.type === 'inbound-rtp' && report.kind === 'audio') {
+            packetsLost = report.packetsLost || 0;
+            jitter = report.jitter || 0;
+          }
+        });
+        const dot = indicator.querySelector('.call-quality-dot');
+        const label = indicator.querySelector('.call-quality-label');
+        if (packetsLost > 50 || jitter > 0.1) {
+          dot.className = 'call-quality-dot call-quality-poor';
+          label.textContent = 'Poor';
+        } else if (packetsLost > 10 || jitter > 0.05) {
+          dot.className = 'call-quality-dot call-quality-fair';
+          label.textContent = 'Fair';
+        } else {
+          dot.className = 'call-quality-dot call-quality-good';
+          label.textContent = 'Good';
+        }
+      } catch (e) { /* stats not available */ }
+    }, 5000);
+  };
+
+  // Start monitoring when call connects
+  const origStateChange = callManager.onCallStateChange;
+  const wrappedStateChange = (state) => {
+    if (origStateChange) origStateChange(state);
+    if (state === 'connected') {
+      startNetworkMonitor();
+      const screen = callOverlay.querySelector('.call-screen');
+      if (screen) screen.classList.add('call-connected');
+    }
+  };
+  callManager.onCallStateChange = wrappedStateChange;
+
+  // Clean up on call end
+  const origEnd = callManager.onCallEnd;
+  callManager.onCallEnd = (reason) => {
+    if (netQualityTimer) { clearInterval(netQualityTimer); netQualityTimer = null; }
+    if (origEnd) origEnd(reason);
+  };
 }
 
 // Global reply-to state
@@ -1590,3 +2139,103 @@ function showReplyPreview() {
   document.querySelector('#msg-input')?.focus();
 }
 
+// ========== GROUP SETTINGS ==========
+function showGroupSettingsModal(chatId, currentName, currentPic) {
+  const modal = router.openModal('', { title: 'Group Info' });
+  modal.body.innerHTML = `
+    <div class="p-4 text-center">
+      <div class="relative inline-block mb-4 group-avatar-container">
+        ${currentPic ? `<img src="${currentPic}" class="w-24 h-24 rounded-full object-cover shadow-md mx-auto" id="group-pic-preview"/>` : `<div class="w-24 h-24 rounded-full bg-navy-100 text-navy-800 flex items-center justify-center text-4xl font-bold shadow-md mx-auto" id="group-pic-preview">${(currentName || 'G')[0]}</div>`}
+        <button class="absolute bottom-0 right-0 p-2 bg-navy-500 text-white rounded-full shadow-lg" id="change-group-pic-btn">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/></svg>
+        </button>
+        <input type="file" id="group-pic-input" accept="image/*" class="hidden"/>
+      </div>
+      <div class="mb-4">
+        <label class="block text-xs text-gray-500 font-semibold mb-1 text-left">Group Name</label>
+        <input type="text" id="group-name-input" value="${sanitizeHTML(currentName)}" class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-navy-800 font-semibold focus:outline-none focus:border-navy-500"/>
+      </div>
+      <button id="save-group-btn" class="w-full py-3 bg-navy-500 text-white rounded-xl font-bold mt-2">Save Changes</button>
+    </div>
+  `;
+
+  const picInput = modal.body.querySelector('#group-pic-input');
+  const picBtn = modal.body.querySelector('#change-group-pic-btn');
+  const nameInput = modal.body.querySelector('#group-name-input');
+  const saveBtn = modal.body.querySelector('#save-group-btn');
+  
+  let newPicFile = null;
+
+  picBtn.addEventListener('click', () => picInput.click());
+  
+  picInput.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      newPicFile = file;
+      const url = URL.createObjectURL(file);
+      const preview = modal.body.querySelector('#group-pic-preview');
+      if (preview.tagName === 'IMG') {
+        preview.src = url;
+      } else {
+        const img = document.createElement('img');
+        img.src = url;
+        img.className = 'w-24 h-24 rounded-full object-cover shadow-md mx-auto';
+        img.id = 'group-pic-preview';
+        preview.replaceWith(img);
+      }
+    }
+  });
+
+  saveBtn.addEventListener('click', async () => {
+    const newName = nameInput.value.trim();
+    if (!newName) { showToast('Group name cannot be empty', 'warning'); return; }
+    
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+    
+    try {
+      const updates = {};
+      let sysMsgText = '';
+      
+      const myName = authManager.userData?.fullName || 'Someone';
+
+      if (newName !== currentName) {
+        updates.name = newName;
+        sysMsgText = `${myName} changed the group name to "${newName}"`;
+      }
+      
+      if (newPicFile) {
+        const path = `group-images/${chatId}/${Date.now()}_${newPicFile.name}`;
+        const sRef = storageRef(storage, path);
+        await uploadBytes(sRef, newPicFile);
+        const url = await getDownloadURL(sRef);
+        updates.profilePic = url;
+        if (sysMsgText) {
+          sysMsgText += ' and changed the group photo';
+        } else {
+          sysMsgText = `${myName} changed the group photo`;
+        }
+      }
+
+      if (Object.keys(updates).length > 0) {
+        await updateDoc(doc(db, 'chats', chatId), updates);
+        
+        // Write system message
+        await addDoc(collection(db, 'chats', chatId, 'messages'), {
+          type: 'system',
+          text: sysMsgText,
+          createdAt: serverTimestamp(),
+          senderId: authManager.currentUser?.uid
+        });
+        
+        showToast('Group updated successfully!', 'success');
+      }
+      modal.close();
+    } catch (e) {
+      console.error(e);
+      showToast('Failed to update group', 'error');
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save Changes';
+    }
+  });
+}

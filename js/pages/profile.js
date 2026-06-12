@@ -528,7 +528,7 @@ export async function renderProfile(container, data = null) {
   container.querySelector('#dm-from-profile')?.addEventListener('click', (e) => {
     const targetUid = e.currentTarget.dataset.uid;
     const targetName = e.currentTarget.dataset.name;
-    router.navigate('chat', { userId: targetUid, userName: targetName });
+    router.navigate('chat', { userId: targetUid, userName: targetName, fromProfile: true });
   });
 
   // Edit Profile quick button

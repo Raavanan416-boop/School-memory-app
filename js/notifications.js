@@ -1,6 +1,7 @@
 // Notification system — FCM push + real-time Firestore + in-app notifications
 // Supports: background push, lock screen, foreground toast, badge count, dedup, delete
 // Fixed: token refresh, call types, ringtone management, foreground notification
+// v2: Unified SW registration, data-only payloads, robust token lifecycle
 import { db, app, collection, doc, addDoc, deleteDoc, query, where, orderBy, limit,
   onSnapshot, updateDoc, serverTimestamp, getDocs } from './firebase-config.js';
 import { authManager } from './auth.js';
@@ -151,6 +152,7 @@ class NotificationManager {
     this._ringtoneAudio = null;
     this._soundUnlocked = false;
     this._tokenRefreshInterval = null;
+    this._swRegistration = null; // Cache SW registration
   }
 
   onChange(cb) { this.listeners.push(cb); }
@@ -161,13 +163,23 @@ class NotificationManager {
   // ===== FCM INITIALIZATION =====
 
   // Initialize Firebase Cloud Messaging
+  // Uses the UNIFIED service worker (firebase-messaging-sw.js) which handles
+  // both caching and push notifications — no dual-SW conflict
   async initFCM() {
     try {
-      // Register the FCM service worker
-      const swReg = await navigator.serviceWorker.register('/firebase-messaging-sw.js', {
-        scope: '/'
-      });
-      console.log('[Notifications] FCM SW registered:', swReg.scope);
+      // Wait for the unified service worker to be ready
+      // It's registered by index.html — we just need to get its registration
+      let swReg = await navigator.serviceWorker.getRegistration('/');
+      
+      // If not registered yet, register it
+      if (!swReg) {
+        console.log('[Notifications] Registering unified SW...');
+        swReg = await navigator.serviceWorker.register('/firebase-messaging-sw.js', {
+          scope: '/'
+        });
+      }
+      
+      console.log('[Notifications] Using SW registration:', swReg.scope);
 
       // Wait for the SW to be active
       if (swReg.installing) {
@@ -179,7 +191,15 @@ class NotificationManager {
             }
           });
         });
+      } else if (swReg.waiting) {
+        // If there's a waiting SW, tell it to skip waiting
+        swReg.waiting.postMessage({ type: 'SKIP_WAITING' });
+        await new Promise(resolve => {
+          navigator.serviceWorker.addEventListener('controllerchange', resolve, { once: true });
+        });
       }
+
+      this._swRegistration = swReg;
 
       // Dynamic import of Firebase Messaging
       const { getMessaging, getToken, onMessage } = await import(
@@ -227,6 +247,7 @@ class NotificationManager {
         }
       });
 
+      console.log('[Notifications] FCM initialized successfully');
       return swReg;
     } catch (e) {
       console.warn('[Notifications] FCM init failed:', e);
@@ -270,6 +291,8 @@ class NotificationManager {
         await this._registerFCMToken();
         // Start periodic token refresh (every 6 hours)
         this._startTokenRefresh();
+      } else {
+        console.log('[Notifications] Push permission:', permission);
       }
       return permission;
     } catch (e) {
@@ -280,26 +303,58 @@ class NotificationManager {
 
   // Register FCM token and save to user document
   async _registerFCMToken() {
-    if (!this._messaging || !authManager.currentUser) return;
+    if (!this._messaging || !authManager.currentUser) {
+      console.log('[Notifications] Cannot register token — messaging or user not ready');
+      return;
+    }
 
     try {
       const { getToken } = await import(
         'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js'
       );
 
-      const swReg = await navigator.serviceWorker.getRegistration('/');
+      // Use cached SW registration or get it fresh
+      let swReg = this._swRegistration || await navigator.serviceWorker.getRegistration('/');
       if (!swReg) {
         console.warn('[Notifications] No service worker registration found');
         return;
       }
 
-      // Get FCM token — VAPID key from Firebase Console > Cloud Messaging > Web Push certificates
-      // NOTE: Replace this with your actual public VAPID key if push isn't working
+      // Wait for SW to be active
+      if (!swReg.active) {
+        console.log('[Notifications] Waiting for SW to activate...');
+        await new Promise((resolve, reject) => {
+          const sw = swReg.installing || swReg.waiting;
+          if (!sw) { reject(new Error('No SW installing/waiting')); return; }
+          sw.addEventListener('statechange', function handler(e) {
+            if (e.target.state === 'activated') {
+              resolve();
+              e.target.removeEventListener('statechange', handler);
+            }
+            if (e.target.state === 'redundant') {
+              reject(new Error('SW became redundant'));
+              e.target.removeEventListener('statechange', handler);
+            }
+          });
+          // Timeout after 10s
+          setTimeout(() => reject(new Error('SW activation timeout')), 10000);
+        });
+      }
+
+      // ⚠️ VAPID KEY — Get this from Firebase Console:
+      // Project Settings → Cloud Messaging → Web Push certificates → Key pair
+      // The key should be ~87 characters long (base64url encoded)
+      // If push notifications don't work, THIS IS THE FIRST THING TO CHECK
+      const VAPID_KEY = 'BHcaRPIBkT-EE5J1pT0hKGWnCqMwqSj9F3D0c79E2dM3W3HutXNvJepjMq5VKwLCe0B0a_9qW0CVfi6DfV_7lEU';
+
+      console.log('[Notifications] Requesting FCM token...');
       const token = await getToken(this._messaging, {
-        vapidKey: 'qxHBJtuRVh-UdDL4nGmIEJplitZyHDQ_viFI22ibmQc',
+        vapidKey: 'BMWctXcy4hmQGMLyC48WHNvU24uP5MD-HFmnZ0EQsgCfndJv0RgYFjZqUskiKuTbYJsb118y4YYVYUrRvUgvDV8',
         serviceWorkerRegistration: swReg,
       }).catch((err) => {
-        console.warn('[Notifications] Token generation failed:', err);
+        console.error('[Notifications] Token generation failed:', err);
+        console.error('[Notifications] ⚠️ If you see "messaging/permission-blocked", check browser notification permission');
+        console.error('[Notifications] ⚠️ If you see other errors, verify your VAPID key is correct');
         return null;
       });
 
@@ -310,10 +365,13 @@ class NotificationManager {
           pushEnabled: true,
           fcmTokenUpdatedAt: serverTimestamp(),
         });
-        console.log('[Notifications] FCM token saved:', token.substring(0, 20) + '...');
+        console.log('[Notifications] ✅ FCM token saved:', token.substring(0, 20) + '...');
+      } else if (!token) {
+        console.warn('[Notifications] ❌ No token returned — check VAPID key and SW registration');
       }
     } catch (e) {
-      console.log('[Notifications] FCM token registration failed:', e.message);
+      console.error('[Notifications] FCM token registration failed:', e.message);
+      console.error('[Notifications] Stack:', e.stack);
     }
   }
 
@@ -353,8 +411,9 @@ class NotificationManager {
     if (!authManager.currentUser) return;
     if (this.unsubscribe) this.unsubscribe();
 
-    // Request push permission after a short delay (not too aggressive)
+    // Request push permission if not yet granted
     if ('Notification' in window && Notification.permission === 'default') {
+      // Request permission after a short delay (not too aggressive)
       setTimeout(() => this.requestPushPermission(), 3000);
     } else if ('Notification' in window && Notification.permission === 'granted') {
       // Already granted — ensure token is fresh

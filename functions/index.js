@@ -1,10 +1,14 @@
 // Cloud Functions — Push notification sender + Call notification handler
 // Triggers when a notification document is created in Firestore
 // Reads the receiver's FCM token and sends push via FCM
+//
+// CRITICAL: All messages are sent as DATA-ONLY payloads (no notification field).
+// This ensures the service worker's onBackgroundMessage ALWAYS fires,
+// giving us full control over notification display in all app states.
 
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
 const { initializeApp } = require('firebase-admin/app');
-const { getFirestore } = require('firebase-admin/firestore');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { getMessaging } = require('firebase-admin/messaging');
 
 initializeApp();
@@ -13,6 +17,10 @@ const db = getFirestore();
 /**
  * Send push notification when a notification document is created.
  * Handles all types: messages, likes, comments, calls, missed calls, etc.
+ * 
+ * Uses DATA-ONLY payloads so the service worker always controls display.
+ * Includes retry logic for transient failures.
+ * Logs delivery status for debugging.
  * 
  * Expected notification document fields:
  * - userId: string (receiver's uid)
@@ -34,7 +42,7 @@ exports.sendPushNotification = onDocumentCreated('notifications/{notifId}', asyn
   const receiverId = notif.userId;
 
   if (!receiverId) {
-    console.log('No receiverId in notification, skipping push');
+    console.log('[FCM] No receiverId in notification, skipping push');
     return;
   }
 
@@ -42,7 +50,7 @@ exports.sendPushNotification = onDocumentCreated('notifications/{notifId}', asyn
     // Get receiver's user document to find FCM token
     const userDoc = await db.collection('users').doc(receiverId).get();
     if (!userDoc.exists) {
-      console.log('Receiver user document not found:', receiverId);
+      console.log('[FCM] Receiver user document not found:', receiverId);
       return;
     }
 
@@ -50,8 +58,19 @@ exports.sendPushNotification = onDocumentCreated('notifications/{notifId}', asyn
     const fcmToken = userData.fcmToken;
 
     if (!fcmToken) {
-      console.log('No FCM token for user:', receiverId);
+      console.log('[FCM] No FCM token for user:', receiverId, '— push skipped');
+      // Log delivery failure
+      await logDeliveryStatus(notifId, 'no_token', receiverId);
       return;
+    }
+
+    // Verify token is not stale (optional: check fcmTokenUpdatedAt)
+    if (userData.fcmTokenUpdatedAt) {
+      const tokenAge = Date.now() - userData.fcmTokenUpdatedAt.toDate().getTime();
+      const MAX_TOKEN_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days
+      if (tokenAge > MAX_TOKEN_AGE) {
+        console.log('[FCM] Token may be stale for user:', receiverId, 'age:', Math.round(tokenAge / 86400000), 'days');
+      }
     }
 
     const type = notif.type || 'general';
@@ -59,124 +78,155 @@ exports.sendPushNotification = onDocumentCreated('notifications/{notifId}', asyn
     const body = notif.body || notif.message || 'New notification';
     const targetUrl = notif.targetUrl || '/';
 
-    // Determine priority and TTL based on notification type
+    // Determine TTL based on notification type
     const isCallNotif = type.includes('call_incoming');
-    const isMissedCall = type.includes('missed_');
-    const priority = isCallNotif ? 'high' : 'high'; // All notifications are high priority
-    const ttl = isCallNotif ? '30' : '86400'; // Calls expire in 30s, others in 24h
+    const ttl = isCallNotif ? 30 : 86400; // Calls expire in 30s, others in 24h
 
-    // Build the FCM message
+    // Build the FCM message — DATA-ONLY payload
+    // No `notification` field = service worker's onBackgroundMessage ALWAYS fires
+    // This gives us full control over notification display in ALL app states
     const message = {
       token: fcmToken,
-      // Use data-only message for maximum control over notification display
+      // DATA-ONLY: All notification info is in the data field
+      // The service worker reads these and shows the notification
       data: {
-        title: title,
-        body: body,
-        type: type,
-        targetUrl: targetUrl,
-        notifId: notifId,
+        title: String(title),
+        body: String(body),
+        type: String(type),
+        targetUrl: String(targetUrl),
+        notifId: String(notifId),
         tag: `${type}-${notifId}`,
-        fromId: notif.fromId || '',
-        fromName: notif.fromName || '',
+        fromId: String(notif.fromId || ''),
+        fromName: String(notif.fromName || ''),
+        fromPhoto: String(notif.fromPhoto || ''),
         // Call-specific fields
-        callId: notif.callId || '',
-        callType: notif.callType || '',
-        callerName: notif.fromName || '',
-        callerId: notif.fromId || '',
+        callId: String(notif.callId || ''),
+        callType: String(notif.callType || ''),
+        callerName: String(notif.fromName || ''),
+        callerId: String(notif.fromId || ''),
+        // Message-specific fields
+        messagePreview: String(notif.messagePreview || ''),
       },
+      // Web push configuration
       webpush: {
         headers: {
           Urgency: 'high',
-          TTL: ttl,
+          TTL: String(ttl),
         },
-        // Let the service worker handle notification display
-        // Only include notification for non-call types (calls need custom handling)
-        ...(isCallNotif ? {} : {
-          notification: {
-            title: title,
-            body: body,
-            icon: '/icons/icon-192.svg',
-            badge: '/icons/icon-192.svg',
-            vibrate: [200, 100, 200, 100, 200],
-            tag: `${type}-${notifId}`,
-            renotify: true,
-            requireInteraction: type !== 'chat_message',
-            data: {
-              url: targetUrl,
-              type: type,
-              notifId: notifId,
-            },
-            actions: isCallNotif ? [
-              { action: 'accept_call', title: '✅ Accept' },
-              { action: 'reject_call', title: '❌ Reject' }
-            ] : [
-              { action: 'open', title: 'Open' },
-              { action: 'dismiss', title: 'Dismiss' },
-            ],
-          },
-        }),
+        // NO notification field here — data-only for full SW control
         fcmOptions: {
           link: targetUrl,
         },
       },
+      // Android configuration (for future native app support)
       android: {
         priority: 'high',
-        notification: {
+        ttl: ttl * 1000, // milliseconds
+        data: {
           channelId: isCallNotif ? 'incoming_calls' : 'class_memories_notifications',
-          priority: 'max',
-          defaultSound: true,
-          defaultVibrateTimings: true,
-          visibility: 'public',
-          // For calls, make the notification persistent
-          ...(isCallNotif ? {
-            sticky: true,
-            ongoing: true,
-          } : {}),
         },
       },
+      // iOS/APNs configuration (for future native app support)
       apns: {
         headers: {
           'apns-priority': '10',
           'apns-push-type': 'alert',
+          'apns-expiration': String(Math.floor(Date.now() / 1000) + ttl),
         },
         payload: {
           aps: {
-            alert: {
-              title: title,
-              body: body,
-            },
-            sound: isCallNotif ? 'default' : 'default',
-            badge: 1,
             'content-available': 1,
             'mutable-content': 1,
+            sound: 'default',
+            badge: 1,
             ...(isCallNotif ? { 'interruption-level': 'time-sensitive' } : {}),
           },
         },
       },
     };
 
-    // Send the push notification
-    const response = await getMessaging().send(message);
-    console.log('Push sent successfully:', response, 'type:', type, 'to:', receiverId);
+    // Send with retry logic
+    const response = await sendWithRetry(message, 2);
+    console.log('[FCM] ✅ Push sent successfully:', response, '| type:', type, '| to:', receiverId);
+    
+    // Log successful delivery
+    await logDeliveryStatus(notifId, 'sent', receiverId, response);
 
   } catch (error) {
     // Handle invalid/expired tokens
     if (error.code === 'messaging/invalid-registration-token' ||
         error.code === 'messaging/registration-token-not-registered') {
-      console.log('Invalid FCM token, removing from user:', receiverId);
+      console.log('[FCM] ❌ Invalid FCM token, removing from user:', receiverId);
       try {
         await db.collection('users').doc(receiverId).update({
           fcmToken: null,
           pushEnabled: false,
         });
       } catch (e) {
-        console.error('Failed to clean up invalid token:', e);
+        console.error('[FCM] Failed to clean up invalid token:', e);
       }
+      await logDeliveryStatus(notifId, 'invalid_token', receiverId, null, error.code);
     } else {
-      console.error('FCM send error:', error);
+      console.error('[FCM] ❌ Send error:', error.code || error.message);
+      await logDeliveryStatus(notifId, 'error', receiverId, null, error.code || error.message);
     }
   }
 });
+
+/**
+ * Send FCM message with retry logic for transient errors.
+ * @param {object} message - The FCM message to send
+ * @param {number} maxRetries - Maximum number of retries
+ * @returns {Promise<string>} - Message ID on success
+ */
+async function sendWithRetry(message, maxRetries = 2) {
+  let lastError = null;
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await getMessaging().send(message);
+      return response;
+    } catch (error) {
+      lastError = error;
+      
+      // Only retry on transient errors
+      const retryableCodes = [
+        'messaging/internal-error',
+        'messaging/server-unavailable',
+        'messaging/too-many-requests',
+      ];
+      
+      if (!retryableCodes.includes(error.code) || attempt >= maxRetries) {
+        throw error;
+      }
+      
+      // Exponential backoff: 500ms, 1500ms
+      const delay = 500 * Math.pow(3, attempt);
+      console.log(`[FCM] Retry ${attempt + 1}/${maxRetries} after ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  
+  throw lastError;
+}
+
+/**
+ * Log notification delivery status for debugging.
+ * Writes to a subcollection on the notification document.
+ */
+async function logDeliveryStatus(notifId, status, receiverId, messageId = null, errorCode = null) {
+  try {
+    await db.collection('notifications').doc(notifId).update({
+      _pushStatus: status,
+      _pushMessageId: messageId || null,
+      _pushError: errorCode || null,
+      _pushTimestamp: FieldValue.serverTimestamp(),
+    });
+  } catch (e) {
+    // Non-critical — don't fail the function
+    console.log('[FCM] Could not log delivery status:', e.message);
+  }
+}
 
 /**
  * Clean up old notifications (older than 30 days) — runs on schedule

@@ -1,6 +1,6 @@
 // WebRTC Calls — Voice & Video using Firestore signaling
 // v3: Fixed ICE candidate buffering, state machine, SDP exchange ordering, logging
-import { db, doc, collection, addDoc, updateDoc, onSnapshot, serverTimestamp, getDoc, getDocs, query, where } from './firebase-config.js';
+import { db, doc, collection, addDoc, updateDoc, setDoc, onSnapshot, serverTimestamp, getDoc, getDocs, query, where } from './firebase-config.js';
 import { authManager } from './auth.js';
 import { createNotification } from './notifications.js';
 import { showToast } from './utils.js';
@@ -85,6 +85,11 @@ class CallManager {
     this._pendingCandidates = [];     // Buffer: ICE candidates before remote desc
     this._remoteDescSet = false;      // Flag: remote description successfully set
     this._connectionCheckTimer = null;
+    
+    // Call history tracking
+    this._callTargetId = null;
+    this._callTargetName = null;
+    this._callCallerName = null;
   }
 
   get isInCall() {
@@ -191,6 +196,10 @@ class CallManager {
       this._answerSet = false;
       this._remoteDescSet = false;
       this._pendingCandidates = [];
+
+      this._callTargetId = targetUserId;
+      this._callTargetName = targetName;
+      this._callCallerName = authManager.userData?.fullName || 'Unknown';
 
       _log('📱 Starting', type, 'call to', targetName, '(' + targetUserId + ')');
       if (this.onCallStateChange) this.onCallStateChange('dialing');
@@ -332,6 +341,10 @@ class CallManager {
       this._answerSet = false;
       this._remoteDescSet = false;
       this._pendingCandidates = [];
+      
+      this._callTargetId = callData.callerId;
+      this._callTargetName = callData.callerName;
+      this._callCallerName = authManager.userData?.fullName || callData.targetName;
 
       if (this.onCallStateChange) this.onCallStateChange('connecting');
 
@@ -436,6 +449,14 @@ class CallManager {
     const callId = this.currentCallId;
     const wasCaller = this._isCaller;
     const callType = this.currentCallType;
+    const targetId = this._callTargetId;
+    const targetName = this._callTargetName;
+    const callerName = this._callCallerName;
+
+    let duration = 0;
+    if (this._connectedTimestamp) {
+      duration = Math.floor((Date.now() - this._connectedTimestamp) / 1000);
+    }
 
     // Close all peer connections
     Object.entries(this.peerConnections).forEach(([uid, pc]) => {
@@ -469,32 +490,123 @@ class CallManager {
     // Update Firestore
     if (callId) {
       try {
+        const endTime = Date.now();
+        const duration = this._connectedTimestamp ? Math.floor((endTime - this._connectedTimestamp) / 1000) : 0;
+        
         await updateDoc(doc(db, 'calls', callId), {
           status: reason,
-          endedAt: serverTimestamp()
+          endedAt: serverTimestamp(),
+          duration: duration
         });
         _log('✅ Call status updated to:', reason);
-      } catch (e) { /* doc might already be deleted */ }
 
-      // Missed call notification
-      if (reason === 'no_answer' && wasCaller) {
-        try {
-          const callSnap = await getDoc(doc(db, 'calls', callId));
-          if (callSnap.exists()) {
-            const callData = callSnap.data();
+        // Fetch call doc to log history
+        const callSnap = await getDoc(doc(db, 'calls', callId));
+        if (callSnap.exists()) {
+          const callData = callSnap.data();
+          const targetUserId = wasCaller ? callData.targetId : callData.callerId;
+          const myUid = authManager.currentUser.uid;
+          
+          // Log call history to chat
+          try {
+            const q1 = query(collection(db, 'chats'), where('participants', 'array-contains', myUid));
+            const chatsSnap = await getDocs(q1);
+            let chatId = null;
+            chatsSnap.forEach(d => {
+              const cData = d.data();
+              if (cData.type === 'dm' && cData.participants.includes(targetUserId)) {
+                chatId = d.id;
+              }
+            });
+            
+            if (chatId) {
+              await addDoc(collection(db, 'chats', chatId, 'messages'), {
+                type: 'system_call',
+                callType: callType,
+                callStatus: reason,
+                duration: duration,
+                callerId: callData.callerId,
+                createdAt: serverTimestamp()
+              });
+              await updateDoc(doc(db, 'chats', chatId), {
+                lastMessage: `${callType === 'video' ? '📹' : '📞'} ${callType === 'video' ? 'Video' : 'Voice'} Call`,
+                lastMessageAt: serverTimestamp()
+              });
+            }
+          } catch(e) {
+            _err('Failed to log call history:', e);
+          }
+
+          // Missed call notification
+          if (reason === 'no_answer' && wasCaller) {
             createNotification(
               callType === 'video' ? 'missed_video_call' : 'missed_voice_call',
               callData.targetId,
               { callId, callType, message: `Missed ${callType} call` }
             );
           }
-        } catch (e) {
-          _err('Missed call notification error:', e);
         }
-      }
+      } catch (e) { /* doc might already be deleted */ }
     }
 
     this._resetCallState(reason);
+
+    // Save call history (both sides can try, predictable ID avoids dupes)
+    if (callId && targetId) {
+      this._saveCallHistory(callId, targetId, targetName, callerName, callType, reason, duration);
+    }
+  }
+
+  async _saveCallHistory(callId, targetId, targetName, callerName, callType, status, duration) {
+    const myUid = authManager.currentUser?.uid;
+    if (!myUid || !targetId) return;
+
+    try {
+      // Find chat between myUid and targetId
+      const q1 = query(collection(db, 'chats'), where('participants', 'array-contains', myUid));
+      const snap = await getDocs(q1);
+      let existingChatId = null;
+
+      snap.forEach(d => {
+        const data = d.data();
+        if (data.type === 'dm' && data.participants.includes(targetId)) {
+          existingChatId = d.id;
+        }
+      });
+
+      if (!existingChatId) {
+        // Create new chat
+        const chatRef = await addDoc(collection(db, 'chats'), {
+          type: 'dm',
+          participants: [myUid, targetId],
+          participantNames: [callerName || 'Unknown', targetName || 'Unknown'],
+          lastMessage: '',
+          lastMessageAt: serverTimestamp(),
+          createdAt: serverTimestamp(),
+          typing: {},
+          unreadCount: { [myUid]: 0, [targetId]: 0 }
+        });
+        existingChatId = chatRef.id;
+      }
+
+      // Add system_call message with predictable ID based on callId to avoid duplicates
+      await setDoc(doc(db, 'chats', existingChatId, 'messages', callId + '_history'), {
+        type: 'system_call',
+        callType: callType,
+        callStatus: status,
+        duration: duration,
+        createdAt: serverTimestamp(),
+        senderId: myUid // to know who wrote it (informational)
+      });
+
+      // Update chat last message
+      await updateDoc(doc(db, 'chats', existingChatId), {
+        lastMessage: `📞 ${callType === 'video' ? 'Video' : 'Voice'} Call`,
+        lastMessageAt: serverTimestamp()
+      });
+    } catch (e) {
+      console.error('Save call history error:', e);
+    }
   }
 
   // ===================================================================

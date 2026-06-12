@@ -1,10 +1,17 @@
-// Firebase Messaging Service Worker — SOLE handler for all push notifications
-// This file MUST be at the root of the domain for FCM to work
-// NOTE: sw.js handles ONLY caching. All push/notification logic lives here.
+// ========================================================================
+// UNIFIED Service Worker — Caching + Firebase Cloud Messaging (FCM)
+// ========================================================================
+// This is the SOLE service worker for the app.
+// Handles: static asset caching, push notifications (background + foreground),
+// notification clicks, incoming call alerts, and message forwarding.
+//
+// IMPORTANT: Do NOT register sw.js separately — it will conflict.
+// ========================================================================
+
 importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js');
 
-// Firebase config (same as main app)
+// ===== Firebase Config =====
 firebase.initializeApp({
   apiKey: "AIzaSyDs9bqr8xcafukYgVLPg9Z9q5V50gI7i8g",
   authDomain: "school-memory-app.firebaseapp.com",
@@ -16,10 +23,173 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
+// ===== CACHING (migrated from sw.js) =====
+const CACHE_NAME = 'class-memories-v9';
+const STATIC_ASSETS = [
+  '/',
+  '/index.html',
+  '/css/styles.css',
+  '/js/app.js',
+  '/js/auth.js',
+  '/js/router.js',
+  '/js/utils.js',
+  '/js/tailwind-config.js',
+  '/js/firebase-config.js',
+  '/js/notifications.js',
+  '/js/presence.js',
+  '/js/calls.js',
+  '/js/cinematic-intro.js',
+  '/js/festival-themes.js',
+  '/js/security.js',
+  '/js/pages/home.js',
+  '/js/pages/upload.js',
+  '/js/pages/search.js',
+  '/js/pages/chat.js',
+  '/js/pages/games.js',
+  '/js/pages/profile.js',
+  '/js/pages/notifications.js',
+  '/js/pages/timecapsule.js',
+  '/js/pages/diary.js',
+  '/js/pages/birthday.js',
+  '/js/pages/leaderboard.js',
+  '/js/pages/polls.js',
+  '/assets/notification.mp3',
+  '/assets/class-memories-logo.png',
+  '/icons/favicon-32.png',
+  '/icons/icon-48.png',
+  '/icons/icon-72.png',
+  '/icons/icon-96.png',
+  '/icons/icon-144.png',
+  '/icons/icon-192.png',
+  '/icons/icon-256.png',
+  '/icons/icon-384.png',
+  '/icons/icon-512.png',
+  '/icons/apple-touch-icon.png',
+  '/manifest.json'
+];
+
+// Install — cache all static assets
+self.addEventListener('install', (e) => {
+  console.log('[SW] Installing unified service worker...');
+  e.waitUntil(
+    caches.open(CACHE_NAME)
+      .then(c => c.addAll(STATIC_ASSETS))
+      .then(() => console.log('[SW] Static assets cached'))
+  );
+  self.skipWaiting(); // Activate immediately
+});
+
+// Activate — purge old caches + claim all clients immediately
+self.addEventListener('activate', (e) => {
+  console.log('[SW] Activating unified service worker...');
+  e.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => {
+        console.log('[SW] Deleting old cache:', k);
+        return caches.delete(k);
+      }))
+    ).then(() => self.clients.claim()) // Take control of all open tabs immediately
+  );
+});
+
+// Fetch — Network first, fallback to cache
+self.addEventListener('fetch', (e) => {
+  if (e.request.method !== 'GET') return;
+
+  // Skip Firebase and external API requests from cache
+  if (e.request.url.includes('firebaseio.com') ||
+      e.request.url.includes('googleapis.com') ||
+      e.request.url.includes('gstatic.com') ||
+      e.request.url.includes('firebasestorage.app') ||
+      e.request.url.includes('fcm/')) {
+    return;
+  }
+
+  // Force network-first for manifest and icon files to ensure fresh icons
+  if (e.request.url.includes('manifest.json') ||
+      e.request.url.includes('/icons/') ||
+      e.request.url.includes('favicon')) {
+    e.respondWith(
+      fetch(e.request).then(r => {
+        const clone = r.clone();
+        caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
+        return r;
+      }).catch(() => caches.match(e.request))
+    );
+    return;
+  }
+
+  e.respondWith(
+    fetch(e.request).then(r => {
+      const clone = r.clone();
+      caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
+      return r;
+    }).catch(() => caches.match(e.request))
+  );
+});
+
+
+// ========================================================================
+// PUSH NOTIFICATION HANDLING
+// ========================================================================
+
 // Track recently shown notification tags to prevent duplicates
 const recentTags = new Set();
 
-// ===== BACKGROUND MESSAGE HANDLER =====
+// ===== SAFETY NET: Raw push event handler =====
+// This fires for EVERY push, even if onBackgroundMessage doesn't trigger.
+// We check if the notification was already shown (via recentTags) to avoid duplicates.
+self.addEventListener('push', (event) => {
+  // Let Firebase SDK handle it first via onBackgroundMessage
+  // This handler is a safety net — it only fires if the SDK doesn't handle it
+  
+  if (!event.data) {
+    console.log('[SW-Push] Empty push event, ignoring');
+    return;
+  }
+
+  try {
+    const payload = event.data.json();
+    console.log('[SW-Push] Raw push event received:', payload);
+    
+    // If this is a Firebase message, the SDK's onBackgroundMessage will handle it
+    // We use a small delay to check if it was already handled
+    const data = payload.data || {};
+    const tag = data.tag || data.type || 'cm-notif-' + Date.now();
+    
+    // If already handled by onBackgroundMessage, skip
+    if (recentTags.has(tag)) {
+      console.log('[SW-Push] Already handled by onBackgroundMessage:', tag);
+      return;
+    }
+    
+    // If there's a notification field in the payload, the browser will auto-show it
+    // We don't need to do anything in that case
+    if (payload.notification) {
+      console.log('[SW-Push] Browser will auto-handle notification field');
+      return;
+    }
+
+    // Safety net: if we get here, onBackgroundMessage didn't fire
+    // This can happen in edge cases (SW restart, race conditions)
+    // Show notification manually from data payload
+    const waitMs = 500; // Wait 500ms to give onBackgroundMessage a chance
+    event.waitUntil(
+      new Promise(resolve => setTimeout(resolve, waitMs)).then(() => {
+        if (recentTags.has(tag)) {
+          console.log('[SW-Push] Handled by onBackgroundMessage after delay');
+          return;
+        }
+        console.log('[SW-Push] Safety net: showing notification manually');
+        return showNotificationFromData(data);
+      })
+    );
+  } catch (e) {
+    console.warn('[SW-Push] Could not parse push data:', e);
+  }
+});
+
+// ===== FCM BACKGROUND MESSAGE HANDLER =====
 // Handles messages when app is closed, backgrounded, or phone is locked
 messaging.onBackgroundMessage((payload) => {
   console.log('[FCM-SW] Background message:', payload);
@@ -27,8 +197,19 @@ messaging.onBackgroundMessage((payload) => {
   const notifData = payload.notification || {};
   const data = payload.data || {};
 
-  const title = data.title || notifData.title || '📸 Class Memories';
-  const body = data.body || notifData.body || 'New notification';
+  return showNotificationFromData({
+    ...data,
+    // Fallback to notification field values if data field is empty
+    title: data.title || notifData.title,
+    body: data.body || notifData.body,
+  });
+});
+
+// ===== UNIFIED NOTIFICATION DISPLAY =====
+// Single function to show notifications from data payload
+function showNotificationFromData(data) {
+  const title = data.title || '📸 Class Memories';
+  const body = data.body || 'New notification';
   const tag = data.tag || data.type || 'cm-notif-' + Date.now();
   const type = data.type || 'general';
 
@@ -48,14 +229,13 @@ messaging.onBackgroundMessage((payload) => {
 
     const options = {
       body: `Incoming ${callType} Call`,
-      icon: '/icons/icon-192.svg',
-      badge: '/icons/icon-192.svg',
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
       vibrate: [500, 200, 500, 200, 500, 200, 500],
       tag: 'incoming-call-' + callId,
       renotify: true,
       requireInteraction: true,
       silent: false,
-      ongoing: true,
       data: {
         url: `/?page=chat`,
         type: type,
@@ -83,8 +263,8 @@ messaging.onBackgroundMessage((payload) => {
 
     const options = {
       body: `Missed ${callType} Call`,
-      icon: '/icons/icon-192.svg',
-      badge: '/icons/icon-192.svg',
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
       vibrate: [200, 100, 200],
       tag: 'missed-call-' + (data.callId || Date.now()),
       renotify: true,
@@ -115,8 +295,8 @@ messaging.onBackgroundMessage((payload) => {
 
     const options = {
       body: preview,
-      icon: '/icons/icon-192.svg',
-      badge: '/icons/icon-192.svg',
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
       vibrate: [200, 100, 200, 100, 200],
       tag: 'chat-' + (data.fromId || Date.now()),
       renotify: true,
@@ -140,8 +320,8 @@ messaging.onBackgroundMessage((payload) => {
   // ===== DEFAULT NOTIFICATIONS (likes, comments, etc.) =====
   const options = {
     body: body,
-    icon: '/icons/icon-192.svg',
-    badge: '/icons/icon-192.svg',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
     vibrate: [200, 100, 200, 100, 200],
     tag: tag,
     renotify: true,
@@ -159,9 +339,12 @@ messaging.onBackgroundMessage((payload) => {
   };
 
   return self.registration.showNotification(title, options);
-});
+}
 
-// ===== NOTIFICATION CLICK HANDLER =====
+
+// ========================================================================
+// NOTIFICATION CLICK HANDLER
+// ========================================================================
 // Deep link to correct page based on notification type and action
 self.addEventListener('notificationclick', (event) => {
   const notification = event.notification;
@@ -175,7 +358,6 @@ self.addEventListener('notificationclick', (event) => {
 
   // Reject call — close notification, notify app
   if (action === 'reject_call') {
-    // Post message to any open client to reject the call
     event.waitUntil(
       clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
         for (const client of clientList) {
@@ -261,15 +443,18 @@ self.addEventListener('notificationclick', (event) => {
   );
 });
 
-// ===== MESSAGE HANDLER =====
-// Receive messages from main thread (e.g. show notification from foreground)
+
+// ========================================================================
+// MESSAGE HANDLER — Receive messages from main thread
+// ========================================================================
 self.addEventListener('message', (event) => {
+  // Show notification from foreground code
   if (event.data && event.data.type === 'SHOW_NOTIFICATION') {
     const { title, body, data } = event.data;
     self.registration.showNotification(title || 'Class Memories', {
       body: body || 'New notification',
-      icon: '/icons/icon-192.svg',
-      badge: '/icons/icon-192.svg',
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
       vibrate: [200, 100, 200, 100, 200],
       tag: data?.tag || 'cm-' + Date.now(),
       renotify: true,
@@ -284,5 +469,10 @@ self.addEventListener('message', (event) => {
     self.registration.getNotifications({ tag: 'incoming-call-' + callId }).then(notifications => {
       notifications.forEach(n => n.close());
     });
+  }
+
+  // Force skip waiting (for SW updates)
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
   }
 });

@@ -4,7 +4,7 @@ import { router } from './router.js';
 import { showToast, sanitizeHTML } from './utils.js';
 import { presenceManager } from './presence.js';
 import { timeCapsuleManager } from './timecapsuleManager.js';
-import { db, collection, getDocs, doc, writeBatch } from './firebase-config.js';
+import { db, collection, getDocs, doc, writeBatch, query, where, onSnapshot } from './firebase-config.js';
 
 window.syncAllLeaderboardPoints = async () => {
   console.log("Starting Emergency Sync...");
@@ -148,6 +148,7 @@ window.__appRouter = { router };
 // Lazy-load modules to prevent one broken module from killing the whole app
 let notificationManager = null;
 let callManager = null;
+let unsubChatBadge = null; // Firestore listener for chat unread badge
 
 async function loadCoreModules() {
   try {
@@ -356,14 +357,20 @@ function buildAppShell() {
     <main id="page-container" class="relative min-h-[calc(100vh-120px)]"></main>
   `;
 
-  // Build nav (5 tabs)
+  // Build nav (5 tabs) — chat icon gets a wrapper for the unread badge
   const navEl = $('#nav-buttons');
-  navEl.innerHTML = NAV_ITEMS.map(n => `
-    <button data-page="${n.id}" class="nav-btn ${n.id === 'home' ? 'active' : ''} flex flex-col items-center py-1.5 px-3 transition-all ${n.id === 'upload' ? 'nav-btn-center' : ''}" id="nav-${n.id}">
-      ${n.icon}
-      <span class="text-[10px] mt-0.5 font-medium">${n.label}</span>
-    </button>
-  `).join('');
+  navEl.innerHTML = NAV_ITEMS.map(n => {
+    // Wrap the chat icon in a relative container with an unread badge
+    const iconHTML = n.id === 'chat'
+      ? `<div class="nav-icon-wrap">${n.icon}<span id="chat-unread-badge" class="chat-nav-badge hidden"></span></div>`
+      : n.icon;
+    return `
+      <button data-page="${n.id}" class="nav-btn ${n.id === 'home' ? 'active' : ''} flex flex-col items-center py-1.5 px-3 transition-all ${n.id === 'upload' ? 'nav-btn-center' : ''}" id="nav-${n.id}">
+        ${iconHTML}
+        <span class="text-[10px] mt-0.5 font-medium">${n.label}</span>
+      </button>
+    `;
+  }).join('');
 
   $('#bottom-nav').classList.remove('hidden');
 
@@ -393,17 +400,25 @@ function buildAppShell() {
   $('#btn-notifications')?.addEventListener('click', () => router.navigate('notifications'));
 
   // Set up notification badge + FCM
+  // IMPORTANT: Initialize FCM FIRST (registers unified SW + gets token),
+  // THEN start Firestore listener. This ensures the push token is ready
+  // before any notifications could arrive.
   if (notificationManager) {
     const badge = $('#notif-badge');
     notificationManager.setBadgeElement(badge);
-    notificationManager.startListening();
-    // Initialize FCM (registers firebase-messaging-sw.js + token)
+
+    // 1. Initialize FCM (registers firebase-messaging-sw.js as unified SW)
     notificationManager.initFCM().then(() => {
-      // Request push permission after FCM is ready
-      if ('Notification' in window && Notification.permission === 'default') {
-        setTimeout(() => notificationManager.requestPushPermission(), 5000);
+      console.log('[App] FCM initialized, requesting push permission...');
+      // Request push permission immediately — don't delay
+      if ('Notification' in window && Notification.permission !== 'denied') {
+        notificationManager.requestPushPermission();
       }
     }).catch(e => console.log('[App] FCM init:', e.message));
+
+    // 2. Start Firestore notification listener (works independently of FCM)
+    notificationManager.startListening();
+
     // Unlock audio on first user touch/click (required by mobile browsers)
     const unlockAudio = () => {
       if (notificationManager) notificationManager.unlockAudio();
@@ -419,6 +434,9 @@ function buildAppShell() {
     callManager.listenForIncomingCalls();
     callManager.onIncomingCall = (call) => showIncomingCallUI(call);
   }
+
+  // Start real-time chat unread badge listener
+  startChatBadgeListener();
 
   // Start presence tracking (online/offline status)
   presenceManager.startPresenceTracking();
@@ -680,6 +698,83 @@ function showThrowbackPopup(posts) {
   });
 }
 
+// ===== CHAT UNREAD BADGE (Real-time Firestore listener) =====
+let _lastChatBadgeCount = 0;
+
+function startChatBadgeListener() {
+  stopChatBadgeListener(); // Clean up any existing listener
+  if (!authManager.currentUser) return;
+
+  const uid = authManager.currentUser.uid;
+
+  try {
+    const q = query(
+      collection(db, 'chats'),
+      where('participants', 'array-contains', uid)
+    );
+
+    unsubChatBadge = onSnapshot(q, (snap) => {
+      let totalUnread = 0;
+
+      snap.forEach(d => {
+        const data = d.data();
+        const unread = data.unreadCount?.[uid] || 0;
+        totalUnread += unread;
+      });
+
+      updateChatBadge(totalUnread);
+    }, (err) => {
+      console.warn('[ChatBadge] Listener error:', err);
+    });
+  } catch (e) {
+    console.warn('[ChatBadge] Could not start listener:', e);
+  }
+}
+
+function stopChatBadgeListener() {
+  if (unsubChatBadge) {
+    unsubChatBadge();
+    unsubChatBadge = null;
+  }
+  _lastChatBadgeCount = 0;
+}
+
+function updateChatBadge(count) {
+  const badge = document.getElementById('chat-unread-badge');
+  if (!badge) return;
+
+  const prevCount = _lastChatBadgeCount;
+  _lastChatBadgeCount = count;
+
+  if (count <= 0) {
+    // Hide badge smoothly
+    badge.classList.add('hidden');
+    badge.textContent = '';
+    return;
+  }
+
+  // Format count text
+  badge.textContent = count > 99 ? '99+' : String(count);
+
+  // Show badge
+  badge.classList.remove('hidden');
+
+  // Trigger bounce animation only when count changes (not on initial load from 0)
+  if (prevCount !== count && prevCount >= 0) {
+    badge.classList.remove('badge-bounce');
+    // Force reflow to restart animation
+    void badge.offsetWidth;
+    badge.classList.add('badge-bounce');
+    // Remove animation class after it completes
+    setTimeout(() => badge.classList.remove('badge-bounce'), 400);
+  }
+
+  // Update PWA app badge if supported
+  if ('setAppBadge' in navigator) {
+    navigator.setAppBadge(count).catch(() => {});
+  }
+}
+
 // ===== INCOMING CALL UI =====
 function showIncomingCallUI(call) {
   const callOverlay = document.getElementById('call-overlay');
@@ -885,6 +980,7 @@ async function init() {
         notificationManager.stopListening();
       }
       if (callManager) callManager.stopListeningForCalls();
+      stopChatBadgeListener();
       showLogin();
     }
   });

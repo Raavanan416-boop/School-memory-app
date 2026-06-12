@@ -66,29 +66,32 @@
   <script src="/js/security.js"></script>
   <script type="module" src="/js/app.js"></script>
   <script>
-    // Force clear all old caches on icon branding update (v2)
+    // Force clear all old caches on unified SW migration (v3)
     (async function() {
-      const BRAND_VERSION = 'cm-brand-v2';
+      const BRAND_VERSION = 'cm-brand-v3';
       if (!localStorage.getItem(BRAND_VERSION)) {
         localStorage.setItem(BRAND_VERSION, '1');
         // Clear all service worker caches
         if ('caches' in window) {
           const names = await caches.keys();
           await Promise.all(names.map(name => caches.delete(name)));
-          console.log('[ClassMemories] Cleared old caches for branding update:', names);
+          console.log('[ClassMemories] Cleared old caches for unified SW migration:', names);
         }
-        // Unregister old service workers so they re-register fresh
+        // Unregister ALL old service workers (sw.js + old firebase-messaging-sw.js)
         if ('serviceWorker' in navigator) {
           const regs = await navigator.serviceWorker.getRegistrations();
           for (const reg of regs) {
             await reg.unregister();
-            console.log('[ClassMemories] Unregistered old SW');
+            console.log('[ClassMemories] Unregistered old SW:', reg.scope);
           }
         }
       }
-      // Register service worker
+      // Register the UNIFIED service worker (handles both caching + FCM push)
+      // NOTE: firebase-messaging-sw.js is the SOLE service worker — do NOT also register sw.js
       if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js').catch(e => console.log('SW:', e));
+        navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' })
+          .then(reg => console.log('[ClassMemories] Unified SW registered:', reg.scope))
+          .catch(e => console.error('[ClassMemories] SW registration failed:', e));
       }
     })();
   </script>

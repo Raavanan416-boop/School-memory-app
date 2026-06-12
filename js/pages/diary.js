@@ -68,46 +68,55 @@ export async function renderDiary(container) {
 
 function loadDiary(container, filter = 'all') {
   const diaryEl = container.querySelector('#diary-container');
+  
+  // Clear previous list state immediately before fetching
+  diaryEl.innerHTML = '<div class="text-center py-8 text-gray-400">Loading...</div>';
+  
   if (unsubDiary) unsubDiary();
   // Clean up old reply listeners
   Object.values(replyUnsubs).forEach(unsub => { if (unsub) unsub(); });
   replyUnsubs = {};
 
   try {
+    const uid = authManager.currentUser?.uid;
+    // Use base query to avoid composite index requirements in Firebase
+    // Strict frontend filtering will handle the tab logic perfectly
     const q = query(collection(db, 'diary'), orderBy('createdAt', 'desc'), limit(30));
+
     unsubDiary = onSnapshot(q, (snap) => {
       if (snap.empty) {
         diaryEl.innerHTML = `
           <div class="diary-empty">
-            <div class="diary-empty-icon">📖</div>
-            <h3 class="font-handwriting text-2xl text-navy-700 mb-1">The diary awaits...</h3>
-            <p class="text-sm text-gray-400">Be the first to pen your thoughts</p>
+            <div class="diary-empty-icon">${filter === 'private' ? '🔒' : (filter === 'close' ? '👥' : '📖')}</div>
+            <h3 class="font-handwriting text-2xl text-navy-700 mb-1">${filter === 'private' ? 'Your private space' : 'The diary awaits...'}</h3>
+            <p class="text-sm text-gray-400">${filter === 'private' ? 'Only you can see these entries' : 'Be the first to pen your thoughts'}</p>
           </div>`;
         return;
       }
 
       diaryEl.innerHTML = '';
-      const uid = authManager.currentUser?.uid;
       let hasEntries = false;
 
       snap.forEach(d => {
         if (deletedDiaryIds.has(d.id)) return; // Skip deleted
         const entry = { id: d.id, ...d.data() };
 
-        // Apply privacy filter
+        // Apply strict frontend filters to guarantee no cross-tab mixing
+        
+        // 1. All Friends tab: Show only 'all'
+        if (filter === 'all' && entry.privacy !== 'all') return;
+        
+        // 2. Close Friends tab: Show only 'close' AND (author is me OR I am in closeFriendsList)
+        if (filter === 'close') {
+          if (entry.privacy !== 'close') return;
+          const closeFriends = entry.closeFriendsList || [];
+          if (entry.authorId !== uid && !closeFriends.includes(uid)) return;
+        }
+
+        // 3. My Private tab: Show only 'private' AND author is me
         if (filter === 'private') {
-          if (entry.authorId !== uid) return;
           if (entry.privacy !== 'private') return;
-        } else if (filter === 'close') {
-          if (entry.privacy === 'private' && entry.authorId !== uid) return;
-          if (entry.privacy !== 'close' && entry.privacy !== 'all' && entry.authorId !== uid) return;
-        } else {
-          // "all" filter — show public + close friends + own private
-          if (entry.privacy === 'private' && entry.authorId !== uid) return;
-          if (entry.privacy === 'close') {
-            const closeFriends = entry.closeFriendsList || [];
-            if (entry.authorId !== uid && !closeFriends.includes(uid)) return;
-          }
+          if (entry.authorId !== uid) return;
         }
 
         hasEntries = true;

@@ -1,4 +1,4 @@
-import { db, collection, getDocs, doc, updateDoc, writeBatch, deleteDoc, query, limit, getDoc, onSnapshot } from '../firebase-config.js';
+import { db, collection, getDocs, doc, updateDoc, writeBatch, deleteDoc, query, limit, getDoc, onSnapshot, addDoc, serverTimestamp } from '../firebase-config.js';
 import { authManager } from '../auth.js';
 import { router } from '../router.js';
 import { showToast, sanitizeHTML } from '../utils.js';
@@ -53,10 +53,9 @@ export async function renderOwnerPanel(container) {
         <!-- Navigation Tabs -->
         <div class="flex gap-2 p-1 bg-[#1e293b] rounded-xl border border-gray-700/50 overflow-x-auto hide-scrollbar shadow-inner">
           <button class="owner-tab-btn active" data-tab="users">👥 Users</button>
-          <button class="owner-tab-btn" data-tab="leaderboard">🏆 Score</button>
-          <button class="owner-tab-btn" data-tab="messages">💬 Chats</button>
           <button class="owner-tab-btn" data-tab="posts">📸 Posts</button>
           <button class="owner-tab-btn" data-tab="system">⚙️ System</button>
+          <button class="owner-tab-btn" data-tab="reset">☢️ Reset</button>
         </div>
 
         <!-- Tab Contents -->
@@ -70,28 +69,52 @@ export async function renderOwnerPanel(container) {
           </div>
         </div>
 
-        <div id="tab-leaderboard" class="owner-tab-content hidden space-y-4">
-          <div class="bg-red-500/10 border border-red-500/30 rounded-2xl p-5 text-center shadow-[0_0_15px_rgba(239,68,68,0.1)]">
-            <div class="w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-3">
-              <svg class="w-6 h-6 text-red-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+        <div id="tab-reset" class="owner-tab-content hidden space-y-4">
+          <div class="bg-[#1e293b] border border-red-500/30 rounded-2xl p-5 shadow-[0_0_15px_rgba(239,68,68,0.1)] relative">
+            <h3 class="text-white font-bold mb-4 flex items-center gap-2">
+              <svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+              Advanced Reset Control
+            </h3>
+            
+            <div class="grid grid-cols-2 gap-3 mb-6" id="reset-options">
+              <label class="flex items-center gap-2 text-sm text-gray-300 hover:text-white cursor-pointer"><input type="checkbox" value="messages" class="w-4 h-4 rounded bg-gray-800 border-gray-600 text-red-500 focus:ring-red-500/50"> Messages</label>
+              <label class="flex items-center gap-2 text-sm text-gray-300 hover:text-white cursor-pointer"><input type="checkbox" value="group_messages" class="w-4 h-4 rounded bg-gray-800 border-gray-600 text-red-500 focus:ring-red-500/50"> Group Messages</label>
+              <label class="flex items-center gap-2 text-sm text-gray-300 hover:text-white cursor-pointer"><input type="checkbox" value="call_history" class="w-4 h-4 rounded bg-gray-800 border-gray-600 text-red-500 focus:ring-red-500/50"> Call History</label>
+              <label class="flex items-center gap-2 text-sm text-gray-300 hover:text-white cursor-pointer"><input type="checkbox" value="notifications" class="w-4 h-4 rounded bg-gray-800 border-gray-600 text-red-500 focus:ring-red-500/50"> Notifications</label>
+              <label class="flex items-center gap-2 text-sm text-gray-300 hover:text-white cursor-pointer"><input type="checkbox" value="leaderboard_points" class="w-4 h-4 rounded bg-gray-800 border-gray-600 text-red-500 focus:ring-red-500/50"> Leaderboard Pts</label>
+              <label class="flex items-center gap-2 text-sm text-gray-300 hover:text-white cursor-pointer"><input type="checkbox" value="posts" class="w-4 h-4 rounded bg-gray-800 border-gray-600 text-red-500 focus:ring-red-500/50"> Posts</label>
+              <label class="flex items-center gap-2 text-sm text-gray-300 hover:text-white cursor-pointer"><input type="checkbox" value="likes" class="w-4 h-4 rounded bg-gray-800 border-gray-600 text-red-500 focus:ring-red-500/50"> Likes</label>
+              <label class="flex items-center gap-2 text-sm text-gray-300 hover:text-white cursor-pointer"><input type="checkbox" value="comments" class="w-4 h-4 rounded bg-gray-800 border-gray-600 text-red-500 focus:ring-red-500/50"> Comments</label>
+              <label class="flex items-center gap-2 text-sm text-gray-300 hover:text-white cursor-pointer"><input type="checkbox" value="polls" class="w-4 h-4 rounded bg-gray-800 border-gray-600 text-red-500 focus:ring-red-500/50"> Polls</label>
+              <label class="flex items-center gap-2 text-sm text-gray-300 hover:text-white cursor-pointer"><input type="checkbox" value="diaries" class="w-4 h-4 rounded bg-gray-800 border-gray-600 text-red-500 focus:ring-red-500/50"> Diaries</label>
+              <label class="flex items-center gap-2 text-sm text-gray-300 hover:text-white cursor-pointer"><input type="checkbox" value="time_capsules" class="w-4 h-4 rounded bg-gray-800 border-gray-600 text-red-500 focus:ring-red-500/50"> Time Capsules</label>
+              <label class="flex items-center gap-2 text-sm text-gray-300 hover:text-white cursor-pointer"><input type="checkbox" value="slam_books" class="w-4 h-4 rounded bg-gray-800 border-gray-600 text-red-500 focus:ring-red-500/50"> Slam Books</label>
+              <label class="flex items-center gap-2 text-sm text-gray-300 hover:text-white cursor-pointer"><input type="checkbox" value="friends_list" class="w-4 h-4 rounded bg-gray-800 border-gray-600 text-red-500 focus:ring-red-500/50"> Friends List</label>
+              <label class="flex items-center gap-2 text-sm text-gray-300 hover:text-white cursor-pointer"><input type="checkbox" value="birthday_wishes" class="w-4 h-4 rounded bg-gray-800 border-gray-600 text-red-500 focus:ring-red-500/50"> Birthday Wishes</label>
+              <label class="flex items-center gap-2 text-sm text-gray-300 hover:text-white cursor-pointer"><input type="checkbox" value="miss_you_notifications" class="w-4 h-4 rounded bg-gray-800 border-gray-600 text-red-500 focus:ring-red-500/50"> Miss You Notifs</label>
+              <label class="flex items-center gap-2 text-sm text-gray-300 hover:text-white cursor-pointer"><input type="checkbox" value="activity_logs" class="w-4 h-4 rounded bg-gray-800 border-gray-600 text-red-500 focus:ring-red-500/50"> Activity Logs</label>
+              <label class="flex items-center gap-2 text-sm text-gray-300 hover:text-white cursor-pointer"><input type="checkbox" value="user_points" class="w-4 h-4 rounded bg-gray-800 border-gray-600 text-red-500 focus:ring-red-500/50"> User Points</label>
+              <label class="flex items-center gap-2 text-sm font-bold text-red-400 hover:text-red-300 cursor-pointer col-span-2 border-t border-gray-700/50 pt-3 mt-1"><input type="checkbox" id="reset-everything" value="everything" class="w-4 h-4 rounded bg-gray-800 border-gray-600 text-red-600 focus:ring-red-600"> Everything (Full Reset)</label>
             </div>
-            <h3 class="text-white font-bold mb-2">Reset All Leaderboard Points</h3>
-            <p class="text-xs text-gray-400 mb-5">This will instantly set all users' scores back to 0. This action cannot be undone.</p>
-            <button id="btn-reset-leaderboard" class="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-[0_0_15px_rgba(220,38,38,0.4)] transition-all">
-              EXECUTE RESET
-            </button>
-          </div>
-        </div>
 
-        <div id="tab-messages" class="owner-tab-content hidden space-y-4">
-          <div class="bg-red-500/10 border border-red-500/30 rounded-2xl p-5 text-center shadow-[0_0_15px_rgba(239,68,68,0.1)]">
-            <div class="w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-3">
-              <svg class="w-6 h-6 text-red-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
+            <div class="space-y-3 mb-6 bg-gray-900/50 p-4 rounded-xl border border-gray-700">
+              <label class="block text-xs font-semibold text-gray-400 uppercase tracking-widest">Authorization Required</label>
+              <input type="password" id="owner-secret-code" placeholder="Enter Owner Secret Code..." class="w-full px-4 py-2 bg-[#0f172a] border border-red-500/30 rounded-lg text-white focus:outline-none focus:border-red-500 transition-colors placeholder-gray-600 font-mono text-sm"/>
             </div>
-            <h3 class="text-white font-bold mb-2">Nuclear Option: Clear All Messages</h3>
-            <p class="text-xs text-gray-400 mb-5">This will permanently delete ALL chats and messages between ALL users. Extremely destructive.</p>
-            <button id="btn-clear-messages" class="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-[0_0_15px_rgba(220,38,38,0.4)] transition-all">
-              INITIATE WIPE
+
+            <!-- Progress Indicator -->
+            <div id="reset-progress-container" class="hidden mb-4">
+              <div class="flex justify-between text-xs font-mono mb-1">
+                <span id="reset-progress-text" class="text-blue-400">Resetting...</span>
+                <span id="reset-progress-pct" class="text-blue-400">0%</span>
+              </div>
+              <div class="w-full bg-gray-800 rounded-full h-1.5 overflow-hidden">
+                <div id="reset-progress-bar" class="bg-blue-500 h-1.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+              </div>
+            </div>
+
+            <button id="btn-execute-reset" class="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-[0_0_15px_rgba(220,38,38,0.4)] transition-all disabled:opacity-50">
+              EXECUTE RESET
             </button>
           </div>
         </div>
@@ -162,8 +185,19 @@ export async function renderOwnerPanel(container) {
   await loadUsers(container);
 
   // Bind extreme actions
-  container.querySelector('#btn-reset-leaderboard').addEventListener('click', () => executeResetLeaderboard(container));
-  container.querySelector('#btn-clear-messages').addEventListener('click', () => executeClearMessages(container));
+  container.querySelector('#btn-execute-reset').addEventListener('click', () => executeAdvancedReset(container));
+  
+  // Connect "Everything" checkbox logic
+  const everythingCheck = container.querySelector('#reset-everything');
+  const otherChecks = container.querySelectorAll('#reset-options input[type="checkbox"]:not(#reset-everything)');
+  if (everythingCheck) {
+    everythingCheck.addEventListener('change', (e) => {
+      otherChecks.forEach(chk => chk.checked = e.target.checked);
+    });
+  }
+  otherChecks.forEach(chk => chk.addEventListener('change', () => {
+    if (!chk.checked) everythingCheck.checked = false;
+  }));
   
   // Bind system actions
   container.querySelector('#btn-refresh-posts').addEventListener('click', () => loadPosts(container));
@@ -519,80 +553,260 @@ window.openOwnerUserEdit = async (uid) => {
   };
 };
 
-window.executeResetLeaderboard = async function(container) {
-  if (!authManager.isOwner) {
-    showToast('Permission denied', 'error');
-    return;
-  }
-  if (!confirm('⚠ Reset all user points?\n\nThis will set all leaderboard points to zero.')) return;
-  
-  const btn = container.querySelector('#btn-reset-leaderboard');
-  const ogText = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'EXECUTING RESET...';
-
-  try {
-    console.log('Leaderboard Reset Started');
-    const usersSnap = await getDocs(collection(db, 'users'));
-    console.log(`Users Found: ${usersSnap.size}`);
-    console.log('Resetting Points...');
-
+async function deleteInBatches(docsToDelete, collectionName, onProgress, startPct, endPct) {
+  if (!docsToDelete || docsToDelete.length === 0) return;
+  const chunkSize = 400;
+  for (let i = 0; i < docsToDelete.length; i += chunkSize) {
+    const chunk = docsToDelete.slice(i, i + chunkSize);
     const batch = writeBatch(db);
-    usersSnap.forEach(userDoc => {
-      batch.update(doc(db, 'users', userDoc.id), { points: 0 });
-    });
-    
+    chunk.forEach(ref => batch.delete(ref));
     await batch.commit();
-    console.log('Batch Commit Success');
-    console.log('Leaderboard Updated');
-    showToast('✅ Leaderboard Reset Successfully', 'success');
-  } catch (e) {
-    console.error(e);
-    showToast('Failed to reset leaderboard', 'error');
+    const currentPct = Math.round(startPct + ((i + chunk.length) / docsToDelete.length) * (endPct - startPct));
+    if (onProgress) onProgress(currentPct, `Clearing ${collectionName}...`);
   }
-
-  btn.disabled = false;
-  btn.textContent = ogText;
 }
 
-async function executeClearMessages(container) {
-  if (!confirm('NUCLEAR WARNING:\\n\\nThis will PERMANENTLY delete ALL messages and chats.\\nAre you absolutely sure?')) return;
-  if (prompt('Type WIPE to confirm:') !== 'WIPE') {
-    showToast('Wipe cancelled.', 'info');
+async function executeAdvancedReset(container) {
+  const secretInput = container.querySelector('#owner-secret-code').value;
+  if (secretInput !== 'OWNER777') {
+    showToast('Invalid Owner Secret Code', 'error');
     return;
   }
+
+  const selectedOptions = Array.from(container.querySelectorAll('#reset-options input[type="checkbox"]:checked')).map(c => c.value);
+  if (selectedOptions.length === 0) {
+    showToast('Select at least one module to reset', 'warning');
+    return;
+  }
+
+  if (!confirm('Are you sure?\nThis action cannot be undone.')) return;
+
+  const btn = container.querySelector('#btn-execute-reset');
+  const progContainer = container.querySelector('#reset-progress-container');
+  const progText = container.querySelector('#reset-progress-text');
+  const progPct = container.querySelector('#reset-progress-pct');
+  const progBar = container.querySelector('#reset-progress-bar');
   
-  const btn = container.querySelector('#btn-clear-messages');
-  const ogText = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'WIPING DATABASE...';
+  btn.textContent = 'EXECUTING RESET...';
+  progContainer.classList.remove('hidden');
+
+  const updateProgress = (pct, text) => {
+    progPct.textContent = `${pct}%`;
+    progBar.style.width = `${pct}%`;
+    if (text) progText.textContent = text;
+  };
 
   try {
-    const chatsSnap = await getDocs(collection(db, 'chats'));
-    let count = 0;
-    
-    // Process each chat sequentially to avoid memory overload
-    for (const chatDoc of chatsSnap.docs) {
-      // 1. Delete messages subcollection
-      const msgsSnap = await getDocs(collection(db, 'chats', chatDoc.id, 'messages'));
-      const batch = writeBatch(db);
-      msgsSnap.forEach(msgDoc => {
-        batch.delete(doc(db, 'chats', chatDoc.id, 'messages', msgDoc.id));
-        count++;
-      });
-      // 2. Delete the chat document itself
-      batch.delete(chatDoc.ref);
-      await batch.commit();
+    let totalSteps = selectedOptions.length;
+    let stepSize = 100 / totalSteps;
+    let currentStep = 0;
+
+    const hasOption = (opt) => selectedOptions.includes(opt) || selectedOptions.includes('everything');
+
+    // 1. Messages / Group Messages
+    if (hasOption('messages') || hasOption('group_messages')) {
+      updateProgress(Math.round(currentStep * stepSize), 'Fetching Chats...');
+      const chatsSnap = await getDocs(collection(db, 'chats'));
+      
+      let chatRefsToDelete = [];
+      let messageRefsToDelete = [];
+      
+      for (const chatDoc of chatsSnap.docs) {
+        const data = chatDoc.data();
+        const isGroup = !!data.isGroup;
+        if ((isGroup && hasOption('group_messages')) || (!isGroup && hasOption('messages'))) {
+          chatRefsToDelete.push(chatDoc.ref);
+          const msgsSnap = await getDocs(collection(db, 'chats', chatDoc.id, 'messages'));
+          msgsSnap.forEach(m => messageRefsToDelete.push(m.ref));
+        }
+      }
+      
+      await deleteInBatches(messageRefsToDelete, 'Messages', updateProgress, currentStep * stepSize, (currentStep + 0.5) * stepSize);
+      await deleteInBatches(chatRefsToDelete, 'Chats', updateProgress, (currentStep + 0.5) * stepSize, (currentStep + 1) * stepSize);
+      currentStep += (hasOption('messages') && hasOption('group_messages') ? 2 : 1); // Adjust roughly
     }
+
+    // 2. Call History
+    if (hasOption('call_history')) {
+      updateProgress(Math.round(currentStep * stepSize), 'Clearing Calls...');
+      const callsSnap = await getDocs(collection(db, 'calls'));
+      let callRefs = [];
+      callsSnap.forEach(d => callRefs.push(d.ref));
+      await deleteInBatches(callRefs, 'Calls', updateProgress, currentStep * stepSize, (currentStep + 1) * stepSize);
+      currentStep++;
+    }
+
+    // 3. Notifications & Miss You
+    if (hasOption('notifications') || hasOption('miss_you_notifications')) {
+      updateProgress(Math.round(currentStep * stepSize), 'Clearing Notifications...');
+      const notifSnap = await getDocs(collection(db, 'notifications'));
+      let notifRefs = [];
+      notifSnap.forEach(d => {
+        const data = d.data();
+        if (hasOption('notifications') || (hasOption('miss_you_notifications') && data.type === 'miss_you')) {
+          notifRefs.push(d.ref);
+        }
+      });
+      await deleteInBatches(notifRefs, 'Notifications', updateProgress, currentStep * stepSize, (currentStep + 1) * stepSize);
+      currentStep += (hasOption('notifications') && hasOption('miss_you_notifications') ? 2 : 1);
+    }
+
+    // 4. Posts / Likes / Comments
+    if (hasOption('posts') || hasOption('likes') || hasOption('comments')) {
+      updateProgress(Math.round(currentStep * stepSize), 'Processing Posts...');
+      const postsSnap = await getDocs(collection(db, 'posts'));
+      
+      let postsToDelete = [];
+      let commentsToDelete = [];
+      let postsToUpdateLikes = [];
+      
+      for (const pDoc of postsSnap.docs) {
+        if (hasOption('posts')) {
+          postsToDelete.push(pDoc.ref);
+        } else if (hasOption('likes')) {
+          postsToUpdateLikes.push(pDoc.ref);
+        }
+        
+        if (hasOption('posts') || hasOption('comments')) {
+          const cSnap = await getDocs(collection(db, 'posts', pDoc.id, 'comments'));
+          cSnap.forEach(c => commentsToDelete.push(c.ref));
+        }
+      }
+      
+      await deleteInBatches(commentsToDelete, 'Comments', updateProgress, currentStep * stepSize, (currentStep + 0.3) * stepSize);
+      
+      if (postsToUpdateLikes.length > 0) {
+        for (let i = 0; i < postsToUpdateLikes.length; i += 400) {
+          const chunk = postsToUpdateLikes.slice(i, i + 400);
+          const batch = writeBatch(db);
+          chunk.forEach(ref => batch.update(ref, { likes: [] }));
+          await batch.commit();
+        }
+      }
+      
+      if (postsToDelete.length > 0) {
+        await deleteInBatches(postsToDelete, 'Posts', updateProgress, (currentStep + 0.6) * stepSize, (currentStep + 1) * stepSize);
+      }
+      
+      if (hasOption('posts')) currentStep++;
+      if (hasOption('likes')) currentStep++;
+      if (hasOption('comments')) currentStep++;
+    }
+
+    // 5. Polls
+    if (hasOption('polls')) {
+      updateProgress(Math.round(currentStep * stepSize), 'Clearing Polls...');
+      const pollsSnap = await getDocs(collection(db, 'polls'));
+      let pollRefs = [];
+      pollsSnap.forEach(d => pollRefs.push(d.ref));
+      await deleteInBatches(pollRefs, 'Polls', updateProgress, currentStep * stepSize, (currentStep + 1) * stepSize);
+      currentStep++;
+    }
+
+    // 6. Diaries
+    if (hasOption('diaries')) {
+      updateProgress(Math.round(currentStep * stepSize), 'Clearing Diaries...');
+      const diarySnap = await getDocs(collection(db, 'diary'));
+      let dRefs = [];
+      diarySnap.forEach(d => dRefs.push(d.ref));
+      await deleteInBatches(dRefs, 'Diaries', updateProgress, currentStep * stepSize, (currentStep + 1) * stepSize);
+      currentStep++;
+    }
+
+    // 7. Time Capsules
+    if (hasOption('time_capsules')) {
+      updateProgress(Math.round(currentStep * stepSize), 'Clearing Time Capsules...');
+      const capSnap = await getDocs(collection(db, 'timeCapsules'));
+      let capRefs = [];
+      let capMsgRefs = [];
+      for (const cDoc of capSnap.docs) {
+        capRefs.push(cDoc.ref);
+        const mSnap = await getDocs(collection(db, 'timeCapsules', cDoc.id, 'messages'));
+        mSnap.forEach(m => capMsgRefs.push(m.ref));
+      }
+      await deleteInBatches(capMsgRefs, 'Capsule Msgs', updateProgress, currentStep * stepSize, (currentStep + 0.5) * stepSize);
+      await deleteInBatches(capRefs, 'Capsules', updateProgress, (currentStep + 0.5) * stepSize, (currentStep + 1) * stepSize);
+      currentStep++;
+    }
+
+    // 8. Slam Books
+    if (hasOption('slam_books')) {
+      updateProgress(Math.round(currentStep * stepSize), 'Clearing Slam Books...');
+      const sbSnap = await getDocs(collection(db, 'slambooks'));
+      const sbrSnap = await getDocs(collection(db, 'slambookResponses'));
+      let sbRefs = [];
+      sbSnap.forEach(d => sbRefs.push(d.ref));
+      sbrSnap.forEach(d => sbRefs.push(d.ref));
+      await deleteInBatches(sbRefs, 'Slam Books', updateProgress, currentStep * stepSize, (currentStep + 1) * stepSize);
+      currentStep++;
+    }
+
+    // 9. Birthday Wishes
+    if (hasOption('birthday_wishes')) {
+      updateProgress(Math.round(currentStep * stepSize), 'Clearing Birthdays...');
+      const bdaySnap = await getDocs(collection(db, 'birthdayPoints'));
+      let bRefs = [];
+      bdaySnap.forEach(d => bRefs.push(d.ref));
+      await deleteInBatches(bRefs, 'Birthdays', updateProgress, currentStep * stepSize, (currentStep + 1) * stepSize);
+      currentStep++;
+    }
+
+    // 10. Activity Logs (Badges)
+    if (hasOption('activity_logs')) {
+      updateProgress(Math.round(currentStep * stepSize), 'Clearing Activity Logs...');
+      const badgeSnap = await getDocs(collection(db, 'badges'));
+      let badgeRefs = [];
+      badgeSnap.forEach(d => badgeRefs.push(d.ref));
+      await deleteInBatches(badgeRefs, 'Activity Logs', updateProgress, currentStep * stepSize, (currentStep + 1) * stepSize);
+      currentStep++;
+    }
+
+    // 11. Leaderboard / User Points / Friends List
+    if (hasOption('leaderboard_points') || hasOption('user_points') || hasOption('friends_list')) {
+      updateProgress(Math.round(currentStep * stepSize), 'Updating Users...');
+      const usersSnap = await getDocs(collection(db, 'users'));
+      let userRefs = [];
+      usersSnap.forEach(d => userRefs.push(d.ref));
+      
+      for (let i = 0; i < userRefs.length; i += 400) {
+        const chunk = userRefs.slice(i, i + 400);
+        const batch = writeBatch(db);
+        chunk.forEach(ref => {
+          let updates = {};
+          if (hasOption('leaderboard_points') || hasOption('user_points')) updates.points = 0;
+          if (hasOption('friends_list')) updates.closeFriends = [];
+          batch.update(ref, updates);
+        });
+        await batch.commit();
+      }
+      if (hasOption('leaderboard_points')) currentStep++;
+      if (hasOption('user_points')) currentStep++;
+      if (hasOption('friends_list')) currentStep++;
+    }
+
+    updateProgress(100, 'Reset Completed Successfully');
     
-    showToast(`Database wiped. ${count} messages destroyed.`, 'success');
-  } catch (e) {
-    console.error(e);
-    showToast('Failed to complete wipe. See console.', 'error');
+    // Write Log
+    await addDoc(collection(db, 'resetLogs'), {
+      ownerName: authManager.currentUser?.displayName || 'Owner',
+      ownerId: authManager.currentUser?.uid,
+      resetType: hasOption('everything') ? ['Everything (Full Reset)'] : selectedOptions,
+      timestamp: serverTimestamp()
+    });
+
+    showToast('Reset Completed Successfully', 'success');
+    container.querySelector('#owner-secret-code').value = '';
+    
+  } catch (err) {
+    console.error('Reset error:', err);
+    showToast('Reset failed or partially completed', 'error');
+    updateProgress(100, 'Reset Error');
   }
 
   btn.disabled = false;
-  btn.textContent = ogText;
+  btn.textContent = 'EXECUTE RESET';
+  setTimeout(() => { progContainer.classList.add('hidden'); }, 3000);
 }
 
 // ----- POSTS MANAGEMENT -----

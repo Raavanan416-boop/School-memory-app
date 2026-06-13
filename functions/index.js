@@ -7,9 +7,19 @@
 // giving us full control over notification display in all app states.
 
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
+const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { getMessaging } = require('firebase-admin/messaging');
+const cloudinary = require('cloudinary').v2;
+
+// Cloudinary configuration (Using process.env for security)
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'dcjudjdlm',
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+  secure: true
+});
 
 initializeApp();
 const db = getFirestore();
@@ -245,3 +255,45 @@ async function logDeliveryStatus(notifId, status, receiverId, messageId = null, 
 //   await batch.commit();
 //   console.log(`Cleaned ${snap.size} old notifications`);
 // });
+
+/**
+ * Securely delete media from Cloudinary.
+ * Only callable by authenticated users.
+ * Validates request data and deletes via Cloudinary backend API.
+ */
+exports.deleteCloudinaryMedia = onCall(async (request) => {
+  // 1. Check Auth
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'User must be logged in to delete media.');
+  }
+
+  // 2. Validate Data
+  const { publicIds, resourceType } = request.data;
+  if (!publicIds || !Array.isArray(publicIds) || publicIds.length === 0) {
+    throw new HttpsError('invalid-argument', 'An array of Cloudinary public IDs is required.');
+  }
+
+  // 3. Ensure API secrets are configured
+  if (!process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+    console.error('Missing Cloudinary API Key or Secret in environment variables.');
+    throw new HttpsError('internal', 'Server configuration error.');
+  }
+
+  const type = resourceType || 'image'; // 'image', 'video', or 'raw'
+  const results = [];
+
+  // 4. Delete each media from Cloudinary
+  for (const publicId of publicIds) {
+    try {
+      if (!publicId) continue;
+      console.log(`[Cloudinary] Deleting ${type}: ${publicId}`);
+      const result = await cloudinary.uploader.destroy(publicId, { resource_type: type });
+      results.push({ publicId, success: result.result === 'ok' || result.result === 'not found', raw: result });
+    } catch (err) {
+      console.error(`[Cloudinary] Failed to delete ${publicId}:`, err);
+      results.push({ publicId, success: false, error: err.message });
+    }
+  }
+
+  return { status: 'success', results };
+});

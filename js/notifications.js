@@ -24,6 +24,11 @@ const NOTIF_CONFIG = {
     bodyTemplate: (name, data) => `${name}: ${data.messagePreview || 'sent you a message'}`,
     getUrl: (data) => `/?page=chat&userId=${data.fromId || ''}`,
   },
+  share: {
+    title: '🚀 Memory Shared',
+    bodyTemplate: (name) => `${name} shared a memory with you!`,
+    getUrl: (data) => `/?page=chat&userId=${data.fromId || ''}`,
+  },
   birthday_wish: {
     title: '🎂 New Birthday Wish',
     bodyTemplate: (name) => `${name} sent you a birthday wish.`,
@@ -120,6 +125,16 @@ const NOTIF_CONFIG = {
   tag_request: {
     title: '📸 Tag Request',
     bodyTemplate: (name) => `${name} tagged you in a memory. Approve to add to your profile.`,
+    getUrl: (data) => `/?page=home&postId=${data.postId || ''}`,
+  },
+  tag_accepted: {
+    title: '✅ Tag Accepted',
+    bodyTemplate: (name) => `${name} accepted your tag.`,
+    getUrl: (data) => `/?page=home&postId=${data.postId || ''}`,
+  },
+  tag_declined: {
+    title: '❌ Tag Declined',
+    bodyTemplate: (name) => `${name} declined your tag.`,
     getUrl: (data) => `/?page=home&postId=${data.postId || ''}`,
   },
   miss_you: {

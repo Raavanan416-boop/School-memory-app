@@ -1,0 +1,86 @@
+/* Post Interactions Redesign - CSS Enhancements */
+
+/* 1. Modal Sheet (Instagram style bottom sheet) */
+.modal-sheet-container {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.modal-sheet-content {
+  width: 100%;
+  max-width: 600px;
+  height: 90vh; /* 90% screen height */
+  background: #ffffff;
+  border-top-left-radius: 24px;
+  border-top-right-radius: 24px;
+  display: flex;
+  flex-direction: column;
+  transform: translateY(100%);
+  transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  box-shadow: 0 -10px 40px rgba(0,0,0,0.1);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Slide-up animation active class */
+.modal-active .modal-sheet-content {
+  transform: translateY(0);
+}
+.modal-closing .modal-sheet-content {
+  transform: translateY(100%);
+}
+
+/* Background blur */
+.modal-sheet-overlay .modal-backdrop {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  background: rgba(0, 0, 0, 0.4);
+}
+
+/* Sheet Handle (for swipe indicator) */
+.sheet-handle {
+  width: 40px;
+  height: 5px;
+  background: #e2e8f0;
+  border-radius: 10px;
+  margin: 12px auto;
+}
+
+/* 2. Heart Pop Animation */
+@keyframes heart-pop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.3); }
+  100% { transform: scale(1); }
+}
+.heart-pop-anim {
+  animation: heart-pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+/* 3. Bookmark Bounce Animation */
+@keyframes bookmark-bounce {
+  0% { transform: scale(1); }
+  50% { transform: scale(0.8); }
+  70% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+.bookmark-bounce-anim {
+  animation: bookmark-bounce 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+/* Selected friend chips in share modal */
+.share-chip {
+  animation: fadeInScale 0.2s ease-out forwards;
+}
+@keyframes fadeInScale {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* Comment like icon transition */
+.comment-like-icon {
+  transition: color 0.2s ease, transform 0.2s ease;
+}
+.comment-like-icon.liked {
+  color: #ef4444; /* red-500 */
+}

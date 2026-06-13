@@ -1,5 +1,6 @@
 // Upload page — Premium Instagram + Apple inspired Multi-Step flow
-import { db, storage, collection, addDoc, serverTimestamp, Timestamp, storageRef, uploadBytesResumable, getDownloadURL, getDocs } from '../firebase-config.js';
+import { db, collection, addDoc, serverTimestamp, Timestamp, getDocs } from '../firebase-config.js';
+import { uploadMedia } from '../services/cloudinary.js';
 import { showToast, compressImage, sanitizeHTML } from '../utils.js';
 import { authManager, awardPoints } from '../auth.js';
 import { createNotification } from '../notifications.js';
@@ -581,23 +582,20 @@ export async function renderUpload(container) {
       // Upload Media Files
       const mediaUrls = [];
       const mediaTypes = [];
+      const cloudinaryPublicIds = [];
       
       for (const file of selectedMediaFiles) {
         let processedFile = file;
         if (file.type.startsWith('image')) {
           processedFile = await compressImage(file);
         }
-        const path = `posts/${uid}/${Date.now()}_${file.name}`;
-        const sRef = storageRef(storage, path);
-        const uploadTask = uploadBytesResumable(sRef, processedFile);
         
-        await new Promise((resolve, reject) => {
-          uploadTask.on('state_changed', null, reject, resolve);
-        });
+        const type = file.type.startsWith('video') ? 'video' : 'image';
+        const { url, publicId } = await uploadMedia(processedFile, type);
         
-        const url = await getDownloadURL(sRef);
         mediaUrls.push(url);
-        mediaTypes.push(file.type.startsWith('video') ? 'video' : 'image');
+        mediaTypes.push(type);
+        cloudinaryPublicIds.push(publicId);
         
         uploadedCount++;
         updateProgress();
@@ -605,15 +603,12 @@ export async function renderUpload(container) {
 
       // Upload Music if present
       let musicUrl = null;
+      let musicPublicId = null;
       if (selectedMusicFile) {
         titleStatus.textContent = 'Uploading Soundtrack';
-        const path = `posts_audio/${uid}/${Date.now()}_${selectedMusicFile.name}`;
-        const sRef = storageRef(storage, path);
-        const uploadTask = uploadBytesResumable(sRef, selectedMusicFile);
-        await new Promise((resolve, reject) => {
-          uploadTask.on('state_changed', null, reject, resolve);
-        });
-        musicUrl = await getDownloadURL(sRef);
+        const res = await uploadMedia(selectedMusicFile, 'raw');
+        musicUrl = res.url;
+        musicPublicId = res.publicId;
         
         uploadedCount++;
         updateProgress();
@@ -642,7 +637,9 @@ export async function renderUpload(container) {
         privacy,
         imageUrls: mediaUrls, // New array for multiple media
         mediaTypes, // Corresponds to imageUrls index
+        cloudinaryPublicIds, // Array of Cloudinary Public IDs for images/videos
         musicUrl,
+        musicPublicId, // Cloudinary Public ID for music
         pendingTags, // Await acceptance
         taggedFriends: [], // Accepted tags go here
         mentions, // Instant mentions

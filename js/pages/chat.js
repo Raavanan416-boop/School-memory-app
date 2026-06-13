@@ -1,7 +1,7 @@
 // Chat page — WhatsApp-style with typing, presence, images, voice msgs, call buttons
-import { db, storage, collection, doc, query, orderBy, onSnapshot, addDoc, getDocs, updateDoc,
-  serverTimestamp, where, setDoc, arrayUnion, limit, deleteDoc, getDoc, increment, deleteField,
-  storageRef, uploadBytes, uploadBytesResumable, getDownloadURL } from '../firebase-config.js';
+import { db, collection, doc, query, orderBy, onSnapshot, addDoc, getDocs, updateDoc,
+  serverTimestamp, where, setDoc, arrayUnion, limit, deleteDoc, getDoc, increment, deleteField } from '../firebase-config.js';
+import { uploadMedia } from '../services/cloudinary.js';
 import { showToast, timeAgo, sanitizeHTML, debounce } from '../utils.js';
 import { authManager } from '../auth.js';
 import { presenceManager } from '../presence.js';
@@ -633,9 +633,21 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false, fro
         const msgEl = document.createElement('div');
         msgEl.className = `flex ${isMine ? 'justify-end' : 'justify-start'} ${sameSender ? 'mt-0.5' : 'mt-2'} msg-animate msg-wrapper`;
         
-        // Voice Message rendering
+        // Voice Message & Shared Post rendering
         let contentHTML = '';
-        if (msg.audioUrl) {
+        if (msg.type === 'shared_post' && msg.sharedPost) {
+          const sp = msg.sharedPost;
+          contentHTML = `
+            <div class="shared-post-preview mt-1 ${isMine ? 'bg-white/20' : 'bg-gray-100'} rounded-xl overflow-hidden shadow-sm cursor-pointer border border-white/10" onclick="location.hash='#home?post=${sp.id}'">
+              ${sp.imageUrl ? `<img src="${sp.imageUrl}" class="w-full h-32 object-cover" />` : ''}
+              <div class="p-2">
+                <p class="text-xs font-semibold ${isMine ? 'text-white' : 'text-navy-800'}">Shared from ${sanitizeHTML(sp.authorName)}</p>
+                ${sp.caption ? `<p class="text-[10px] ${isMine ? 'text-white/80' : 'text-gray-600'} truncate">${sanitizeHTML(sp.caption)}</p>` : ''}
+                <button class="mt-2 text-[10px] bg-navy-500 text-white px-2 py-1 rounded-full w-full font-semibold">Open Post</button>
+              </div>
+            </div>
+          `;
+        } else if (msg.audioUrl) {
           const duration = msg.duration || 0;
           const durStr = duration ? `${Math.floor(duration/60)}:${(duration%60).toString().padStart(2,'0')}` : '';
           contentHTML = `
@@ -959,10 +971,8 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false, fro
 
         try {
           showToast('Sending voice message...', 'info');
-          const path = `chat-audio/${currentChatId}/${Date.now()}.webm`;
-          const sRef = storageRef(storage, path);
-          await uploadBytes(sRef, audioBlob);
-          const audioUrl = await getDownloadURL(sRef);
+          const res = await uploadMedia(audioBlob, 'raw');
+          const audioUrl = res.url;
 
           const msgData = {
             audioUrl,
@@ -1120,10 +1130,8 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false, fro
 
     try {
       showToast('Sending image...', 'info');
-      const path = `chat-images/${currentChatId}/${Date.now()}_${file.name}`;
-      const sRef = storageRef(storage, path);
-      await uploadBytes(sRef, file);
-      const imageUrl = await getDownloadURL(sRef);
+      const res = await uploadMedia(file, 'image');
+      const imageUrl = res.url;
 
       await addDoc(collection(db, 'chats', currentChatId, 'messages'), {
         text: '',
@@ -2092,10 +2100,8 @@ function showGroupSettingsModal(chatId, currentName, currentPic) {
       }
       
       if (newPicFile) {
-        const path = `group-images/${chatId}/${Date.now()}_${newPicFile.name}`;
-        const sRef = storageRef(storage, path);
-        await uploadBytes(sRef, newPicFile);
-        const url = await getDownloadURL(sRef);
+        const res = await uploadMedia(newPicFile, 'image');
+        const url = res.url;
         updates.profilePic = url;
         if (sysMsgText) {
           sysMsgText += ' and changed the group photo';

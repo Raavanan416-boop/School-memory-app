@@ -1,5 +1,5 @@
 // Notifications page — Premium notification center with grouping, delete, and deep links
-import { db, collection, query, where, orderBy, limit, onSnapshot, doc, updateDoc, deleteDoc, arrayUnion, arrayRemove } from '../firebase-config.js';
+import { db, collection, query, where, orderBy, limit, onSnapshot, doc, updateDoc, deleteDoc, arrayUnion, arrayRemove, setDoc, serverTimestamp, getDoc } from '../firebase-config.js';
 import { timeAgo, sanitizeHTML } from '../utils.js';
 import { authManager } from '../auth.js';
 import { notificationManager } from '../notifications.js';
@@ -207,6 +207,8 @@ function createNotifCard(notif) {
     game_challenge: { icon: '🎮', color: 'bg-orange-50 border-orange-100' },
     tag: { icon: '📸', color: 'bg-blue-50 border-blue-100' },
     tag_request: { icon: '📸', color: 'bg-blue-50 border-blue-100' },
+    tag_accepted: { icon: '✅', color: 'bg-green-50 border-green-100' },
+    tag_declined: { icon: '❌', color: 'bg-red-50 border-red-100' },
     badge_suggestion: { icon: '🏅', color: 'bg-amber-50 border-amber-100' },
     miss_you: { icon: '❤️', color: 'bg-pink-50 border-pink-100' },
   };
@@ -297,10 +299,33 @@ function createNotifCard(notif) {
       try {
         const postId = acceptBtn.dataset.postId;
         const postRef = doc(db, 'posts', postId);
+        const myUid = authManager.currentUser.uid;
+        
         await updateDoc(postRef, {
-          pendingTags: arrayRemove(authManager.currentUser.uid),
-          taggedFriends: arrayUnion(authManager.currentUser.uid)
+          pendingTags: arrayRemove(myUid),
+          taggedFriends: arrayUnion(myUid)
         });
+
+        // Add to subcollections
+        await setDoc(doc(db, 'users', myUid, 'taggedPosts', postId), {
+          taggedAt: serverTimestamp()
+        });
+        await setDoc(doc(db, 'posts', postId, 'acceptedTags', myUid), {
+          acceptedAt: serverTimestamp()
+        });
+
+        // Send notification to post owner
+        const postSnap = await getDoc(postRef);
+        if (postSnap.exists()) {
+          const authorId = postSnap.data().authorId;
+          if (authorId && authorId !== myUid) {
+            notificationManager.constructor.create('tag_accepted', authorId, { 
+              postId, 
+              messagePreview: 'accepted your tag'
+            });
+          }
+        }
+
         await updateDoc(doc(db, 'notifications', notif.id), { handled: true, body: 'You accepted the tag request.', read: true });
         import('../utils.js').then(m => m.showToast('Added to your profile!', 'success'));
       } catch (err) { console.error(err); }
@@ -312,9 +337,24 @@ function createNotifCard(notif) {
       try {
         const postId = rejectBtn.dataset.postId;
         const postRef = doc(db, 'posts', postId);
+        const myUid = authManager.currentUser.uid;
+
         await updateDoc(postRef, {
-          pendingTags: arrayRemove(authManager.currentUser.uid)
+          pendingTags: arrayRemove(myUid)
         });
+
+        // Send notification to post owner
+        const postSnap = await getDoc(postRef);
+        if (postSnap.exists()) {
+          const authorId = postSnap.data().authorId;
+          if (authorId && authorId !== myUid) {
+            notificationManager.constructor.create('tag_declined', authorId, { 
+              postId, 
+              messagePreview: 'declined your tag'
+            });
+          }
+        }
+
         await updateDoc(doc(db, 'notifications', notif.id), { handled: true, body: 'You rejected the tag request.', read: true });
       } catch (err) { console.error(err); }
     });
@@ -400,6 +440,8 @@ function getDefaultTitle(type) {
     game_challenge: '🎮 Game Challenge',
     tag: '📸 Tagged',
     tag_request: '📸 Tag Request',
+    tag_accepted: '✅ Tag Accepted',
+    tag_declined: '❌ Tag Declined',
     badge_suggestion: '🏅 New Badge',
     miss_you: '❤️ Someone Misses You',
   };
@@ -432,6 +474,8 @@ function getDefaultBody(notif) {
     game_challenge: `${name} challenged you!`,
     tag: `${name} tagged you in a memory.`,
     tag_request: `${name} tagged you in a memory. Approve to add to your profile.`,
+    tag_accepted: `${name} accepted your tag.`,
+    tag_declined: `${name} declined your tag.`,
     badge_suggestion: `${name} suggested a new title for you.`,
     miss_you: `${name} misses you ❤️🥺`,
   };

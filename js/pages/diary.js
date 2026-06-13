@@ -1,7 +1,7 @@
 // Shared Diary page — Fixed replies, continue writing, privacy, delete support
 import { db, collection, addDoc, query, orderBy, onSnapshot, doc, updateDoc,
-  serverTimestamp, limit, arrayUnion, arrayRemove, getDocs, where, storage,
-  storageRef, uploadBytes, getDownloadURL, deleteDoc } from '../firebase-config.js';
+  serverTimestamp, limit, arrayUnion, arrayRemove, getDocs, where, deleteDoc } from '../firebase-config.js';
+import { uploadMedia } from '../services/cloudinary.js';
 import { showToast, sanitizeHTML, formatDate, MOOD_EMOJIS, timeAgo } from '../utils.js';
 import { authManager, awardPoints } from '../auth.js';
 import { router } from '../router.js';
@@ -610,10 +610,8 @@ function showDiaryEntryModal() {
     try {
       let imageUrl = '';
       if (selectedImage) {
-        const path = `diary/${authManager.currentUser.uid}/${Date.now()}_${selectedImage.name}`;
-        const sRef = storageRef(storage, path);
-        await uploadBytes(sRef, selectedImage);
-        imageUrl = await getDownloadURL(sRef);
+        const res = await uploadMedia(selectedImage, 'image');
+        imageUrl = res.url;
       }
 
       await addDoc(collection(db, 'diary'), {

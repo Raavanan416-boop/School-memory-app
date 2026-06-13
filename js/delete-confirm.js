@@ -1,6 +1,6 @@
 // Shared delete confirmation popup — Premium animated modal
 // BULLETPROOF: Always removes UI instantly (optimistic), never shows errors.
-import { db, doc, deleteDoc, collection, getDocs, query, storage, storageRef, deleteObject } from './firebase-config.js';
+import { db, doc, deleteDoc, collection, getDocs, query } from './firebase-config.js';
 import { showToast } from './utils.js';
 
 /**
@@ -14,41 +14,56 @@ export function showDeleteConfirmation(title = 'this item', onConfirm, options =
   const {
     subtitle = 'This action cannot be undone.',
     icon = '🗑️',
-    confirmText = 'Delete',
+    confirmText = 'Delete Forever',
     cancelText = 'Cancel',
     element = null  // DOM element to remove from UI
   } = options;
 
   const overlay = document.createElement('div');
-  overlay.className = 'delete-confirm-overlay';
+  overlay.className = 'fixed inset-0 z-[200] flex items-center justify-center p-4 bg-navy-900/40 backdrop-blur-sm opacity-0 transition-opacity duration-300';
+  
   overlay.innerHTML = `
-    <div class="delete-confirm-backdrop"></div>
-    <div class="delete-confirm-card">
-      <div class="delete-confirm-icon">${icon}</div>
-      <h3 class="delete-confirm-title">Are you sure you want to delete ${title}?</h3>
-      <p class="delete-confirm-subtitle">${subtitle}</p>
-      <div class="delete-confirm-actions">
-        <button class="delete-confirm-cancel">${cancelText}</button>
-        <button class="delete-confirm-delete">${confirmText}</button>
+    <div class="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl transform scale-95 transition-transform duration-300 text-center p-6">
+      <div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">
+        ⚠️
+      </div>
+      <h3 class="text-xl font-bold text-navy-800">Delete ${title}?</h3>
+      <p class="text-sm text-gray-500 mt-2">${subtitle}</p>
+      
+      <div class="flex gap-3 mt-8">
+        <button class="delete-confirm-cancel flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold hover:bg-gray-200 transition-colors">
+          ${cancelText}
+        </button>
+        <button class="delete-confirm-delete flex-1 py-3 bg-red-500 text-white rounded-xl font-bold hover:bg-red-600 transition-colors shadow-lg shadow-red-500/30">
+          ${confirmText}
+        </button>
       </div>
     </div>
   `;
+
   document.body.appendChild(overlay);
-  requestAnimationFrame(() => overlay.classList.add('active'));
+  
+  // Animate in
+  requestAnimationFrame(() => {
+    overlay.classList.remove('opacity-0');
+    overlay.querySelector('.transform').classList.remove('scale-95');
+  });
 
   const close = () => {
-    overlay.classList.remove('active');
-    setTimeout(() => { if (overlay.parentNode) overlay.remove(); }, 300);
+    overlay.classList.add('opacity-0');
+    overlay.querySelector('.transform').classList.add('scale-95');
+    setTimeout(() => overlay.remove(), 300);
   };
 
-  overlay.querySelector('.delete-confirm-backdrop')?.addEventListener('click', close);
-  overlay.querySelector('.delete-confirm-cancel')?.addEventListener('click', close);
+  overlay.querySelector('.delete-confirm-cancel').addEventListener('click', close);
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) close();
+  });
 
-  overlay.querySelector('.delete-confirm-delete')?.addEventListener('click', async () => {
+  overlay.querySelector('.delete-confirm-delete').addEventListener('click', async () => {
     const btn = overlay.querySelector('.delete-confirm-delete');
-    if (!btn) return;
     btn.disabled = true;
-    btn.textContent = 'Deleting...';
+    btn.innerHTML = '<div class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mx-auto"></div>';
 
     // 1. INSTANT: Close popup
     close();
@@ -71,14 +86,13 @@ export function showDeleteConfirmation(title = 'this item', onConfirm, options =
       }, 400);
     }
 
-    // 3. Show success toast IMMEDIATELY
-    showToast('Deleted successfully ✅', 'success');
-
-    // 4. BACKGROUND: Run the actual Firestore delete (non-blocking)
+    // 3. BACKGROUND: Run the actual Firestore delete (non-blocking)
     try {
       await onConfirm();
+      showToast('✨ Memory permanently removed', 'success');
     } catch (e) {
-      console.warn('[Delete] Background error (non-critical):', e?.message || e);
+      console.warn('[Delete] Background error:', e?.message || e);
+      showToast('Error deleting memory', 'error');
     }
   });
 }
@@ -105,28 +119,42 @@ export async function deleteDocWithSubs(collectionPath, docId, subcollections = 
   }
 }
 
-/**
- * Delete a file from Firebase Storage by URL (best effort)
- */
 export async function deleteStorageFile(fileUrl) {
-  if (!fileUrl || !fileUrl.includes('firebase')) return;
-  try {
-    const pathMatch = fileUrl.match(/\/o\/(.+?)\?/);
-    if (pathMatch) {
-      const decodedPath = decodeURIComponent(pathMatch[1]);
-      const fileRef = storageRef(storage, decodedPath);
-      await deleteObject(fileRef);
-    }
-  } catch (e) {
-    console.warn('[Delete] Storage cleanup skipped:', e?.message);
-  }
+  // Deprecated. Use Cloud Functions backend.
+  console.log('[Delete] Skipping media deletion via storage');
 }
 
 /**
- * Full delete: removes document, subcollections, AND storage files
+ * Full delete: securely removes Cloudinary media via Cloud Functions, then Firestore document and subcollections.
  */
-export async function deleteDocFull(collectionPath, docId, subcollections = [], mediaUrls = []) {
-  const storageDeletes = mediaUrls.filter(url => url).map(url => deleteStorageFile(url));
-  const firestoreDelete = deleteDocWithSubs(collectionPath, docId, subcollections);
-  await Promise.allSettled([firestoreDelete, ...storageDeletes]);
+export async function deleteDocFull(collectionPath, docId, subcollections = [], cloudinaryPublicIds = [], resourceType = 'image') {
+  try {
+    // 1. Delete Media from Cloudinary (Server-Side API Route)
+    if (cloudinaryPublicIds && cloudinaryPublicIds.length > 0) {
+      const { app } = await import('./firebase-config.js');
+      const { getFunctions, httpsCallable } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-functions.js');
+      const functions = getFunctions(app);
+      const deleteCloudinaryMedia = httpsCallable(functions, 'deleteCloudinaryMedia');
+      
+      await deleteCloudinaryMedia({
+        publicIds: cloudinaryPublicIds,
+        resourceType: resourceType
+      });
+      console.log('[Delete] Cloudinary media deleted successfully');
+    }
+
+    // 2. Delete Firestore Document and Subcollections
+    await deleteDocWithSubs(collectionPath, docId, subcollections);
+    
+    // 3. Cleanup notifications related to this post
+    const notifSnap = await getDocs(query(collection(db, 'notifications'), where('postId', '==', docId)));
+    const notifPromises = [];
+    notifSnap.forEach(d => notifPromises.push(deleteDoc(d.ref).catch(() => {})));
+    await Promise.allSettled(notifPromises);
+
+    console.log('[Delete] Firestore cleanup complete');
+  } catch (err) {
+    console.error('[Delete] Deep cleanup failed:', err);
+    throw err;
+  }
 }

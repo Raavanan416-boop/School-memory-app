@@ -2,7 +2,8 @@
 import { auth, db, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail,
   updatePassword, EmailAuthProvider, reauthenticateWithCredential,
   doc, getDoc, updateDoc, setDoc, serverTimestamp, Timestamp, increment,
-  storage, storageRef, uploadBytes, getDownloadURL, runTransaction } from './firebase-config.js';
+  runTransaction } from './firebase-config.js';
+import { uploadMedia } from './services/cloudinary.js';
 
 const OWNER_EMAIL = 'kaviraj@school.com';
 
@@ -83,6 +84,23 @@ class AuthManager {
           profilePic: ud.profilePic || '',
           points: ud.points || 0
         }, { merge: true }).catch(() => {});
+
+        // Fetch new savedPosts subcollection and migrate if old array exists
+        this.userData.savedPosts = [];
+        try {
+          const { getDocs, collection } = await import('./firebase-config.js');
+          const savedSnap = await getDocs(collection(db, 'users', uid, 'savedPosts'));
+          savedSnap.forEach(d => this.userData.savedPosts.push(d.id));
+
+          // Quick migration from old array
+          if (ud.savedPosts && Array.isArray(ud.savedPosts) && ud.savedPosts.length > 0 && this.userData.savedPosts.length === 0) {
+            const { setDoc, doc } = await import('./firebase-config.js');
+            for (const pid of ud.savedPosts) {
+              await setDoc(doc(db, 'users', uid, 'savedPosts', pid), { savedAt: serverTimestamp() });
+              this.userData.savedPosts.push(pid);
+            }
+          }
+        } catch (e) { console.error('Error loading saved posts:', e); }
       } else {
         // Create minimal user document if it doesn't exist
         const defaultData = {
@@ -182,10 +200,8 @@ class AuthManager {
 
   async updateProfilePic(file) {
     if (!this.currentUser) throw new Error('Not logged in');
-    const path = `profilePics/${this.currentUser.uid}_${Date.now()}`;
-    const sRef = storageRef(storage, path);
-    await uploadBytes(sRef, file);
-    const url = await getDownloadURL(sRef);
+    const res = await uploadMedia(file, 'image');
+    const url = res.url;
     await this.updateProfile({ profilePic: url });
     return url;
   }
@@ -207,9 +223,9 @@ class AuthManager {
 
   async savePost(postId) {
     if (!this.currentUser) return;
-    const { arrayUnion } = await import('./firebase-config.js');
-    await updateDoc(doc(db, 'users', this.currentUser.uid), {
-      savedPosts: arrayUnion(postId)
+    const { setDoc, serverTimestamp } = await import('./firebase-config.js');
+    await setDoc(doc(db, 'users', this.currentUser.uid, 'savedPosts', postId), {
+      savedAt: serverTimestamp()
     });
     if (this.userData) {
       if (!this.userData.savedPosts) this.userData.savedPosts = [];
@@ -219,10 +235,8 @@ class AuthManager {
 
   async unsavePost(postId) {
     if (!this.currentUser) return;
-    const { arrayRemove } = await import('./firebase-config.js');
-    await updateDoc(doc(db, 'users', this.currentUser.uid), {
-      savedPosts: arrayRemove(postId)
-    });
+    const { deleteDoc } = await import('./firebase-config.js');
+    await deleteDoc(doc(db, 'users', this.currentUser.uid, 'savedPosts', postId));
     if (this.userData) {
       this.userData.savedPosts = (this.userData.savedPosts || []).filter(id => id !== postId);
     }

@@ -8,8 +8,7 @@ import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager
   arrayUnion, arrayRemove, increment, startAfter, endAt, writeBatch, deleteField,
   startAt, endBefore, getCountFromServer, runTransaction }
   from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
-import { getStorage, ref as storageRef, uploadBytes, uploadBytesResumable, getDownloadURL, deleteObject }
-  from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js';
+
 
 // ⚠️ REPLACE with your Firebase project config
 const firebaseConfig = {
@@ -26,15 +25,14 @@ const auth = getAuth(app);
 const db = initializeFirestore(app, {
   localCache: persistentLocalCache({tabManager: persistentMultipleTabManager()})
 });
-const storage = getStorage(app);
+
 
 export {
-  app, auth, db, storage,
+  app, auth, db,
   signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail,
   updatePassword, EmailAuthProvider, reauthenticateWithCredential,
   collection, doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc,
   query, where, orderBy, limit, limitToLast, onSnapshot, serverTimestamp, Timestamp,
   arrayUnion, arrayRemove, increment, startAfter, endAt, writeBatch, deleteField,
-  startAt, endBefore, getCountFromServer, runTransaction,
-  storageRef, uploadBytes, uploadBytesResumable, getDownloadURL, deleteObject
+  startAt, endBefore, getCountFromServer, runTransaction
 };

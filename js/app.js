@@ -604,6 +604,139 @@ function buildAppShell() {
 
   // Throwback Thursday check
   checkThrowbackThursday();
+
+  // Pending Tag Requests check
+  checkPendingTags();
+}
+
+// ===== PENDING TAG REQUESTS MODAL =====
+async function checkPendingTags() {
+  if (!authManager.currentUser) return;
+  
+  // Only show once per session so it's not annoying
+  if (sessionStorage.getItem('tag_checked')) return;
+  sessionStorage.setItem('tag_checked', '1');
+
+  try {
+    const { getDocs, getDoc, collection, query, where } = await import('./firebase-config.js');
+    const myUid = authManager.currentUser.uid;
+    const q = query(
+      collection(db, 'notifications'),
+      where('userId', '==', myUid),
+      where('type', '==', 'tag_request'),
+      where('handled', '==', false)
+    );
+    
+    const snap = await getDocs(q);
+    if (snap.empty) return;
+    
+    // Get the first unhandled tag request
+    const notifDoc = snap.docs[0];
+    const notif = notifDoc.data();
+    
+    // Fetch post details for the preview
+    const postSnap = await getDoc(doc(db, 'posts', notif.postId));
+    if (!postSnap.exists()) return;
+    const post = postSnap.data();
+
+    // Show Instagram/Facebook style popup card
+    showTagRequestModal(notifDoc.id, notif, post);
+  } catch (err) {
+    console.error('Pending tags check failed:', err);
+  }
+}
+
+function showTagRequestModal(notifId, notif, post) {
+  const overlay = document.createElement('div');
+  overlay.className = 'fixed inset-0 z-[200] flex items-center justify-center p-4 bg-navy-900/40 backdrop-blur-md opacity-0 transition-opacity duration-300';
+  
+  const taggerName = sanitizeHTML(notif.title.replace('📸 ', '')); // Usually "Kaviraj tagged you..."
+  const captionPreview = sanitizeHTML(post.caption || '');
+  const imageUrl = post.imageUrls?.[0] || post.imageUrl || '';
+  
+  overlay.innerHTML = `
+    <div class="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl transform scale-95 transition-transform duration-300">
+      
+      <!-- Top graphic/image -->
+      ${imageUrl ? `
+        <div class="h-48 w-full relative">
+          <img src="${imageUrl}" class="w-full h-full object-cover" alt="Memory" />
+          <div class="absolute inset-0 bg-gradient-to-t from-navy-900/80 to-transparent"></div>
+          <div class="absolute bottom-3 left-4 right-4 text-white">
+            <p class="text-xs font-semibold uppercase tracking-wider mb-1 text-cream-200">Pending Tag</p>
+            <p class="text-sm line-clamp-2">${captionPreview}</p>
+          </div>
+        </div>
+      ` : `
+        <div class="h-32 w-full bg-gradient-to-br from-navy-500 to-navy-700 flex items-center justify-center text-white">
+          <svg class="w-12 h-12 opacity-50" fill="none" stroke="currentColor" stroke-width="1" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0"/></svg>
+        </div>
+      `}
+      
+      <!-- Content -->
+      <div class="p-6 text-center -mt-8 relative z-10">
+        <div class="w-16 h-16 rounded-full border-4 border-white bg-cream-100 mx-auto shadow-md overflow-hidden mb-3">
+          ${notif.icon ? `<img src="${notif.icon}" class="w-full h-full object-cover" />` : `<div class="w-full h-full flex items-center justify-center text-xl">👤</div>`}
+        </div>
+        <h3 class="font-bold text-navy-800 text-lg leading-tight mb-1">${taggerName}</h3>
+        <p class="text-sm text-gray-500 mb-6">tagged you in a memory. Do you want to add this to your profile?</p>
+        
+        <div class="flex gap-3">
+          <button id="tag-accept-popup" class="flex-1 py-3 bg-navy-500 text-white rounded-xl font-bold hover:bg-navy-600 transition-colors shadow-sm shadow-navy-500/30 flex items-center justify-center gap-2">
+            ✅ Accept
+          </button>
+          <button id="tag-reject-popup" class="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold hover:bg-gray-200 transition-colors flex items-center justify-center gap-2">
+            ❌ Reject
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  // Animate in
+  requestAnimationFrame(() => {
+    overlay.classList.remove('opacity-0');
+    overlay.querySelector('div').classList.remove('scale-95');
+  });
+
+  const close = () => {
+    overlay.classList.add('opacity-0');
+    overlay.querySelector('div').classList.add('scale-95');
+    setTimeout(() => overlay.remove(), 300);
+  };
+
+  overlay.querySelector('#tag-accept-popup').addEventListener('click', async () => {
+    close();
+    try {
+      const { updateDoc, doc, setDoc, serverTimestamp } = await import('./firebase-config.js');
+      const myUid = authManager.currentUser.uid;
+      const postId = notif.postId;
+      const postRef = doc(db, 'posts', postId);
+      
+      await updateDoc(postRef, {
+        pendingTags: (await import('./firebase-config.js')).arrayRemove(myUid),
+        taggedFriends: (await import('./firebase-config.js')).arrayUnion(myUid)
+      });
+      await setDoc(doc(db, 'users', myUid, 'taggedPosts', postId), { taggedAt: serverTimestamp() });
+      await setDoc(doc(db, 'posts', postId, 'acceptedTags', myUid), { acceptedAt: serverTimestamp() });
+      await updateDoc(doc(db, 'notifications', notifId), { handled: true, body: 'You accepted the tag request.', read: true });
+      showToast('Added to your tagged memories!', 'success');
+    } catch (e) { console.error(e); }
+  });
+
+  overlay.querySelector('#tag-reject-popup').addEventListener('click', async () => {
+    close();
+    try {
+      const { updateDoc, doc } = await import('./firebase-config.js');
+      const myUid = authManager.currentUser.uid;
+      await updateDoc(doc(db, 'posts', notif.postId), {
+        pendingTags: (await import('./firebase-config.js')).arrayRemove(myUid)
+      });
+      await updateDoc(doc(db, 'notifications', notifId), { handled: true, body: 'You rejected the tag request.', read: true });
+    } catch (e) { console.error(e); }
+  });
 }
 
 // ===== BIRTHDAY FULLSCREEN CELEBRATION =====

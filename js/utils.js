@@ -181,6 +181,13 @@ export async function compressImage(file, maxWidth = 1200, quality = 0.8) {
 }
 
 // Emoji mood options for diary
+export function optimizeCloudinaryUrl(url, width = 800) {
+  if (!url || !url.includes('cloudinary.com')) return url;
+  // Cloudinary URLs typically look like: https://res.cloudinary.com/<cloud_name>/image/upload/v1234567890/folder/image.jpg
+  // We want to insert `q_auto,f_auto,w_${width}` after `/upload/`
+  return url.replace('/upload/', `/upload/q_auto,f_auto,w_${width}/`);
+}
+
 export const MOOD_EMOJIS = ['😊', '😢', '😂', '🥰', '😎', '🤔', '😤', '🎉', '😴', '🤗'];
 
 // Truth or Dare questions

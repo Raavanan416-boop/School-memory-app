@@ -1,5 +1,6 @@
 // Profile page — Instagram-style with cover photo, tabs, hidden settings menu
 import { db, doc, getDoc, getDocs, collection, query, where, orderBy, addDoc, onSnapshot, serverTimestamp, arrayUnion, arrayRemove, updateDoc, deleteDoc } from '../firebase-config.js';
+import { uploadMedia } from '../services/cloudinary.js';
 import { showToast, sanitizeHTML, timeAgo, formatNumber } from '../utils.js';
 import { authManager } from '../auth.js';
 import { router } from '../router.js';
@@ -10,6 +11,7 @@ import { presenceManager } from '../presence.js';
 let unsubBadges = null;
 let friendPresenceUnsubs = [];
 let profilePresenceUnsub = null;
+let unsubTagged = null;
 
 function cleanupFriendPresence() {
   friendPresenceUnsubs.forEach(u => u());
@@ -25,6 +27,10 @@ export function destroyProfile() {
   if (profilePresenceUnsub) {
     profilePresenceUnsub();
     profilePresenceUnsub = null;
+  }
+  if (unsubTagged) {
+    unsubTagged();
+    unsubTagged = null;
   }
 }
 
@@ -64,17 +70,7 @@ export async function renderProfile(container, data = null) {
     }
   } catch (e) { }
 
-  // Get tagged posts
-  try {
-    if (uid) {
-      const tagSnap = await getDocs(query(collection(db, 'posts'), where('taggedFriends', 'array-contains', uid), orderBy('createdAt', 'desc')));
-      tagSnap.forEach(d => {
-        const p = d.data();
-        if (p.isHidden && !authManager.isOwner) return;
-        taggedPosts.push({ id: d.id, ...p });
-      });
-    }
-  } catch (e) { }
+  // Tagged posts are now loaded via real-time listener in renderTaggedTab
 
   // Count friends (all other users)
   try {
@@ -204,6 +200,12 @@ export async function renderProfile(container, data = null) {
         <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"/></svg>
         <span>Highlights</span>
       </button>
+      ${!viewingOther ? `
+      <button class="profile-tab" data-tab="saved">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z"/></svg>
+        <span>Saved</span>
+      </button>
+      ` : ''}
     </div>
 
     <!-- Tab Content -->
@@ -380,9 +382,10 @@ export async function renderProfile(container, data = null) {
 
     switch (tab) {
       case 'posts': renderPostsTab(tabContent, userPosts, viewingOther, user); break;
-      case 'tagged': renderTaggedTab(tabContent, taggedPosts); break;
+      case 'tagged': renderTaggedTab(tabContent, uid); break;
       case 'slambook': renderSlamBookTab(tabContent, user, viewingOther); break;
-      case 'memories': renderHighlightsTab(tabContent, highlights); break;
+      case 'memories': renderHighlightsTab(tabContent, user, viewingOther, highlights); break;
+      case 'saved': renderSavedTab(tabContent, uid); break;
     }
   }
 
@@ -1239,29 +1242,139 @@ function renderPostsTab(el, posts, viewingOther, user) {
   });
 }
 
-function renderTaggedTab(el, posts) {
-  if (posts.length === 0) {
-    el.innerHTML = `
-      <div class="px-4 py-12 text-center">
-        <div class="text-4xl mb-3">🏷️</div>
-        <h3 class="font-semibold text-navy-700 mb-1">No tagged memories</h3>
-        <p class="text-sm text-gray-400">When you are tagged in a memory, it will appear here.</p>
-      </div>`;
+function renderTaggedTab(el, targetUid) {
+  if (!targetUid) {
+    el.innerHTML = '<div class="px-4 py-12 text-center text-gray-500">User not found</div>';
     return;
   }
+
+  if (unsubTagged) {
+    unsubTagged();
+    unsubTagged = null;
+  }
+
   el.innerHTML = `
-    <div class="profile-posts-grid">
-      ${posts.map(p => `
-        <div class="profile-post-cell">
-          ${p.imageUrl
-      ? `<img src="${p.imageUrl}" class="w-full h-full object-cover" alt="" loading="lazy"/>`
-      : `<div class="w-full h-full bg-cream-200 flex items-center justify-center"><span class="text-2xl">📝</span></div>`}
-          <div class="profile-post-overlay">
-            <span class="text-white text-[10px] font-medium">${sanitizeHTML(p.authorName || '')}</span>
+    <div class="px-4 py-12 text-center" id="tagged-loading">
+      <div class="w-8 h-8 border-4 border-navy-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+      <p class="text-sm text-gray-400">Loading tagged memories...</p>
+    </div>
+  `;
+
+  const q = query(
+    collection(db, 'users', targetUid, 'taggedPosts'),
+    orderBy('taggedAt', 'desc')
+  );
+
+  unsubTagged = onSnapshot(q, async (snap) => {
+    if (snap.empty) {
+      el.innerHTML = `
+        <div class="px-4 py-12 text-center">
+          <div class="text-4xl mb-3">🏷️</div>
+          <h3 class="font-semibold text-navy-700 mb-1">No tagged memories</h3>
+          <p class="text-sm text-gray-400">When accepted, tagged memories will appear here.</p>
+        </div>`;
+      return;
+    }
+
+    const postPromises = snap.docs.map(async d => {
+      const postId = d.id;
+      const postSnap = await getDoc(doc(db, 'posts', postId));
+      if (postSnap.exists()) {
+        const p = postSnap.data();
+        if (p.isHidden && !authManager.isOwner) return null;
+        return { id: postSnap.id, ...p };
+      }
+      return null;
+    });
+
+    const posts = (await Promise.all(postPromises)).filter(p => p !== null);
+
+    if (posts.length === 0) {
+      el.innerHTML = `
+        <div class="px-4 py-12 text-center">
+          <div class="text-4xl mb-3">🏷️</div>
+          <h3 class="font-semibold text-navy-700 mb-1">No tagged memories</h3>
+          <p class="text-sm text-gray-400">When accepted, tagged memories will appear here.</p>
+        </div>`;
+      return;
+    }
+
+    el.innerHTML = `
+      <div class="profile-posts-grid">
+        ${posts.map(p => `
+          <div class="profile-post-cell cursor-pointer" onclick="window.location.hash='#home?postId=${p.id}'">
+            ${(p.imageUrls && p.imageUrls.length > 0) || p.imageUrl
+        ? `<img src="${(p.imageUrls && p.imageUrls.length > 0) ? p.imageUrls[0] : p.imageUrl}" class="w-full h-full object-cover" alt="" loading="lazy"/>`
+        : `<div class="w-full h-full bg-cream-200 flex items-center justify-center"><span class="text-2xl">📝</span></div>`}
+            <div class="profile-post-overlay">
+              <span class="text-white text-[10px] font-medium">${sanitizeHTML(p.authorName || '')}</span>
+            </div>
           </div>
-        </div>
-      `).join('')}
-    </div>`;
+        `).join('')}
+      </div>`;
+  });
+}
+
+function renderSavedTab(el, targetUid) {
+  if (!targetUid) return;
+  
+  el.innerHTML = `
+    <div class="px-4 py-12 text-center" id="saved-loading">
+      <div class="w-8 h-8 border-4 border-navy-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+      <p class="text-sm text-gray-400">Loading saved memories...</p>
+    </div>
+  `;
+
+  const q = query(
+    collection(db, 'users', targetUid, 'savedPosts'),
+    orderBy('savedAt', 'desc')
+  );
+
+  onSnapshot(q, async (snap) => {
+    if (snap.empty) {
+      el.innerHTML = `
+        <div class="px-4 py-12 text-center">
+          <div class="text-4xl mb-3">🔖</div>
+          <h3 class="font-semibold text-navy-700 mb-1">No saved memories</h3>
+          <p class="text-sm text-gray-400">Posts you save will appear here.</p>
+        </div>`;
+      return;
+    }
+
+    const postPromises = snap.docs.map(async d => {
+      const postId = d.id;
+      const postSnap = await getDoc(doc(db, 'posts', postId));
+      if (postSnap.exists()) {
+        const p = postSnap.data();
+        if (p.isHidden && !authManager.isOwner) return null;
+        return { id: postSnap.id, ...p };
+      }
+      return null;
+    });
+
+    const posts = (await Promise.all(postPromises)).filter(p => p !== null);
+
+    if (posts.length === 0) {
+      el.innerHTML = `
+        <div class="px-4 py-12 text-center">
+          <div class="text-4xl mb-3">🔖</div>
+          <h3 class="font-semibold text-navy-700 mb-1">No saved memories</h3>
+          <p class="text-sm text-gray-400">Posts you save will appear here.</p>
+        </div>`;
+      return;
+    }
+
+    el.innerHTML = `
+      <div class="profile-posts-grid">
+        ${posts.map(p => `
+          <div class="profile-post-cell cursor-pointer" onclick="window.location.hash='#home?postId=${p.id}'">
+            ${(p.imageUrls && p.imageUrls.length > 0) || p.imageUrl
+        ? `<img src="${(p.imageUrls && p.imageUrls.length > 0) ? p.imageUrls[0] : p.imageUrl}" class="w-full h-full object-cover" alt="" loading="lazy"/>`
+        : `<div class="w-full h-full bg-cream-200 flex items-center justify-center"><span class="text-2xl">📝</span></div>`}
+          </div>
+        `).join('')}
+      </div>`;
+  });
 }
 
 async function renderSlamBookTab(el, user, viewingOther) {
@@ -1458,11 +1571,8 @@ function showEditProfileModal() {
     if (!file) return;
     try {
       showToast('Uploading cover...', 'info');
-      const { storageRef, uploadBytes, getDownloadURL, storage } = await import('../firebase-config.js');
-      const path = `coverPhotos/${authManager.currentUser.uid}_${Date.now()}`;
-      const sRef = storageRef(storage, path);
-      await uploadBytes(sRef, file);
-      const url = await getDownloadURL(sRef);
+      const res = await uploadMedia(file, 'image');
+      const url = res.url;
       await authManager.updateProfile({ coverPhoto: url });
       showToast('Cover updated! 🖼️', 'success');
       const preview = modal.body.querySelector('#edit-cover-preview');

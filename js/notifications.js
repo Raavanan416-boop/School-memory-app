@@ -117,6 +117,11 @@ const NOTIF_CONFIG = {
     bodyTemplate: (name) => `${name} tagged you in a memory.`,
     getUrl: (data) => `/?page=home&postId=${data.postId || ''}`,
   },
+  tag_request: {
+    title: '📸 Tag Request',
+    bodyTemplate: (name) => `${name} tagged you in a memory. Approve to add to your profile.`,
+    getUrl: (data) => `/?page=home&postId=${data.postId || ''}`,
+  },
   miss_you: {
     title: '❤️ Someone Misses You',
     bodyTemplate: (name) => `${name} misses you ❤️🥺`,

@@ -243,6 +243,10 @@ function loadFeed(container) {
         if (deletedPostIds.has(d.id)) return;
         const postData = d.data();
         if (postData.isHidden && !authManager.isOwner) return;
+        
+        // Privacy filter
+        if (postData.privacy === 'private' && postData.authorId !== authManager.currentUser?.uid) return;
+
         feedEl.appendChild(createPostCard({ id: d.id, ...postData }));
         lastDoc = d;
       });
@@ -280,6 +284,10 @@ async function loadMorePosts(container) {
       snap.forEach(d => {
         const postData = d.data();
         if (postData.isHidden && !authManager.isOwner) return;
+
+        // Privacy filter
+        if (postData.privacy === 'private' && postData.authorId !== authManager.currentUser?.uid) return;
+
         feedEl.appendChild(createPostCard({ id: d.id, ...postData }));
         lastDoc = d;
       });
@@ -304,6 +312,13 @@ function createPostCard(post) {
   const location = post.category ? `📍 ${post.category}` : '';
   const isVideo = post.mediaType === 'video';
 
+  const imageUrls = post.imageUrls && post.imageUrls.length > 0 ? post.imageUrls : (post.imageUrl ? [post.imageUrl] : []);
+  const mediaTypes = post.mediaTypes && post.mediaTypes.length > 0 ? post.mediaTypes : (post.mediaType ? [post.mediaType] : []);
+  
+  const mentionsHtml = post.mentions?.length > 0 
+    ? `<p class="mt-1 text-xs">With: ${post.mentions.map(m => `<span class="mention-chip" data-uid="${m.id}">@${sanitizeHTML(m.name)}</span>`).join(', ')}</p>` 
+    : '';
+
   const card = document.createElement('article');
   card.className = 'post-card animate-fadeIn';
   card.innerHTML = `
@@ -325,21 +340,46 @@ function createPostCard(post) {
     </div>
 
     <!-- Media -->
-    ${post.imageUrl ? `
+    ${imageUrls.length > 0 ? `
       <div class="post-image-frame relative" data-post-id="${post.id}">
-        ${isVideo ? `
-          <video src="${post.imageUrl}" class="w-full aspect-[4/3] object-cover" preload="metadata" playsinline></video>
-          <button class="play-overlay">
-            <svg class="w-12 h-12 text-white drop-shadow-lg" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-          </button>
-        ` : `
-          <img src="${post.imageUrl}" class="w-full aspect-[4/3] object-cover" alt="Memory" loading="lazy"/>
-        `}
+        <div class="swipeable-gallery w-full aspect-[4/3] relative">
+          ${imageUrls.map((url, i) => `
+            <div class="swipeable-item w-full h-full relative">
+              ${mediaTypes[i] === 'video' ? `
+                <video src="${url}" class="w-full h-full object-cover" preload="metadata" playsinline></video>
+                <button class="play-overlay">
+                  <svg class="w-12 h-12 text-white drop-shadow-lg" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                </button>
+              ` : `
+                <img src="${url}" class="w-full h-full object-cover" alt="Memory" loading="lazy"/>
+              `}
+            </div>
+          `).join('')}
+        </div>
+        ${imageUrls.length > 1 ? `
+          <div class="gallery-dots">
+            ${imageUrls.map((_, i) => `<div class="gallery-dot ${i===0 ? 'active':''}"></div>`).join('')}
+          </div>
+        ` : ''}
         <div class="double-tap-heart hidden">
           <svg class="w-20 h-20 text-red-500 drop-shadow-lg" fill="currentColor" viewBox="0 0 24 24">
             <path d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"/>
           </svg>
         </div>
+      </div>
+    ` : ''}
+
+    <!-- Audio Player -->
+    ${post.musicUrl ? `
+      <div class="post-audio-player">
+        <button type="button" class="post-audio-btn">
+          <svg class="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+        <div class="post-audio-wave">
+          <div class="post-audio-bar"></div><div class="post-audio-bar"></div><div class="post-audio-bar"></div>
+          <div class="post-audio-bar"></div><div class="post-audio-bar"></div><div class="post-audio-bar"></div>
+        </div>
+        <audio class="hidden" src="${post.musicUrl}" loop preload="none"></audio>
       </div>
     ` : ''}
 
@@ -372,6 +412,7 @@ function createPostCard(post) {
       ${post.caption ? `
         <p class="text-sm text-navy-800 mb-1"><span class="font-semibold">${sanitizeHTML(user)}</span> ${sanitizeHTML(post.caption)}</p>
       ` : ''}
+      ${mentionsHtml}
       ${commentCount > 0 ? `<button class="comment-toggle-btn text-xs text-gray-400 hover:text-navy-500" data-id="${post.id}">View all ${commentCount} comments</button>` : ''}
     </div>
 
@@ -437,18 +478,50 @@ function createPostCard(post) {
     lastTap = now;
   });
 
-  // Video play
-  const playBtn = card.querySelector('.play-overlay');
-  playBtn?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const video = card.querySelector('video');
-    if (video) {
-      video.play();
-      playBtn.classList.add('hidden');
-      video.addEventListener('ended', () => playBtn.classList.remove('hidden'));
-      video.addEventListener('click', () => { video.paused ? video.play() : video.pause(); });
-    }
+  // Video play (for all videos in gallery)
+  const playBtns = card.querySelectorAll('.play-overlay');
+  playBtns.forEach(playBtn => {
+    playBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const video = playBtn.previousElementSibling;
+      if (video && video.tagName === 'VIDEO') {
+        video.play();
+        playBtn.classList.add('hidden');
+        video.addEventListener('ended', () => playBtn.classList.remove('hidden'));
+        video.addEventListener('click', () => { video.paused ? video.play() : video.pause(); });
+      }
+    });
   });
+
+  // Audio play
+  const audioBtn = card.querySelector('.post-audio-btn');
+  if (audioBtn) {
+    const audioEl = card.querySelector('audio');
+    const bars = card.querySelectorAll('.post-audio-bar');
+    audioBtn.addEventListener('click', () => {
+      if (audioEl.paused) {
+        audioEl.play();
+        audioBtn.innerHTML = '<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
+        bars.forEach(b => b.classList.add('playing'));
+      } else {
+        audioEl.pause();
+        audioBtn.innerHTML = '<svg class="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+        bars.forEach(b => b.classList.remove('playing'));
+      }
+    });
+  }
+
+  // Swipeable Gallery dots sync
+  const gallery = card.querySelector('.swipeable-gallery');
+  const dots = card.querySelectorAll('.gallery-dot');
+  if (gallery && dots.length > 0) {
+    gallery.addEventListener('scroll', () => {
+      const scrollPos = gallery.scrollLeft;
+      const itemWidth = gallery.clientWidth;
+      const activeIdx = Math.round(scrollPos / itemWidth);
+      dots.forEach((d, i) => d.classList.toggle('active', i === activeIdx));
+    });
+  }
 
   // Comment toggle
   card.querySelectorAll('.comment-toggle-btn').forEach(btn => {
@@ -530,7 +603,11 @@ function createPostCard(post) {
     showDeleteConfirmation('this post', async () => {
       deletedPostIds.add(post.id); // Prevent reappearing via onSnapshot
       await awardPoints(post.authorId, -20, 'Post Deleted');
-      await deleteDocFull('posts', post.id, ['comments'], [post.imageUrl]);
+      
+      const filesToDelete = post.imageUrls ? [...post.imageUrls] : (post.imageUrl ? [post.imageUrl] : []);
+      if (post.musicUrl) filesToDelete.push(post.musicUrl);
+      
+      await deleteDocFull('posts', post.id, ['comments'], filesToDelete);
     }, { element: card });
   });
 

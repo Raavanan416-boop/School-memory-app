@@ -1,5 +1,5 @@
 // Notifications page — Premium notification center with grouping, delete, and deep links
-import { db, collection, query, where, orderBy, limit, onSnapshot, doc, updateDoc, deleteDoc } from '../firebase-config.js';
+import { db, collection, query, where, orderBy, limit, onSnapshot, doc, updateDoc, deleteDoc, arrayUnion, arrayRemove } from '../firebase-config.js';
 import { timeAgo, sanitizeHTML } from '../utils.js';
 import { authManager } from '../auth.js';
 import { notificationManager } from '../notifications.js';
@@ -206,6 +206,7 @@ function createNotifCard(notif) {
     missed_video_call: { icon: '📵', color: 'bg-red-50 border-red-100' },
     game_challenge: { icon: '🎮', color: 'bg-orange-50 border-orange-100' },
     tag: { icon: '📸', color: 'bg-blue-50 border-blue-100' },
+    tag_request: { icon: '📸', color: 'bg-blue-50 border-blue-100' },
     badge_suggestion: { icon: '🏅', color: 'bg-amber-50 border-amber-100' },
     miss_you: { icon: '❤️', color: 'bg-pink-50 border-pink-100' },
   };
@@ -243,6 +244,17 @@ function createNotifCard(notif) {
     </div>
   `;
 
+  // Action buttons for specific types
+  if (notif.type === 'tag_request' && notif.postId && !notif.handled) {
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'mt-2 flex gap-2 notif-actions';
+    actionsDiv.innerHTML = `
+      <button class="bg-navy-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-navy-700 tag-accept-btn" data-post-id="${notif.postId}">Accept</button>
+      <button class="bg-gray-100 text-gray-600 px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-gray-200 tag-reject-btn" data-post-id="${notif.postId}">Reject</button>
+    `;
+    card.querySelector('.flex-1').appendChild(actionsDiv);
+  }
+
   // Click handler — navigate to target
   card.addEventListener('click', async (e) => {
     if (e.target.closest('.notif-delete-btn')) return; // Don't navigate on delete
@@ -275,6 +287,38 @@ function createNotifCard(notif) {
     
     notificationManager.navigateToNotification(notif);
   });
+
+  // Action handlers
+  const acceptBtn = card.querySelector('.tag-accept-btn');
+  const rejectBtn = card.querySelector('.tag-reject-btn');
+  if (acceptBtn) {
+    acceptBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        const postId = acceptBtn.dataset.postId;
+        const postRef = doc(db, 'posts', postId);
+        await updateDoc(postRef, {
+          pendingTags: arrayRemove(authManager.currentUser.uid),
+          taggedFriends: arrayUnion(authManager.currentUser.uid)
+        });
+        await updateDoc(doc(db, 'notifications', notif.id), { handled: true, body: 'You accepted the tag request.', read: true });
+        import('../utils.js').then(m => m.showToast('Added to your profile!', 'success'));
+      } catch (err) { console.error(err); }
+    });
+  }
+  if (rejectBtn) {
+    rejectBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        const postId = rejectBtn.dataset.postId;
+        const postRef = doc(db, 'posts', postId);
+        await updateDoc(postRef, {
+          pendingTags: arrayRemove(authManager.currentUser.uid)
+        });
+        await updateDoc(doc(db, 'notifications', notif.id), { handled: true, body: 'You rejected the tag request.', read: true });
+      } catch (err) { console.error(err); }
+    });
+  }
 
   // Delete button handler
   card.querySelector('.notif-delete-btn')?.addEventListener('click', async (e) => {
@@ -355,6 +399,7 @@ function getDefaultTitle(type) {
     missed_video_call: '📵 Missed Video Call',
     game_challenge: '🎮 Game Challenge',
     tag: '📸 Tagged',
+    tag_request: '📸 Tag Request',
     badge_suggestion: '🏅 New Badge',
     miss_you: '❤️ Someone Misses You',
   };
@@ -386,6 +431,7 @@ function getDefaultBody(notif) {
     missed_video_call: `Missed video call from ${name}.`,
     game_challenge: `${name} challenged you!`,
     tag: `${name} tagged you in a memory.`,
+    tag_request: `${name} tagged you in a memory. Approve to add to your profile.`,
     badge_suggestion: `${name} suggested a new title for you.`,
     miss_you: `${name} misses you ❤️🥺`,
   };

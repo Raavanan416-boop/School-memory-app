@@ -190,6 +190,15 @@ async function startOrOpenDM(targetUid, targetName, fromProfile = false) {
   if (!authManager.currentUser) return;
   const myUid = authManager.currentUser.uid;
 
+  if (!targetName || targetName === 'Friend' || targetName === 'Classmate') {
+    try {
+      const uSnap = await getDoc(doc(db, 'users', targetUid));
+      if (uSnap.exists()) {
+        targetName = uSnap.data().fullName || targetName;
+      }
+    } catch (e) {}
+  }
+
   // Check if chat already exists
   try {
     const q1 = query(collection(db, 'chats'), where('participants', 'array-contains', myUid));
@@ -260,7 +269,7 @@ function loadChatList(container) {
       }
 
       // Collect all chats and sort client-side by lastMessageAt (newest first)
-      const chats = [];
+      let chats = [];
       snap.forEach(d => {
         const chat = { id: d.id, ...d.data() };
         if (chat.type === 'group' && chat.id === 'core37') {
@@ -286,6 +295,26 @@ function loadChatList(container) {
         chats.push(chat);
       });
 
+      // Deduplicate chats by other participant
+      const uniqueChats = new Map();
+      chats.forEach(chat => {
+        const otherIdx = chat.participants.findIndex(p => p !== authManager.currentUser?.uid);
+        const otherUid = chat.participants?.[otherIdx];
+        if (!otherUid) return;
+        
+        if (!uniqueChats.has(otherUid)) {
+          uniqueChats.set(otherUid, chat);
+        } else {
+          // Keep the one with the most recent message
+          const existingTime = uniqueChats.get(otherUid).lastMessageAt?.toDate ? uniqueChats.get(otherUid).lastMessageAt.toDate().getTime() : 0;
+          const newTime = chat.lastMessageAt?.toDate ? chat.lastMessageAt.toDate().getTime() : 0;
+          if (newTime > existingTime) {
+            uniqueChats.set(otherUid, chat);
+          }
+        }
+      });
+      chats = Array.from(uniqueChats.values());
+
       // Sort by lastMessageAt descending (newest first — like WhatsApp)
       chats.sort((a, b) => {
         const aTime = a.lastMessageAt?.toDate ? a.lastMessageAt.toDate().getTime() : 0;
@@ -293,14 +322,24 @@ function loadChatList(container) {
         return bTime - aTime;
       });
 
-      dmList.innerHTML = '';
-      chats.forEach(chat => {
-        const otherIdx = chat.participants.findIndex(p => p !== authManager.currentUser?.uid);
-        const otherName = chat.participantNames?.[otherIdx] || 'Classmate';
-        const otherUid = chat.participants?.[otherIdx];
-        const unread = chat.unreadCount?.[authManager.currentUser.uid] || 0;
-        const lastMsg = chat.lastMessage || 'Start a conversation';
-        const time = chat.lastMessageAt?.toDate ? timeAgo(chat.lastMessageAt.toDate()) : '';
+      const renderChats = async () => {
+        dmList.innerHTML = '';
+        for (const chat of chats) {
+          const otherIdx = chat.participants.findIndex(p => p !== authManager.currentUser?.uid);
+          let otherName = chat.participantNames?.[otherIdx] || 'Classmate';
+          const otherUid = chat.participants?.[otherIdx];
+          const unread = chat.unreadCount?.[authManager.currentUser.uid] || 0;
+          const lastMsg = chat.lastMessage || 'Start a conversation';
+          const time = chat.lastMessageAt?.toDate ? timeAgo(chat.lastMessageAt.toDate()) : '';
+
+          if (otherName === 'Friend' || otherName === 'Classmate') {
+            try {
+              const uSnap = await getDoc(doc(db, 'users', otherUid));
+              if (uSnap.exists()) {
+                otherName = uSnap.data().fullName || otherName;
+              }
+            } catch (e) {}
+          }
 
         const item = document.createElement('div');
         item.className = `chat-item ${unread > 0 ? 'chat-item-unread' : ''}`;
@@ -332,7 +371,9 @@ function loadChatList(container) {
             }
           });
         }
-      });
+        } // end for loop
+      };
+      renderChats();
     }, (err) => {
       console.error('Chat list error:', err);
       dmList.innerHTML = `
@@ -638,7 +679,7 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false, fro
         if (msg.type === 'shared_post' && msg.sharedPost) {
           const sp = msg.sharedPost;
           contentHTML = `
-            <div class="shared-post-preview mt-1 ${isMine ? 'bg-white/20' : 'bg-gray-100'} rounded-xl overflow-hidden shadow-sm cursor-pointer border border-white/10" onclick="location.hash='#home?post=${sp.id}'">
+            <div class="shared-post-preview mt-1 ${isMine ? 'bg-white/20' : 'bg-gray-100'} rounded-xl overflow-hidden shadow-sm cursor-pointer border border-white/10">
               ${sp.imageUrl ? `<img src="${sp.imageUrl}" class="w-full h-32 object-cover" />` : ''}
               <div class="p-2">
                 <p class="text-xs font-semibold ${isMine ? 'text-white' : 'text-navy-800'}">Shared from ${sanitizeHTML(sp.authorName)}</p>
@@ -683,6 +724,32 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false, fro
             </button>
           </div>
         `;
+
+        // Shared Post click logic
+        if (msg.type === 'shared_post' && msg.sharedPost) {
+          const spPreview = msgEl.querySelector('.shared-post-preview');
+          if (spPreview) {
+            spPreview.addEventListener('click', async () => {
+              const btn = spPreview.querySelector('button');
+              if (btn) btn.textContent = 'Loading...';
+              try {
+                const spId = msg.sharedPost.id;
+                const pSnap = await getDoc(doc(db, 'posts', spId));
+                if (pSnap.exists()) {
+                  const { showPostModal } = await import('./profile.js');
+                  showPostModal({ id: pSnap.id, ...pSnap.data() });
+                } else {
+                  showToast('Post no longer exists.', 'error');
+                }
+              } catch (e) {
+                console.error(e);
+                showToast('Failed to open post.', 'error');
+              } finally {
+                if (btn) btn.textContent = 'Open Post';
+              }
+            });
+          }
+        }
 
         // Voice message player logic
         if (msg.audioUrl) {

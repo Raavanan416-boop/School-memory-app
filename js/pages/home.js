@@ -1,7 +1,7 @@
 // Home page — Full-featured feed with comments, share, save, throwback, double-tap like
 import { db, collection, query, orderBy, limit, onSnapshot, doc, updateDoc, addDoc,
   arrayUnion, arrayRemove, serverTimestamp, getDocs, where, startAfter, increment, deleteDoc } from '../firebase-config.js';
-import { getTimeSinceSchool, EMOTIONAL_QUOTES, timeAgo, sanitizeHTML, isBirthdayToday, formatNumber, optimizeCloudinaryUrl } from '../utils.js';
+import { getTimeSinceSchool, EMOTIONAL_QUOTES, timeAgo, sanitizeHTML, isBirthdayToday, formatNumber, optimizeCloudinaryUrl, showToast } from '../utils.js';
 import { authManager, awardPoints } from '../auth.js';
 import { router } from '../router.js';
 import { createNotification } from '../notifications.js';
@@ -16,6 +16,24 @@ let allPostsLoaded = false;
 let feedObserver = null;
 const deletedPostIds = new Set(); // Track locally deleted post IDs
 
+// Post Music state and observer
+let currentPostAudio = null;
+let currentPostAudioBtn = null;
+const postMusicObserver = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (!entry.isIntersecting) {
+      const btn = entry.target.querySelector('.post-music-toggle-btn');
+      if (btn && currentPostAudioBtn === btn && currentPostAudio) {
+        currentPostAudio.pause();
+        btn.querySelector('.mute-icon').classList.remove('hidden');
+        btn.querySelector('.play-icon').classList.add('hidden');
+        btn.classList.remove('animate-pulse', 'bg-red-500/80');
+        btn.classList.add('bg-black/50', 'backdrop-blur-md');
+      }
+    }
+  });
+}, { threshold: 0.05 });
+
 export function destroyHome() {
   if (timerInterval) clearInterval(timerInterval);
   if (quoteInterval) clearInterval(quoteInterval);
@@ -23,40 +41,16 @@ export function destroyHome() {
   if (feedObserver) { feedObserver.disconnect(); feedObserver = null; }
   timerInterval = null; quoteInterval = null; unsubFeed = null;
   lastDoc = null; loadingMore = false; allPostsLoaded = false;
+  isFirstLoad = true;
 }
 
 export async function renderHome(container) {
   router.registerDestroy('home', destroyHome);
   destroyHome();
 
-  // Check for birthdays today
-  let birthdayUsers = [];
-  try {
-    const usersSnap = await getDocs(collection(db, 'users'));
-    usersSnap.forEach(d => {
-      const u = d.data();
-      if (isBirthdayToday(u.dateOfBirth)) {
-        birthdayUsers.push({ id: d.id, ...u });
-      }
-    });
-  } catch (e) { }
-
   container.innerHTML = `
-    ${birthdayUsers.length > 0 ? `
-      <section class="px-4 pt-4">
-        <div class="birthday-banner">
-          <div class="confetti-container" id="confetti-box"></div>
-          <div class="relative z-10 text-center">
-            <div class="text-3xl mb-2">🎂🎉</div>
-            <h3 class="font-bold text-navy-800 text-lg">Happy Birthday!</h3>
-            <p class="text-sm text-navy-600">${birthdayUsers.map(u => u.fullName).join(', ')}</p>
-            <button class="mt-3 px-4 py-2 bg-navy-500 text-white rounded-full text-xs font-semibold" id="wish-birthday-btn">
-              Send Wishes 🎈
-            </button>
-          </div>
-        </div>
-      </section>
-    ` : ''}
+    <!-- Birthday placeholder -->
+    <div id="birthday-section"></div>
 
     <!-- Timer Section -->
     <section class="px-4 pt-4 pb-3">
@@ -84,9 +78,9 @@ export async function renderHome(container) {
       <div class="flex gap-2 overflow-x-auto no-scrollbar pb-1">
         <button class="quick-action-chip" data-action="timecapsule">🔒 Time Capsule</button>
         <button class="quick-action-chip" data-action="diary">📖 Diary</button>
-        <button class="quick-action-chip" data-action="birthday">🎂 Birthdays</button>
         <button class="quick-action-chip" data-action="polls">📊 Polls</button>
         <button class="quick-action-chip" data-action="leaderboard">🏆 Leaderboard</button>
+        <button class="quick-action-chip" data-action="birthday">🎂 Birthdays</button>
         <button class="quick-action-chip" data-action="games">🎮 Games</button>
       </div>
     </section>
@@ -144,15 +138,32 @@ export async function renderHome(container) {
     });
   });
 
-  // Birthday wish
-  container.querySelector('#wish-birthday-btn')?.addEventListener('click', () => {
-    router.navigate('birthday');
-  });
+  // Load feed IMMEDIATELY
+  loadFeed(container);
 
   // Refresh
   container.querySelector('#refresh-feed')?.addEventListener('click', () => {
     lastDoc = null;
     allPostsLoaded = false;
+    if (unsubFeed) unsubFeed();
+    isFirstLoad = true;
+    const feedEl = container.querySelector('#feed-container');
+    if (feedEl) {
+      feedEl.innerHTML = `
+        <div class="card p-4">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-10 h-10 skeleton skeleton-avatar flex-shrink-0"></div>
+            <div class="flex-1">
+              <div class="w-32 h-3 skeleton mb-2"></div>
+              <div class="w-20 h-2.5 skeleton"></div>
+            </div>
+          </div>
+          <div class="w-full h-4 skeleton mb-2"></div>
+          <div class="w-3/4 h-4 skeleton mb-4"></div>
+          <div class="w-full skeleton-image mb-4"></div>
+        </div>
+      `;
+    }
     loadFeed(container);
   });
 
@@ -168,23 +179,55 @@ export async function renderHome(container) {
       if (entries[0].isIntersecting && !loadingMore && !allPostsLoaded) {
         loadMorePosts(container);
       }
-    }, { rootMargin: '300px' }); // Load 300px before reaching the bottom
+    }, { rootMargin: '600px' });
     feedObserver.observe(loadMoreBtn);
   }
 
-  // Throwback
-  loadThrowback(container);
+  // Lazy load Throwback later
+  setTimeout(() => loadThrowback(container), 2000);
 
-  // Load feed
-  loadFeed(container);
-
-  // Confetti animation
-  if (birthdayUsers.length > 0) {
-    spawnConfetti(container.querySelector('#confetti-box'));
-  }
+  // Check for birthdays today lazily
+  setTimeout(async () => {
+    try {
+      const usersSnap = await getDocs(collection(db, 'users'));
+      let birthdayUsers = [];
+      usersSnap.forEach(d => {
+        const u = d.data();
+        if (isBirthdayToday(u.dateOfBirth)) {
+          birthdayUsers.push({ id: d.id, ...u });
+        }
+      });
+      if (birthdayUsers.length > 0) {
+        const bSection = container.querySelector('#birthday-section');
+        if (bSection) {
+          bSection.innerHTML = `
+            <section class="px-4 pt-4">
+              <div class="birthday-banner">
+                <div class="confetti-container" id="confetti-box"></div>
+                <div class="relative z-10 text-center">
+                  <div class="text-3xl mb-2">🎂🎉</div>
+                  <h3 class="font-bold text-navy-800 text-lg">Happy Birthday!</h3>
+                  <p class="text-sm text-navy-600">${birthdayUsers.map(u => u.fullName).join(', ')}</p>
+                  <button class="mt-3 px-4 py-2 bg-navy-500 text-white rounded-full text-xs font-semibold" id="wish-birthday-btn">
+                    Send Wishes 🎈
+                  </button>
+                </div>
+              </div>
+            </section>
+          `;
+          bSection.querySelector('#wish-birthday-btn')?.addEventListener('click', () => {
+            router.navigate('birthday');
+          });
+          if (window.spawnConfetti) {
+            window.spawnConfetti(bSection.querySelector('#confetti-box'));
+          }
+        }
+      }
+    } catch (e) { }
+  }, 1000);
 
   // Check for pending tag requests on app load
-  checkPendingTags();
+  setTimeout(() => checkPendingTags(), 3000);
 }
 
 function renderTimer() {
@@ -206,7 +249,7 @@ function renderTimer() {
 async function loadThrowback(container) {
   try {
     const today = new Date();
-    const postsSnap = await getDocs(query(collection(db, 'posts'), orderBy('createdAt', 'desc'), limit(100)));
+    const postsSnap = await getDocs(query(collection(db, 'posts'), orderBy('createdAt', 'desc'), limit(30)));
     const throwbacks = [];
     postsSnap.forEach(d => {
       const post = d.data();
@@ -244,20 +287,21 @@ function loadFeed(container) {
   try {
     const q = query(collection(db, 'posts'), orderBy('createdAt', 'desc'), limit(10));
     unsubFeed = onSnapshot(q, (snap) => {
-      if (snap.empty && isFirstLoad) {
+      console.log('Home Feed Posts Loaded:', snap.docs.length);
+      
+      if (isFirstLoad) {
+        feedEl.innerHTML = ''; // clear initial skeletons instantly
+        isFirstLoad = false;
+      }
+
+      if (snap.empty && feedEl.children.length === 0) {
         feedEl.innerHTML = `
           <div class="card p-8 text-center">
             <div class="text-4xl mb-3">📷</div>
             <h3 class="font-semibold text-navy-700 mb-1">No memories yet</h3>
             <p class="text-sm text-gray-400">Be the first to share a memory!</p>
           </div>`;
-        isFirstLoad = false;
         return;
-      }
-      
-      if (isFirstLoad) {
-        feedEl.innerHTML = ''; // clear initial skeletons
-        isFirstLoad = false;
       }
 
       snap.docChanges().forEach(change => {
@@ -372,7 +416,7 @@ async function loadMorePosts(container) {
   if (btn) btn.textContent = 'Load More Memories';
 }
 
-function createPostCard(post) {
+export function createPostCard(post) {
   const user = post.authorName || 'Classmate';
   const avatar = post.authorPhoto;
   const time = post.createdAt?.toDate ? timeAgo(post.createdAt.toDate()) : '';
@@ -386,6 +430,11 @@ function createPostCard(post) {
   const imageUrls = post.imageUrls && post.imageUrls.length > 0 ? post.imageUrls : (post.imageUrl ? [post.imageUrl] : []);
   const mediaTypes = post.mediaTypes && post.mediaTypes.length > 0 ? post.mediaTypes : (post.mediaType ? [post.mediaType] : []);
   
+  const generateMentionsHtml = (mentions) => {
+    if (!mentions || !mentions.length) return '';
+    return `<p class="text-xs text-blue-500 mb-1">${mentions.map(m => `@${sanitizeHTML(m.name)}`).join(' ')}</p>`;
+  };
+
   const mentionsHtml = generateMentionsHtml(post.mentions || []);
 
   const card = document.createElement('div');
@@ -421,7 +470,7 @@ function createPostCard(post) {
                   <svg class="w-12 h-12 text-white drop-shadow-lg" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                 </button>
               ` : `
-                <img src="${optimizeCloudinaryUrl(url)}" class="w-full h-full object-cover" alt="Memory" loading="lazy"/>
+                <img src="${optimizeCloudinaryUrl(url, 600)}" class="w-full h-full object-cover" alt="Memory" loading="lazy" decoding="async" />
               `}
             </div>
           `).join('')}
@@ -436,22 +485,32 @@ function createPostCard(post) {
             <path d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"/>
           </svg>
         </div>
+        ${post.musicUrl ? `
+          <button class="post-music-toggle-btn absolute bottom-3 right-3 z-20 w-8 h-8 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center text-white shadow-lg border border-white/20 transition-all hover:scale-110 active:scale-95" data-audio-url="${post.musicUrl}">
+            <svg class="w-4 h-4 mute-icon" fill="currentColor" viewBox="0 0 24 24"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+            <svg class="w-4 h-4 play-icon hidden" fill="currentColor" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+          </button>
+        ` : ''}
       </div>
-    ` : ''}
-
-    <!-- Audio Player -->
-    ${post.musicUrl ? `
-      <div class="post-audio-player">
-        <button type="button" class="post-audio-btn">
-          <svg class="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-        </button>
-        <div class="post-audio-wave">
-          <div class="post-audio-bar"></div><div class="post-audio-bar"></div><div class="post-audio-bar"></div>
-          <div class="post-audio-bar"></div><div class="post-audio-bar"></div><div class="post-audio-bar"></div>
+    ` : (post.musicUrl ? `
+      <div class="px-4 mt-2">
+        <div class="relative p-4 bg-gradient-to-br from-navy-50 to-cream-50 rounded-xl flex items-center justify-between border border-navy-100/50">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-full bg-navy-500 text-white flex items-center justify-center shadow-md">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
+            </div>
+            <div>
+              <p class="text-sm font-bold text-navy-800">Attached Music</p>
+              <p class="text-xs text-gray-500">Tap speaker to listen</p>
+            </div>
+          </div>
+          <button class="post-music-toggle-btn w-10 h-10 rounded-full bg-navy-800 text-white flex items-center justify-center shadow-lg transition-all active:scale-95 border border-white/10" data-audio-url="${post.musicUrl}">
+              <svg class="w-5 h-5 mute-icon" fill="currentColor" viewBox="0 0 24 24"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+              <svg class="w-5 h-5 play-icon hidden" fill="currentColor" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+          </button>
         </div>
-        <audio class="hidden" src="${post.musicUrl}" loop preload="none"></audio>
       </div>
-    ` : ''}
+    ` : '')}
 
     <!-- Actions -->
       <div class="px-4 pt-3 pb-2">
@@ -601,20 +660,67 @@ function createPostCard(post) {
     });
   });
 
-  // Audio play
-  const audioBtn = card.querySelector('.post-audio-btn');
-  if (audioBtn) {
-    const audioEl = card.querySelector('audio');
-    const bars = card.querySelectorAll('.post-audio-bar');
-    audioBtn.addEventListener('click', () => {
-      if (audioEl.paused) {
-        audioEl.play();
-        audioBtn.innerHTML = '<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
-        bars.forEach(b => b.classList.add('playing'));
+  // Audio play (new speaker icon logic)
+  const musicBtn = card.querySelector('.post-music-toggle-btn');
+  if (musicBtn) {
+    postMusicObserver.observe(card); // observe for auto-pause on scroll
+    
+    musicBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const audioUrl = musicBtn.getAttribute('data-audio-url');
+      const muteIcon = musicBtn.querySelector('.mute-icon');
+      const playIcon = musicBtn.querySelector('.play-icon');
+      
+      const isCurrentlyPlaying = (currentPostAudioBtn === musicBtn && currentPostAudio && !currentPostAudio.paused);
+
+      if (isCurrentlyPlaying) {
+        // Pause it
+        currentPostAudio.pause();
+        muteIcon.classList.remove('hidden');
+        playIcon.classList.add('hidden');
+        musicBtn.classList.remove('animate-pulse', 'bg-red-500/80');
+        musicBtn.classList.add('bg-black/50', 'backdrop-blur-md');
       } else {
-        audioEl.pause();
-        audioBtn.innerHTML = '<svg class="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
-        bars.forEach(b => b.classList.remove('playing'));
+        // Pause any previously playing music
+        if (currentPostAudio && currentPostAudioBtn !== musicBtn) {
+          currentPostAudio.pause();
+          if (currentPostAudioBtn) {
+            currentPostAudioBtn.querySelector('.mute-icon').classList.remove('hidden');
+            currentPostAudioBtn.querySelector('.play-icon').classList.add('hidden');
+            currentPostAudioBtn.classList.remove('animate-pulse', 'bg-red-500/80');
+            currentPostAudioBtn.classList.add('bg-black/50', 'backdrop-blur-md');
+          }
+        }
+        
+        // Start this music
+        if (!musicBtn.audioObj) {
+          musicBtn.audioObj = new Audio(audioUrl);
+          musicBtn.audioObj.loop = true;
+          musicBtn.audioObj.preload = 'none';
+        }
+        
+        currentPostAudio = musicBtn.audioObj;
+        currentPostAudioBtn = musicBtn;
+        
+        // Fade in volume
+        currentPostAudio.volume = 0;
+        currentPostAudio.play().catch(e => console.error(e));
+        
+        let vol = 0;
+        const fadeInterval = setInterval(() => {
+          if (vol < 0.9) {
+            vol += 0.1;
+            currentPostAudio.volume = vol;
+          } else {
+            currentPostAudio.volume = 1;
+            clearInterval(fadeInterval);
+          }
+        }, 50);
+
+        muteIcon.classList.add('hidden');
+        playIcon.classList.remove('hidden');
+        musicBtn.classList.remove('bg-black/50', 'backdrop-blur-md');
+        musicBtn.classList.add('bg-red-500/80', 'animate-pulse');
       }
     });
   }
@@ -901,6 +1007,8 @@ async function showShareModal(post) {
       <div class="px-4 pb-2 border-b border-gray-100 flex items-center justify-between">
         <h3 class="font-bold text-navy-800 text-lg">Send to</h3>
         <button class="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-navy-800 rounded-full bg-gray-50 modal-close-btn">✕</button>
+      </div>
+      
       <!-- Search & Chips -->
       <div class="p-3 border-b border-gray-50">
         <div id="share-chips-container" class="flex flex-wrap gap-2 mb-2 empty:hidden"></div>
@@ -1030,8 +1138,21 @@ async function showShareModal(post) {
       const myId = authManager.currentUser.uid;
       const myName = authManager.userData?.fullName || 'Someone';
 
+      // Pre-fetch existing chats to prevent duplicates
+      const q1 = query(collection(db, 'chats'), where('participants', 'array-contains', myId));
+      const snap = await getDocs(q1);
+      const existingChats = {};
+      snap.forEach(d => {
+        const data = d.data();
+        if (data.type === 'dm' || data.type === 'direct') {
+          const otherId = data.participants.find(p => p !== myId);
+          // Keep the newest chat if multiple exist
+          if (otherId) existingChats[otherId] = d.id; 
+        }
+      });
+
       for (const [friendId, friendData] of selectedFriends.entries()) {
-        const chatId = myId < friendId ? `${myId}_${friendId}` : `${friendId}_${myId}`;
+        const chatId = existingChats[friendId] || (myId < friendId ? `${myId}_${friendId}` : `${friendId}_${myId}`);
         
         // 1. Create or update chat document
         await updateDoc(doc(db, 'chats', chatId), {
@@ -1265,4 +1386,68 @@ async function showTagRequestModal(notif) {
       rejectBtn.textContent = 'Retry';
     }
   });
+}
+
+// ==========================================
+// LIKES MODAL
+// ==========================================
+async function showLikesModal(likesArray) {
+  const { router } = await import('../router.js');
+  const modal = router.openModal('', { title: 'Likes', className: 'likes-modal' });
+  
+  modal.body.innerHTML = `
+    <div class="p-4 space-y-4" id="likes-list-container">
+      ${Array(Math.min(likesArray.length, 3)).fill('<div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full skeleton skeleton-avatar"></div><div class="flex-1"><div class="w-24 h-3 skeleton mb-2"></div><div class="w-16 h-2 skeleton"></div></div></div>').join('')}
+    </div>
+  `;
+
+  try {
+    const { getDoc, doc, db } = await import('../firebase-config.js');
+    const { sanitizeHTML } = await import('../utils.js');
+    
+    // Fetch users in parallel
+    const users = [];
+    const promises = likesArray.map(async (uid) => {
+      try {
+        const uSnap = await getDoc(doc(db, 'users', uid));
+        if (uSnap.exists()) {
+          users.push({ id: uSnap.id, ...uSnap.data() });
+        }
+      } catch(e) { console.error('Failed user fetch', uid); }
+    });
+    
+    await Promise.all(promises);
+    
+    const container = modal.body.querySelector('#likes-list-container');
+    container.innerHTML = '';
+    
+    if (users.length === 0) {
+      container.innerHTML = '<p class="text-center text-gray-500 text-sm py-4">No data available</p>';
+      return;
+    }
+
+    users.forEach(u => {
+      const div = document.createElement('div');
+      div.className = 'flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-2 rounded-xl transition-colors';
+      div.innerHTML = `
+        ${u.profilePic 
+          ? `<img src="${u.profilePic}" class="w-10 h-10 rounded-full object-cover"/>`
+          : `<div class="w-10 h-10 rounded-full bg-cream-200 text-navy-800 flex items-center justify-center font-bold">${sanitizeHTML(u.fullName || '?')[0]}</div>`
+        }
+        <div>
+          <p class="font-semibold text-sm text-navy-800">${sanitizeHTML(u.fullName || 'Unknown')}</p>
+          ${u.nickname ? `<p class="text-[10px] text-gray-400">"${sanitizeHTML(u.nickname)}"</p>` : ''}
+        </div>
+      `;
+      div.addEventListener('click', () => {
+        modal.close();
+        router.navigate('profile', { userId: u.id });
+      });
+      container.appendChild(div);
+    });
+
+  } catch (e) {
+    console.error(e);
+    modal.body.innerHTML = '<p class="text-center text-red-500 text-sm py-4">Failed to load likes</p>';
+  }
 }

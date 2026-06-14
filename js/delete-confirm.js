@@ -131,26 +131,34 @@ export async function deleteDocFull(collectionPath, docId, subcollections = [], 
   try {
     // 1. Delete Media from Cloudinary (Server-Side API Route)
     if (cloudinaryPublicIds && cloudinaryPublicIds.length > 0) {
-      const { app } = await import('./firebase-config.js');
-      const { getFunctions, httpsCallable } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-functions.js');
-      const functions = getFunctions(app);
-      const deleteCloudinaryMedia = httpsCallable(functions, 'deleteCloudinaryMedia');
-      
-      await deleteCloudinaryMedia({
-        publicIds: cloudinaryPublicIds,
-        resourceType: resourceType
-      });
-      console.log('[Delete] Cloudinary media deleted successfully');
+      try {
+        const { app } = await import('./firebase-config.js');
+        const { getFunctions, httpsCallable } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-functions.js');
+        const functions = getFunctions(app);
+        const deleteCloudinaryMedia = httpsCallable(functions, 'deleteCloudinaryMedia');
+        
+        await deleteCloudinaryMedia({
+          publicIds: cloudinaryPublicIds,
+          resourceType: resourceType
+        });
+        console.log('[Delete] Cloudinary media deleted successfully');
+      } catch (cloudErr) {
+        console.warn('[Delete] Cloudinary deletion failed (backend likely not deployed). Proceeding with Firestore delete.', cloudErr);
+      }
     }
 
     // 2. Delete Firestore Document and Subcollections
     await deleteDocWithSubs(collectionPath, docId, subcollections);
     
     // 3. Cleanup notifications related to this post
-    const notifSnap = await getDocs(query(collection(db, 'notifications'), where('postId', '==', docId)));
-    const notifPromises = [];
-    notifSnap.forEach(d => notifPromises.push(deleteDoc(d.ref).catch(() => {})));
-    await Promise.allSettled(notifPromises);
+    try {
+      const notifSnap = await getDocs(query(collection(db, 'notifications'), where('postId', '==', docId)));
+      const notifPromises = [];
+      notifSnap.forEach(d => notifPromises.push(deleteDoc(d.ref).catch(() => {})));
+      await Promise.allSettled(notifPromises);
+    } catch (notifErr) {
+      console.warn('[Delete] Notifications cleanup failed (likely permission issues). Skipping.', notifErr);
+    }
 
     console.log('[Delete] Firestore cleanup complete');
   } catch (err) {

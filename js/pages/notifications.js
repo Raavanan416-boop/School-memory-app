@@ -89,14 +89,19 @@ function loadNotifications(container) {
   }
 
   try {
-    const q = query(
-      collection(db, 'notifications'),
-      where('userId', '==', authManager.currentUser.uid),
-      orderBy('createdAt', 'desc'),
-      limit(100)
-    );
+    let notifLimit = 20;
+    let notifObserver = null;
 
-    unsubNotifs = onSnapshot(q, (snap) => {
+    const setupNotifListener = () => {
+      if (unsubNotifs) unsubNotifs();
+      const q = query(
+        collection(db, 'notifications'),
+        where('userId', '==', authManager.currentUser.uid),
+        orderBy('createdAt', 'desc'),
+        limit(notifLimit)
+      );
+
+      unsubNotifs = onSnapshot(q, (snap) => {
       if (snap.empty) {
         notifsEl.innerHTML = `
           <div class="flex flex-col items-center justify-center py-16 px-6">
@@ -161,7 +166,30 @@ function loadNotifications(container) {
         notifsEl.appendChild(createGroupHeader('Older'));
         groups.older.forEach(n => notifsEl.appendChild(createNotifCard(n)));
       }
+
+      // Add pagination observer target if we reached the limit
+      if (snap.size >= notifLimit) {
+        const topEl = document.createElement('div');
+        topEl.id = 'notif-bottom-observer';
+        topEl.className = 'py-4 text-center text-[10px] text-navy-300 font-semibold uppercase tracking-wider';
+        topEl.textContent = 'Loading older notifications...';
+        notifsEl.appendChild(topEl);
+
+        if (notifObserver) { notifObserver.disconnect(); }
+        if ('IntersectionObserver' in window) {
+          notifObserver = new IntersectionObserver((entries) => {
+            if (entries[0].isIntersecting) {
+              notifLimit += 20;
+              setupNotifListener();
+            }
+          });
+          notifObserver.observe(topEl);
+        }
+      }
     });
+    };
+
+    setupNotifListener();
   } catch (e) {
     notifsEl.innerHTML = `
       <div class="flex flex-col items-center justify-center py-16 px-6">

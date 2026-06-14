@@ -645,7 +645,7 @@ export async function renderUpload(container) {
         mentions, // Instant mentions
         likes: [],
         commentCount: 0,
-        createdAt: serverTimestamp()
+        createdAt: Timestamp.now()
       };
 
       // Add single `imageUrl` and `mediaType` for backwards compatibility with parts of the app not updated yet

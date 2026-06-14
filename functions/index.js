@@ -16,8 +16,8 @@ const cloudinary = require('cloudinary').v2;
 // Cloudinary configuration (Using process.env for security)
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'dcjudjdlm',
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
+  api_key: process.env.CLOUDINARY_API_KEY ||'176572423893588',
+  api_secret: process.env.CLOUDINARY_API_SECRET|| 'DLYCGMeQbSyBq2dnyawpGX0CLeg',
   secure: true
 });
 

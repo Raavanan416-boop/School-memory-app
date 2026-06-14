@@ -4,6 +4,7 @@ import { uploadMedia } from '../services/cloudinary.js';
 import { showToast, sanitizeHTML, timeAgo, formatNumber } from '../utils.js';
 import { authManager } from '../auth.js';
 import { router } from '../router.js';
+import { createPostCard } from './home.js';
 import { createNotification } from '../notifications.js';
 import { presenceManager } from '../presence.js';
 
@@ -12,6 +13,8 @@ let unsubBadges = null;
 let friendPresenceUnsubs = [];
 let profilePresenceUnsub = null;
 let unsubTagged = null;
+let unsubSaved = null;
+let unsubUserPosts = null;
 
 function cleanupFriendPresence() {
   friendPresenceUnsubs.forEach(u => u());
@@ -31,6 +34,14 @@ export function destroyProfile() {
   if (unsubTagged) {
     unsubTagged();
     unsubTagged = null;
+  }
+  if (unsubSaved) {
+    unsubSaved();
+    unsubSaved = null;
+  }
+  if (unsubUserPosts) {
+    unsubUserPosts();
+    unsubUserPosts = null;
   }
 }
 
@@ -57,6 +68,7 @@ export async function renderProfile(container, data = null) {
   let friendCount = 0;
   const uid = viewingOther ? data.userId : authManager.currentUser?.uid;
 
+  // Initial fetch for smooth first render
   try {
     if (uid) {
       const postSnap = await getDocs(query(collection(db, 'posts'), where('authorId', '==', uid), orderBy('createdAt', 'desc')));
@@ -70,23 +82,64 @@ export async function renderProfile(container, data = null) {
     }
   } catch (e) { }
 
-  // Tagged posts are now loaded via real-time listener in renderTaggedTab
+  // Set up Realtime Sync for Profile Stats & Posts
+  if (uid) {
+    const qPosts = query(collection(db, 'posts'), where('authorId', '==', uid), orderBy('createdAt', 'desc'));
+    unsubUserPosts = onSnapshot(qPosts, (snap) => {
+      userPosts = [];
+      totalLikes = 0;
+      totalComments = 0;
+      
+      snap.forEach(d => {
+        const p = d.data();
+        if (p.isHidden && !authManager.isOwner) return;
+        userPosts.push({ id: d.id, ...p });
+        totalLikes += (p.likes?.length || 0);
+        totalComments += (p.commentCount || 0);
+      });
+
+      console.log(`Profile Posts Count: ${userPosts.length}`);
+      console.log(`Profile Likes Count: ${totalLikes}`);
+      console.log(`Profile Comments Count: ${totalComments}`);
+
+      const postsEl = container.querySelector('#profile-stat-posts');
+      if (postsEl) {
+        postsEl.textContent = userPosts.length;
+        container.querySelector('#profile-stat-likes').textContent = formatNumber(totalLikes);
+        container.querySelector('#profile-stat-comments').textContent = formatNumber(totalComments);
+        
+        // Update badges
+        const badges = [];
+        if (userPosts.length >= 1) badges.push({ icon: '📸', name: 'Memory Maker' });
+        if (userPosts.length >= 10) badges.push({ icon: '🌟', name: 'Prolific' });
+        if (totalLikes >= 10) badges.push({ icon: '❤️', name: 'Beloved' });
+        if (totalLikes >= 50) badges.push({ icon: '⭐', name: 'Star' });
+        const badgesEl = container.querySelector('#profile-badges');
+        if (badgesEl) {
+          badgesEl.innerHTML = badges.map(b => `<span class="badge-chip">${b.icon} ${b.name}</span>`).join('') + 
+            (user.endYear ? `<span class="badge-chip">🎓 Batch of ${sanitizeHTML(user.endYear)}</span>` : '');
+        }
+
+        // Re-render active tab if it relies on userPosts
+        const activeTab = container.querySelector('.profile-tab.active')?.dataset.tab;
+        const tabContent = container.querySelector('#tab-content');
+        if (activeTab === 'posts') {
+          renderPostsTab(tabContent, userPosts, viewingOther, user);
+        } else if (activeTab === 'memories') {
+          const highlights = [...userPosts].sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0)).slice(0, 6);
+          renderHighlightsTab(tabContent, user, viewingOther, highlights);
+        }
+      }
+    }, (error) => {
+      console.error('Realtime Stats Error:', error.message);
+    });
+  }
 
   // Count friends (all other users)
   try {
     const usersSnap = await getDocs(collection(db, 'users'));
     friendCount = Math.max(0, usersSnap.size - 1);
   } catch (e) { }
-
-  // Dynamic badges
-  const badges = [];
-  if (userPosts.length >= 1) badges.push({ icon: '📸', name: 'Memory Maker' });
-  if (userPosts.length >= 10) badges.push({ icon: '🌟', name: 'Prolific' });
-  if (totalLikes >= 10) badges.push({ icon: '❤️', name: 'Beloved' });
-  if (totalLikes >= 50) badges.push({ icon: '⭐', name: 'Star' });
-
-  // Memory highlights — most liked posts
-  const highlights = [...userPosts].sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0)).slice(0, 6);
 
   // Birthday check
   const isBirthday = (() => {
@@ -126,17 +179,17 @@ export async function renderProfile(container, data = null) {
           <!-- Stats Row — Clickable, properly spaced -->
           <div class="profile-stats-row mt-3">
             <button class="profile-stat-btn" data-stat="posts">
-              <span class="profile-stat-value">${userPosts.length}</span>
+              <span class="profile-stat-value" id="profile-stat-posts">${userPosts.length}</span>
               <span class="profile-stat-label">Posts</span>
             </button>
             <div class="profile-stat-divider"></div>
             <button class="profile-stat-btn" data-stat="likes">
-              <span class="profile-stat-value">${formatNumber(totalLikes)}</span>
+              <span class="profile-stat-value" id="profile-stat-likes">${formatNumber(totalLikes)}</span>
               <span class="profile-stat-label">Likes</span>
             </button>
             <div class="profile-stat-divider"></div>
             <button class="profile-stat-btn" data-stat="comments">
-              <span class="profile-stat-value">${formatNumber(totalComments)}</span>
+              <span class="profile-stat-value" id="profile-stat-comments">${formatNumber(totalComments)}</span>
               <span class="profile-stat-label">Comments</span>
             </button>
             <div class="profile-stat-divider"></div>
@@ -167,7 +220,10 @@ export async function renderProfile(container, data = null) {
 
       <!-- Badges -->
       <div class="flex flex-wrap gap-2 mt-4 justify-center" id="profile-badges">
-        ${badges.map(b => `<span class="badge-chip">${b.icon} ${b.name}</span>`).join('')}
+        ${userPosts.length >= 1 ? `<span class="badge-chip">📸 Memory Maker</span>` : ''}
+        ${userPosts.length >= 10 ? `<span class="badge-chip">🌟 Prolific</span>` : ''}
+        ${totalLikes >= 10 ? `<span class="badge-chip">❤️ Beloved</span>` : ''}
+        ${totalLikes >= 50 ? `<span class="badge-chip">⭐ Star</span>` : ''}
         ${user.endYear ? `<span class="badge-chip">🎓 Batch of ${sanitizeHTML(user.endYear)}</span>` : ''}
       </div>
 
@@ -384,7 +440,10 @@ export async function renderProfile(container, data = null) {
       case 'posts': renderPostsTab(tabContent, userPosts, viewingOther, user); break;
       case 'tagged': renderTaggedTab(tabContent, uid); break;
       case 'slambook': renderSlamBookTab(tabContent, user, viewingOther); break;
-      case 'memories': renderHighlightsTab(tabContent, user, viewingOther, highlights); break;
+      case 'memories': 
+        const highlights = [...userPosts].sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0)).slice(0, 6);
+        renderHighlightsTab(tabContent, user, viewingOther, highlights); 
+        break;
       case 'saved': renderSavedTab(tabContent, uid); break;
     }
   }
@@ -1177,7 +1236,7 @@ function renderPostsTab(el, posts, viewingOther, user) {
       </div>
       <div class="flex gap-3 overflow-x-auto pb-3 -mx-1 px-1 snap-x snap-mandatory" style="-webkit-overflow-scrolling: touch; scrollbar-width: none;">
         ${recentPosts.map(p => `
-          <div class="flex-shrink-0 snap-start" style="width: 44%;">
+          <div class="flex-shrink-0 snap-start cursor-pointer profile-post-clickable" data-post-id="${p.id}" style="width: 44%;">
             <div class="rounded-2xl overflow-hidden bg-white shadow-sm border border-gray-50">
               <div class="aspect-[4/3] overflow-hidden bg-cream-100">
                 ${p.imageUrl
@@ -1212,7 +1271,7 @@ function renderPostsTab(el, posts, viewingOther, user) {
         </div>
         <div class="profile-posts-grid">
           ${posts.map(p => `
-            <div class="profile-post-cell">
+            <div class="profile-post-cell cursor-pointer profile-post-clickable" data-post-id="${p.id}">
               ${p.imageUrl
           ? `<img src="${p.imageUrl}" class="w-full h-full object-cover" alt="" loading="lazy"/>`
           : `<div class="w-full h-full bg-gradient-to-br from-cream-200 to-cream-300 flex flex-col items-center justify-center p-2">
@@ -1228,6 +1287,7 @@ function renderPostsTab(el, posts, viewingOther, user) {
           `).join('')}
         </div>
       </div>
+      </div>
     ` : ''}
   `;
 
@@ -1240,6 +1300,42 @@ function renderPostsTab(el, posts, viewingOther, user) {
     const grid = el.querySelector('#all-posts-grid');
     if (grid) grid.classList.add('hidden');
   });
+
+  // Post click handler
+  el.querySelectorAll('.profile-post-clickable').forEach(item => {
+    item.addEventListener('click', () => {
+      const pid = item.dataset.postId;
+      const post = posts.find(p => p.id === pid);
+      if (post) showPostModal(post);
+    });
+  });
+}
+
+export function showPostModal(post) {
+  const overlay = document.createElement('div');
+  overlay.className = 'fixed inset-0 z-[100] modal-sheet-container modal-sheet-overlay flex flex-col justify-end';
+  overlay.innerHTML = `
+    <div class="modal-backdrop absolute inset-0 cursor-pointer bg-black/40 backdrop-blur-sm"></div>
+    <div class="bg-white w-full max-w-lg mx-auto rounded-t-3xl shadow-2xl relative flex flex-col" style="height: 90vh;">
+      <div class="sheet-handle mt-3 mx-auto"></div>
+      <div class="flex-1 overflow-y-auto pb-6 pt-2" id="modal-post-container">
+        <!-- Post injected here -->
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => overlay.classList.add('modal-active'));
+
+  const close = () => {
+    overlay.classList.remove('modal-active');
+    overlay.classList.add('modal-closing');
+    setTimeout(() => overlay.remove(), 300);
+  };
+  overlay.querySelector('.modal-backdrop').addEventListener('click', close);
+  
+  const container = overlay.querySelector('#modal-post-container');
+  // Re-use home feed post card
+  container.appendChild(createPostCard(post));
 }
 
 function renderTaggedTab(el, targetUid) {
@@ -1325,12 +1421,17 @@ function renderSavedTab(el, targetUid) {
     </div>
   `;
 
+  if (unsubSaved) {
+    unsubSaved();
+    unsubSaved = null;
+  }
+
   const q = query(
     collection(db, 'users', targetUid, 'savedPosts'),
     orderBy('savedAt', 'desc')
   );
 
-  onSnapshot(q, async (snap) => {
+  unsubSaved = onSnapshot(q, async (snap) => {
     if (snap.empty) {
       el.innerHTML = `
         <div class="px-4 py-12 text-center">

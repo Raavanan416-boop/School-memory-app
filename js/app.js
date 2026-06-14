@@ -30,9 +30,9 @@ window.syncAllLeaderboardPoints = async () => {
 
 // ===== MUSIC PLAYER =====
 const MusicPlayer = {
-  bellAudio: null,
   bgAudio: null,
   playlist: [
+    'schoolbell.mp3',
     'firstsong.mp3',
     'secondsong.mp3',
     'thridsong.mp3',
@@ -47,35 +47,15 @@ const MusicPlayer = {
     if (this.isStopped || this.hasStarted) return;
     this.hasStarted = true;
 
-    // Play bell first
-    this.bellAudio = new Audio('schoolbell.mp3');
-    this.bellAudio.volume = 0.8;
-
+    this.showStopButton();
+    
     // Ensure no overlapping audio
     if (this.bgAudio) {
       this.bgAudio.pause();
     }
 
-    const playPromise = this.bellAudio.play();
-    if (playPromise !== undefined) {
-      playPromise.then(() => {
-        this.showStopButton();
-      }).catch(e => {
-        console.log('Audio autoplay blocked. Waiting for user interaction.', e);
-        const unlockAudio = () => {
-          if (!this.isStopped) {
-            this.bellAudio.play().then(() => this.showStopButton()).catch(() => { });
-          }
-          document.removeEventListener('click', unlockAudio);
-        };
-        document.addEventListener('click', unlockAudio, { once: true });
-      });
-    }
-
-    this.bellAudio.onended = () => {
-      if (this.isStopped) return;
-      this.playNextSong();
-    };
+    // Start playing the playlist directly
+    this.playNextSong();
   },
 
   playNextSong() {
@@ -103,10 +83,6 @@ const MusicPlayer = {
 
   stopAll() {
     this.isStopped = true;
-    if (this.bellAudio) {
-      this.bellAudio.pause();
-      this.bellAudio.src = '';
-    }
     if (this.bgAudio) {
       this.bgAudio.pause();
       this.bgAudio.src = '';

@@ -77,13 +77,7 @@ class AuthManager {
             this.userData.role = 'admin';
           } catch (e) { console.log('Could not upgrade owner role:', e); }
         }
-        // Sync leaderboard doc on login (non-blocking)
-        const ud = snap.data();
-        setDoc(doc(db, 'leaderboard', uid), {
-          fullName: ud.fullName || 'Unknown',
-          profilePic: ud.profilePic || '',
-          points: ud.points || 0
-        }, { merge: true }).catch(() => {});
+        // (Legacy leaderboard sync removed)
 
         // Fetch new savedPosts subcollection and migrate if old array exists
         this.userData.savedPosts = [];
@@ -123,8 +117,7 @@ class AuthManager {
           createdAt: serverTimestamp()
         };
         await setDoc(doc(db, 'users', uid), defaultData);
-        // Create leaderboard + presence entries for new user
-        await setDoc(doc(db, 'leaderboard', uid), { fullName: defaultData.fullName, profilePic: '', points: 0 });
+        // Create presence entries for new user
         await setDoc(doc(db, 'presence', uid), { online: true, lastSeen: serverTimestamp() });
         this.userData = { id: uid, ...defaultData };
       }
@@ -223,8 +216,11 @@ class AuthManager {
 
   async savePost(postId) {
     if (!this.currentUser) return;
-    const { setDoc, serverTimestamp } = await import('./firebase-config.js');
-    await setDoc(doc(db, 'users', this.currentUser.uid, 'savedPosts', postId), {
+    const { setDoc, doc, serverTimestamp } = await import('./firebase-config.js');
+    const docId = `${this.currentUser.uid}_${postId}`;
+    await setDoc(doc(db, 'savedPosts', docId), {
+      userId: this.currentUser.uid,
+      postId: postId,
       savedAt: serverTimestamp()
     });
     if (this.userData) {
@@ -235,8 +231,9 @@ class AuthManager {
 
   async unsavePost(postId) {
     if (!this.currentUser) return;
-    const { deleteDoc } = await import('./firebase-config.js');
-    await deleteDoc(doc(db, 'users', this.currentUser.uid, 'savedPosts', postId));
+    const { deleteDoc, doc } = await import('./firebase-config.js');
+    const docId = `${this.currentUser.uid}_${postId}`;
+    await deleteDoc(doc(db, 'savedPosts', docId));
     if (this.userData) {
       this.userData.savedPosts = (this.userData.savedPosts || []).filter(id => id !== postId);
     }
@@ -259,7 +256,6 @@ export async function awardPoints(userId, points, reason) {
 
   try {
     const userRef = doc(db, 'users', userId);
-    const lbRef = doc(db, 'leaderboard', userId);
 
     await runTransaction(db, async (transaction) => {
       const userDoc = await transaction.get(userRef);
@@ -271,13 +267,6 @@ export async function awardPoints(userId, points, reason) {
 
       // Update users collection
       transaction.update(userRef, { points: newPoints });
-
-      // Dual-write to leaderboard collection (single source of truth for rankings)
-      transaction.set(lbRef, {
-        points: newPoints,
-        fullName: userData.fullName || 'Unknown',
-        profilePic: userData.profilePic || ''
-      });
     });
 
     // Update local cache so UI updates instantly

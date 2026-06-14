@@ -4,6 +4,7 @@ import { sanitizeHTML, debounce } from '../utils.js';
 import { authManager } from '../auth.js';
 import { router } from '../router.js';
 import { presenceManager } from '../presence.js';
+import { userCache } from '../services/userCache.js';
 
 let allUsers = [];
 let allPosts = [];
@@ -129,13 +130,9 @@ export async function renderSearch(container) {
   async function ensureDataLoaded() {
     if (dataLoaded) return;
     try {
-      const [usersSnap, postsSnap] = await Promise.all([
-        getDocs(collection(db, 'users')),
-        getDocs(query(collection(db, 'posts'), orderBy('createdAt', 'desc'), limit(50)))
-      ]);
-      allUsers = [];
+      const postsSnap = await getDocs(query(collection(db, 'posts'), orderBy('createdAt', 'desc'), limit(50)));
+      allUsers = userCache.getAllUsers();
       allPosts = [];
-      usersSnap.forEach(d => allUsers.push({ id: d.id, ...d.data() }));
       postsSnap.forEach(d => allPosts.push({ id: d.id, ...d.data() }));
       dataLoaded = true;
     } catch (e) {
@@ -233,22 +230,26 @@ function performSearch(container, searchQuery, tab) {
 }
 
 function userCard(u) {
-  const avatar = u.profilePic
-    ? `<img src="${u.profilePic}" class="avatar" alt="${sanitizeHTML(u.fullName || '')}"/>`
-    : `<div class="avatar avatar-placeholder text-sm">${(u.fullName || '?')[0]}</div>`;
+  const cached = userCache.getUser(u.id);
+  const fullName = cached.fullName || u.fullName || '?';
+  const pic = cached.profilePic || u.profilePic;
+
+  const avatar = pic
+    ? `<img src="${pic}" class="avatar" alt="${sanitizeHTML(fullName)}" data-user-pic="${u.id}"/>`
+    : `<div class="avatar avatar-placeholder text-sm" data-user-pic="${u.id}">${fullName[0]}</div>`;
 
   return `
-    <div class="chat-item user-search-card" data-uid="${u.id}" data-name="${sanitizeHTML(u.fullName || '')}">
+    <div class="chat-item user-search-card" data-uid="${u.id}" data-name="${sanitizeHTML(fullName)}">
       <div class="relative">
         ${avatar}
         <div class="presence-dot-mini ${u.online ? 'online' : ''}" id="search-presence-${u.id}"></div>
       </div>
       <div class="flex-1 min-w-0">
-        <p class="font-semibold text-sm text-navy-800">${sanitizeHTML(u.fullName || 'Unknown')}</p>
+        <p class="font-semibold text-sm text-navy-800" data-user-name="${u.id}">${sanitizeHTML(fullName)}</p>
         <p class="text-xs text-gray-400">${u.nickname ? `"${sanitizeHTML(u.nickname)}" · ` : ''}Roll #${sanitizeHTML(u.rollNumber || '—')}</p>
       </div>
       <div class="flex items-center gap-1">
-        <button class="dm-btn p-1.5 rounded-full hover:bg-cream-100 text-gray-400 hover:text-navy-500 transition-colors" data-uid="${u.id}" data-name="${sanitizeHTML(u.fullName || '')}" title="Message">
+        <button class="dm-btn p-1.5 rounded-full hover:bg-cream-100 text-gray-400 hover:text-navy-500 transition-colors" data-uid="${u.id}" data-name="${sanitizeHTML(fullName)}" title="Message">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 016 21c-1.052 0-2.062-.18-3-.512v-.003c0-1.113.285-2.16.786-3.07C2.859 16.023 2 14.104 2 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z"/></svg>
         </button>
       </div>
@@ -256,12 +257,15 @@ function userCard(u) {
 }
 
 function postSearchCard(p) {
+  const cached = userCache.getUser(p.authorId);
+  const authorName = cached.fullName || p.authorName || '';
+
   return `
     <div class="card p-3 flex items-center gap-3">
       ${p.imageUrl ? `<img src="${p.imageUrl}" class="w-14 h-14 rounded-lg object-cover flex-shrink-0" alt="" loading="lazy"/>` : `<div class="w-14 h-14 rounded-lg bg-cream-200 flex items-center justify-center text-2xl flex-shrink-0">📝</div>`}
       <div class="flex-1 min-w-0">
         <p class="text-sm text-navy-800 truncate">${sanitizeHTML(p.caption || 'Memory')}</p>
-        <p class="text-xs text-gray-400">${sanitizeHTML(p.authorName || '')} ${p.category ? `· ${sanitizeHTML(p.category)}` : ''}</p>
+        <p class="text-xs text-gray-400"><span data-user-name="${p.authorId}">${sanitizeHTML(authorName)}</span> ${p.category ? `· ${sanitizeHTML(p.category)}` : ''}</p>
       </div>
     </div>`;
 }

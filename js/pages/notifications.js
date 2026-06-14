@@ -4,6 +4,7 @@ import { timeAgo, sanitizeHTML } from '../utils.js';
 import { authManager } from '../auth.js';
 import { notificationManager } from '../notifications.js';
 import { router } from '../router.js';
+import { userCache } from '../services/userCache.js';
 
 let unsubNotifs = null;
 
@@ -96,9 +97,7 @@ function loadNotifications(container) {
       if (unsubNotifs) unsubNotifs();
       const q = query(
         collection(db, 'notifications'),
-        where('userId', '==', authManager.currentUser.uid),
-        orderBy('createdAt', 'desc'),
-        limit(notifLimit)
+        where('userId', '==', authManager.currentUser.uid)
       );
 
       unsubNotifs = onSnapshot(q, (snap) => {
@@ -114,6 +113,18 @@ function loadNotifications(container) {
         if (unreadBanner) unreadBanner.classList.add('hidden');
         return;
       }
+      
+      // Sort locally
+      let allDocs = [];
+      snap.forEach(d => allDocs.push(d));
+      allDocs.sort((a, b) => {
+        const aTime = a.data().createdAt?.toMillis() || 0;
+        const bTime = b.data().createdAt?.toMillis() || 0;
+        return bTime - aTime;
+      });
+      
+      // Apply pagination limit locally
+      const pageDocs = allDocs.slice(0, notifLimit);
 
       // Group notifications by date
       const today = new Date();
@@ -124,7 +135,7 @@ function loadNotifications(container) {
       const groups = { today: [], yesterday: [], older: [] };
       let unreadCount = 0;
 
-      snap.forEach(d => {
+      pageDocs.forEach(d => {
         const notif = { id: d.id, ...d.data() };
         if (!notif.read) unreadCount++;
 
@@ -168,7 +179,7 @@ function loadNotifications(container) {
       }
 
       // Add pagination observer target if we reached the limit
-      if (snap.size >= notifLimit) {
+      if (allDocs.length >= notifLimit) {
         const topEl = document.createElement('div');
         topEl.id = 'notif-bottom-observer';
         topEl.className = 'py-4 text-center text-[10px] text-navy-300 font-semibold uppercase tracking-wider';
@@ -477,7 +488,14 @@ function getDefaultTitle(type) {
 }
 
 function getDefaultBody(notif) {
-  const name = notif.fromName || 'Someone';
+  let name = notif.fromName || 'Someone';
+  try {
+    if (notif.fromId) {
+      const u = userCache.getUser(notif.fromId);
+      if (u && u.fullName) name = u.fullName;
+    }
+  } catch(e) {}
+
   const bodies = {
     like: `${name} liked your memory.`,
     comment: `${name} commented on your memory.`,

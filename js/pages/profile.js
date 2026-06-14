@@ -1,7 +1,8 @@
 // Profile page — Instagram-style with cover photo, tabs, hidden settings menu
 import { db, doc, getDoc, getDocs, collection, query, where, orderBy, addDoc, onSnapshot, serverTimestamp, arrayUnion, arrayRemove, updateDoc, deleteDoc } from '../firebase-config.js';
 import { uploadMedia } from '../services/cloudinary.js';
-import { showToast, sanitizeHTML, timeAgo, formatNumber } from '../utils.js';
+import { sanitizeHTML, formatNumber, timeAgo, showToast, EMOTIONAL_QUOTES } from '../utils.js';
+import { userCache } from '../services/userCache.js';
 import { authManager } from '../auth.js';
 import { router } from '../router.js';
 import { createPostCard } from './home.js';
@@ -52,10 +53,8 @@ export async function renderProfile(container, data = null) {
   let user;
 
   if (viewingOther) {
-    try {
-      const snap = await getDoc(doc(db, 'users', data.userId));
-      user = snap.exists() ? { id: snap.id, ...snap.data() } : {};
-    } catch (e) { user = {}; }
+    const cachedUser = userCache.getUser(data.userId);
+    user = { id: data.userId, ...cachedUser };
   } else {
     user = authManager.userData || {};
   }
@@ -136,10 +135,7 @@ export async function renderProfile(container, data = null) {
   }
 
   // Count friends (all other users)
-  try {
-    const usersSnap = await getDocs(collection(db, 'users'));
-    friendCount = Math.max(0, usersSnap.size - 1);
-  } catch (e) { }
+  friendCount = Math.max(0, userCache.users.size - 1);
 
   // Birthday check
   const isBirthday = (() => {
@@ -164,8 +160,8 @@ export async function renderProfile(container, data = null) {
         <div class="relative flex-shrink-0">
           <div class="profile-avatar-container ${isBirthday ? 'birthday-ring' : ''}" id="profile-pic-view">
             ${user.profilePic
-      ? `<img src="${user.profilePic}" class="w-full h-full object-cover" alt="${sanitizeHTML(user.fullName || '')}" id="profile-pic-img"/>`
-      : `<div class="w-full h-full flex items-center justify-center text-white text-4xl font-bold">${(user.fullName || '?')[0]}</div>`}
+      ? `<img src="${user.profilePic}" class="w-full h-full object-cover" alt="${sanitizeHTML(user.fullName || '')}" id="profile-pic-img" data-user-pic="${user.id}"/>`
+      : `<div class="w-full h-full flex items-center justify-center text-white text-4xl font-bold" data-user-pic="${user.id}">${(user.fullName || '?')[0]}</div>`}
           </div>
           <div class="absolute bottom-1 right-1 w-5 h-5 rounded-full ${user.online ? 'bg-green-400' : 'bg-gray-300'} border-3 border-white" id="profile-online-dot"></div>
           ${isBirthday ? '<div class="absolute -top-1 -right-1"><span class="birthday-badge">🎂</span></div>' : ''}
@@ -173,7 +169,7 @@ export async function renderProfile(container, data = null) {
 
         <!-- Name + Stats -->
         <div class="flex-1 pt-1">
-          <h2 class="text-xl font-bold text-navy-800 leading-tight">${sanitizeHTML(user.fullName || 'Your Name')}</h2>
+          <h2 class="text-xl font-bold text-navy-800 leading-tight" data-user-name="${user.id}">${sanitizeHTML(user.fullName || 'Your Name')}</h2>
           ${user.nickname ? `<p class="font-handwriting text-base text-navy-400 italic mt-0.5">"${sanitizeHTML(user.nickname)}"</p>` : ''}
 
           <!-- Stats Row — Clickable, properly spaced -->
@@ -973,7 +969,7 @@ async function showStatDetailModal(type, userPosts, uid) {
           ${userPosts.map(p => `
             <div class="profile-post-thumb" data-post-id="${p.id}">
               ${p.imageUrl
-        ? `<img src="${p.imageUrl}" alt="" class="w-full h-full object-cover"/>`
+        ? `<img src="${p.imageUrl}" class="w-full h-full object-cover" alt="" />`
         : `<div class="w-full h-full bg-gradient-to-br from-navy-100 to-navy-200 flex items-center justify-center text-xs text-navy-500 p-2 text-center leading-tight">${sanitizeHTML((p.content || '').slice(0, 60))}</div>`}
               <div class="profile-post-overlay">
                 <span>❤️ ${p.likes?.length || 0}</span>
@@ -997,9 +993,14 @@ async function showStatDetailModal(type, userPosts, uid) {
       if (post.likes?.length > 0) {
         for (const likerUid of post.likes.slice(0, 10)) {
           try {
-            const snap = await getDoc(doc(db, 'users', likerUid));
-            const name = snap.exists() ? snap.data().fullName || 'Unknown' : 'Unknown';
-            likeItems.push({ name, postContent: post.content?.slice(0, 40) || 'a memory', postId: post.id, pic: snap.exists() ? snap.data().profilePic : '' });
+            const cachedUser = userCache.getUser(likerUid);
+            const userObj = { id: likerUid, ...cachedUser };
+            likeItems.push({ 
+              name: userObj.fullName || 'Unknown', 
+              postContent: post.content?.slice(0, 40) || 'a memory', 
+              postId: post.id, 
+              pic: userObj.profilePic || '' 
+            });
           } catch { likeItems.push({ name: 'Unknown', postContent: 'a memory', postId: post.id, pic: '' }); }
         }
       }
@@ -1029,7 +1030,7 @@ async function showStatDetailModal(type, userPosts, uid) {
         const commentsSnap = await getDocs(query(collection(db, 'posts', post.id, 'comments'), orderBy('createdAt', 'desc')));
         commentsSnap.forEach(cDoc => {
           const c = cDoc.data();
-          commentItems.push({ authorName: c.authorName || 'Unknown', text: c.text?.slice(0, 50) || '', postContent: post.content?.slice(0, 30) || 'a memory', postId: post.id, time: c.createdAt?.toDate ? timeAgo(c.createdAt.toDate()) : '' });
+          commentItems.push({ authorName: c.authorName || 'Unknown', authorId: c.authorId, text: c.text?.slice(0, 50) || '', postContent: post.content?.slice(0, 30) || 'a memory', postId: post.id, time: c.createdAt?.toDate ? timeAgo(c.createdAt.toDate()) : '' });
         });
       } catch { /* skip */ }
     }
@@ -1041,9 +1042,9 @@ async function showStatDetailModal(type, userPosts, uid) {
       <div class="p-4 space-y-2">
         ${commentItems.slice(0, 30).map(c => `
           <div class="stat-detail-item">
-            <div class="stat-detail-avatar-placeholder">${(c.authorName || '?')[0]}</div>
+            <div class="stat-detail-avatar-placeholder" data-user-pic="${c.authorId}">${(c.authorName || '?')[0]}</div>
             <div class="flex-1 min-w-0">
-              <p class="text-sm text-navy-800"><span class="font-semibold">${sanitizeHTML(c.authorName)}</span> <span class="text-gray-400">on</span> "${sanitizeHTML(c.postContent)}..."</p>
+              <p class="text-sm text-navy-800"><span class="font-semibold" data-user-name="${c.authorId}">${sanitizeHTML(c.authorName)}</span> <span class="text-gray-400">on</span> "${sanitizeHTML(c.postContent)}..."</p>
               <p class="text-[11px] text-gray-400 truncate">"${sanitizeHTML(c.text)}" · ${c.time}</p>
             </div>
           </div>
@@ -1059,12 +1060,11 @@ async function showFriendsListModal(uid) {
   modal.body.innerHTML = '<div class="p-6 text-center text-gray-400 text-sm">Loading friends...</div>';
 
   try {
-    const usersSnap = await getDocs(collection(db, 'users'));
+    const allUsers = userCache.getAllUsers();
     const friends = [];
-    usersSnap.forEach(d => {
-      if (d.id !== uid) {
-        const u = d.data();
-        friends.push({ id: d.id, ...u });
+    allUsers.forEach(u => {
+      if (u.id !== uid) {
+        friends.push(u);
       }
     });
     friends.sort((a, b) => (b.online ? 1 : 0) - (a.online ? 1 : 0) || (a.fullName || '').localeCompare(b.fullName || ''));
@@ -1138,20 +1138,14 @@ async function showCloseFriendsModal() {
     const myData = authManager.userData || {};
     const closeFriends = myData.closeFriends || [];
 
-    const usersSnap = await getDocs(collection(db, 'users'));
-    const allUsers = [];
-    usersSnap.forEach(d => {
-      if (d.id !== authManager.currentUser?.uid) {
-        allUsers.push({ id: d.id, ...d.data() });
-      }
-    });
+    const allUsers = userCache.getAllUsers();
     allUsers.sort((a, b) => (a.fullName || '').localeCompare(b.fullName || ''));
 
     modal.body.innerHTML = `
       <div class="p-4">
         <p class="text-xs text-gray-400 mb-4">Select close friends to share private memories and diary entries.</p>
         <div class="space-y-2" id="close-friends-list">
-          ${allUsers.map(u => {
+          ${allUsers.filter(u => u.id !== authManager.currentUser.uid).map(u => {
       const isClose = closeFriends.includes(u.id);
       return `
               <label class="close-friend-item ${isClose ? 'selected' : ''}" data-uid="${u.id}">
@@ -1403,7 +1397,7 @@ function renderTaggedTab(el, targetUid) {
         ? `<img src="${(p.imageUrls && p.imageUrls.length > 0) ? p.imageUrls[0] : p.imageUrl}" class="w-full h-full object-cover" alt="" loading="lazy"/>`
         : `<div class="w-full h-full bg-cream-200 flex items-center justify-center"><span class="text-2xl">📝</span></div>`}
             <div class="profile-post-overlay">
-              <span class="text-white text-[10px] font-medium">${sanitizeHTML(p.authorName || '')}</span>
+              <span class="text-white text-[10px] font-medium" data-user-name="${p.authorId}">${sanitizeHTML(p.authorName || '')}</span>
             </div>
           </div>
         `).join('')}
@@ -1427,8 +1421,8 @@ function renderSavedTab(el, targetUid) {
   }
 
   const q = query(
-    collection(db, 'users', targetUid, 'savedPosts'),
-    orderBy('savedAt', 'desc')
+    collection(db, 'savedPosts'),
+    where('userId', '==', targetUid)
   );
 
   unsubSaved = onSnapshot(q, async (snap) => {
@@ -1442,8 +1436,15 @@ function renderSavedTab(el, targetUid) {
       return;
     }
 
-    const postPromises = snap.docs.map(async d => {
-      const postId = d.id;
+    // Sort locally by savedAt desc
+    const sortedDocs = snap.docs.sort((a, b) => {
+      const aTime = a.data().savedAt?.toMillis() || 0;
+      const bTime = b.data().savedAt?.toMillis() || 0;
+      return bTime - aTime;
+    });
+
+    const postPromises = sortedDocs.map(async d => {
+      const postId = d.data().postId || d.id;
       const postSnap = await getDoc(doc(db, 'posts', postId));
       if (postSnap.exists()) {
         const p = postSnap.data();
@@ -1647,23 +1648,97 @@ function showEditProfileModal() {
     if (bioCount) bioCount.textContent = bioInput.value.length;
   });
 
-  // Profile picture upload
+  // Profile picture upload with Cropper.js
   modal.body.querySelector('#pic-file-input')?.addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    try {
-      showToast('Uploading photo...', 'info');
-      const url = await authManager.updateProfilePic(file);
-      showToast('Photo updated! 📸', 'success');
-      const preview = modal.body.querySelector('#edit-pic-preview');
-      if (preview?.tagName === 'IMG') {
-        preview.src = url;
-      } else if (preview) {
-        preview.outerHTML = `<img src="${url}" class="w-20 h-20 rounded-full object-cover border-3 border-cream-300 shadow-md" alt="" id="edit-pic-preview"/>`;
-      }
-      const status = modal.body.querySelector('#pic-upload-status');
-      if (status) status.classList.remove('hidden');
-    } catch (err) { showToast('Upload failed', 'error'); }
+
+    // Read file as Data URL for the cropper
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const imgDataUrl = event.target.result;
+      
+      const cropperModal = router.openModal('', { title: 'Crop Profile Photo' });
+      cropperModal.body.innerHTML = `
+        <div class="p-4 flex flex-col items-center">
+          <div class="w-full max-w-sm h-64 bg-gray-100 rounded-xl overflow-hidden mb-4 relative">
+            <img id="cropper-image" src="${imgDataUrl}" class="max-w-full block" />
+          </div>
+          <div class="flex gap-3 mb-4 w-full">
+            <button id="crop-zoom-in" class="flex-1 py-2 bg-cream-100 text-navy-800 rounded-xl font-bold hover:bg-cream-200">🔍+</button>
+            <button id="crop-zoom-out" class="flex-1 py-2 bg-cream-100 text-navy-800 rounded-xl font-bold hover:bg-cream-200">🔍-</button>
+            <button id="crop-rotate-left" class="flex-1 py-2 bg-cream-100 text-navy-800 rounded-xl font-bold hover:bg-cream-200">↺</button>
+            <button id="crop-rotate-right" class="flex-1 py-2 bg-cream-100 text-navy-800 rounded-xl font-bold hover:bg-cream-200">↻</button>
+          </div>
+          <button id="crop-confirm" class="w-full py-3 bg-navy-500 text-white rounded-xl font-bold hover:bg-navy-600 transition-colors">Confirm & Upload</button>
+        </div>
+      `;
+
+      const image = cropperModal.body.querySelector('#cropper-image');
+      const cropper = new Cropper(image, {
+        aspectRatio: 1,
+        viewMode: 1,
+        dragMode: 'move',
+        autoCropArea: 1,
+        restore: false,
+        guides: false,
+        center: false,
+        highlight: false,
+        cropBoxMovable: true,
+        cropBoxResizable: true,
+        toggleDragModeOnDblclick: false,
+      });
+
+      cropperModal.body.querySelector('#crop-zoom-in').addEventListener('click', () => cropper.zoom(0.1));
+      cropperModal.body.querySelector('#crop-zoom-out').addEventListener('click', () => cropper.zoom(-0.1));
+      cropperModal.body.querySelector('#crop-rotate-left').addEventListener('click', () => cropper.rotate(-90));
+      cropperModal.body.querySelector('#crop-rotate-right').addEventListener('click', () => cropper.rotate(90));
+
+      cropperModal.body.querySelector('#crop-confirm').addEventListener('click', () => {
+        const confirmBtn = cropperModal.body.querySelector('#crop-confirm');
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Uploading...';
+
+        cropper.getCroppedCanvas({
+          width: 500,
+          height: 500,
+          imageSmoothingEnabled: true,
+          imageSmoothingQuality: 'high',
+        }).toBlob(async (blob) => {
+          if (!blob) {
+            showToast('Failed to crop image', 'error');
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = 'Confirm & Upload';
+            return;
+          }
+          try {
+            showToast('Uploading photo...', 'info');
+            // Create a File object from the blob so uploadMedia/updateProfilePic accepts it natively if it needs a name
+            const croppedFile = new File([blob], 'profile.jpg', { type: 'image/jpeg' });
+            const url = await authManager.updateProfilePic(croppedFile);
+            showToast('Photo updated! 📸', 'success');
+            
+            const preview = modal.body.querySelector('#edit-pic-preview');
+            if (preview?.tagName === 'IMG') {
+              preview.src = url;
+            } else if (preview) {
+              preview.outerHTML = `<img src="${url}" class="w-20 h-20 rounded-full object-cover border-3 border-cream-300 shadow-md" alt="" id="edit-pic-preview"/>`;
+            }
+            const status = modal.body.querySelector('#pic-upload-status');
+            if (status) status.classList.remove('hidden');
+            cropperModal.close();
+          } catch (err) {
+            console.error('Cropper upload error', err);
+            showToast('Upload failed', 'error');
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = 'Confirm & Upload';
+          }
+        }, 'image/jpeg', 0.8); // 0.8 compression quality
+      });
+    };
+    reader.readAsDataURL(file);
+    // Reset input so selecting the same file again triggers change event
+    e.target.value = '';
   });
 
   // Cover photo upload
@@ -1893,7 +1968,7 @@ async function showSavedPosts() {
             ${p.imageUrl ? `<img src="${p.imageUrl}" class="w-full h-full object-cover" alt="" loading="lazy"/>` : `
               <div class="w-full h-full flex flex-col items-center justify-center p-3 text-center bg-cream-200">
                 <p class="text-xs text-gray-600 font-handwriting">${sanitizeHTML((p.caption || '').slice(0, 60))}</p>
-                <p class="text-[10px] text-gray-400 mt-1">${sanitizeHTML(p.authorName || '')}</p>
+                <p class="text-[10px] text-gray-400 mt-1" data-user-name="${p.authorId}">${sanitizeHTML(p.authorName || '')}</p>
               </div>
             `}
           </div>

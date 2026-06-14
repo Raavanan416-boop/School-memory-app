@@ -214,8 +214,21 @@ class CallManager {
       if (this.onCallStateChange) this.onCallStateChange('dialing');
 
       // 1. Get local media
+      if (this.localStream) {
+        this.localStream.getTracks().forEach(t => t.stop());
+      }
+      
       const constraints = {
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        audio: { 
+          echoCancellation: true, 
+          noiseSuppression: true, 
+          autoGainControl: true,
+          googEchoCancellation: true,
+          googAutoGainControl: true,
+          googNoiseSuppression: true,
+          googHighpassFilter: true,
+          googTypingNoiseDetection: true
+        },
         video: type === 'video' ? { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } : false
       };
       this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -255,6 +268,15 @@ class CallManager {
         offerToReceiveAudio: true,
         offerToReceiveVideo: type === 'video'
       });
+      
+      // Optimize Opus codec for high quality audio
+      if (offer.sdp.includes('opus/48000')) {
+        offer.sdp = offer.sdp.replace(
+          /(a=fmtp:\d+ .*)/g,
+          '$1; stereo=1; sprop-stereo=1; maxaveragebitrate=510000; useinbandfec=1; cbr=1'
+        );
+      }
+      
       await pc.setLocalDescription(offer);
       _log('✅ Local description (offer) set. SDP type:', offer.type);
 
@@ -358,8 +380,21 @@ class CallManager {
       if (this.onCallStateChange) this.onCallStateChange('connecting');
 
       // 3. Get local media
+      if (this.localStream) {
+        this.localStream.getTracks().forEach(t => t.stop());
+      }
+
       const constraints = {
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        audio: { 
+          echoCancellation: true, 
+          noiseSuppression: true, 
+          autoGainControl: true,
+          googEchoCancellation: true,
+          googAutoGainControl: true,
+          googNoiseSuppression: true,
+          googHighpassFilter: true,
+          googTypingNoiseDetection: true
+        },
         video: callData.type === 'video' ? { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } : false
       };
       this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -393,6 +428,15 @@ class CallManager {
       // 9. Create and set local SDP answer
       _log('📝 Creating SDP answer...');
       const answer = await pc.createAnswer();
+      
+      // Optimize Opus codec for high quality audio
+      if (answer.sdp.includes('opus/48000')) {
+        answer.sdp = answer.sdp.replace(
+          /(a=fmtp:\d+ .*)/g,
+          '$1; stereo=1; sprop-stereo=1; maxaveragebitrate=510000; useinbandfec=1; cbr=1'
+        );
+      }
+      
       await pc.setLocalDescription(answer);
       _log('✅ Local description (answer) set. SDP type:', answer.type);
 

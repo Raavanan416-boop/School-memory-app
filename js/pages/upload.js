@@ -544,6 +544,12 @@ export async function renderUpload(container) {
   async function handlePostSubmission() {
     if (!authManager.currentUser || selectedMediaFiles.length === 0) return;
 
+    const privacy = container.querySelector('input[name="privacy"]:checked').value;
+    if (privacy === 'close_friends' && (!authManager.userData?.closeFriends || authManager.userData.closeFriends.length === 0)) {
+      showToast('Please add Close Friends in your profile first!', 'error');
+      return;
+    }
+
     const overlay = container.querySelector('#upload-overlay');
     const circleBar = container.querySelector('#progress-circle-bar');
     const pctLabel = container.querySelector('#upload-percentage');
@@ -619,7 +625,6 @@ export async function renderUpload(container) {
       // Gather Data
       const caption = captionInput.value;
       const location = locInput.value;
-      const privacy = container.querySelector('input[name="privacy"]:checked').value;
       
       const pendingTags = Array.from(tagList.querySelectorAll('.tag-checkbox:checked')).map(cb => cb.value);
       const mentions = Array.from(mentionList.querySelectorAll('.mention-checkbox:checked')).map(cb => {
@@ -635,6 +640,7 @@ export async function renderUpload(container) {
         caption,
         location,
         privacy,
+        closeFriends: privacy === 'close_friends' ? (authManager.userData?.closeFriends || []) : [],
         imageUrls: mediaUrls, // New array for multiple media
         mediaTypes, // Corresponds to imageUrls index
         cloudinaryPublicIds, // Array of Cloudinary Public IDs for images/videos

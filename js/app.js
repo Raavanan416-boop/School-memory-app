@@ -4,6 +4,7 @@ import { router } from './router.js';
 import { showToast, sanitizeHTML } from './utils.js';
 import { presenceManager } from './presence.js';
 import { timeCapsuleManager } from './timecapsuleManager.js';
+import { userCache } from './services/userCache.js';
 import { db, collection, getDocs, doc, writeBatch, query, where, onSnapshot } from './firebase-config.js';
 
 window.syncAllLeaderboardPoints = async () => {
@@ -1180,6 +1181,7 @@ async function init() {
 
   try {
     await authManager.init();
+    userCache.init();
     console.log('[ClassMemories] Auth initialized');
   } catch (e) {
     console.error('[ClassMemories] Auth init failed:', e);

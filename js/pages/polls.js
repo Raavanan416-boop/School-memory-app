@@ -6,6 +6,7 @@ import { authManager, awardPoints } from '../auth.js';
 import { router } from '../router.js';
 import { createNotification } from '../notifications.js';
 import { showDeleteConfirmation } from '../delete-confirm.js';
+import { userCache } from '../services/userCache.js';
 
 let unsubPolls = null;
 const deletedPollIds = new Set();
@@ -89,7 +90,7 @@ function createPollCard(poll) {
     <div class="flex items-start justify-between mb-3">
       <div class="flex-1">
         <p class="font-semibold text-navy-800">${sanitizeHTML(poll.question)}</p>
-        <p class="text-xs text-gray-400 mt-0.5">by ${sanitizeHTML(poll.authorName || 'Unknown')} · ${time}</p>
+        <p class="text-xs text-gray-400 mt-0.5">by <span data-user-name="${poll.authorId}">${sanitizeHTML(userCache.getUser(poll.authorId).fullName || poll.authorName || 'Unknown')}</span> · ${time}</p>
       </div>
       <div class="flex items-center gap-2">
         <span class="poll-live-badge">${formatNumber(totalVotes)} vote${totalVotes !== 1 ? 's' : ''}</span>
@@ -201,10 +202,7 @@ async function showVotersPopup(poll) {
   poll.options.forEach(opt => (opt.votes || []).forEach(uid => allUids.add(uid)));
 
   for (const uid of allUids) {
-    try {
-      const snap = await getDoc(doc(db, 'users', uid));
-      voterCache[uid] = snap.exists() ? snap.data() : { fullName: 'Unknown' };
-    } catch { voterCache[uid] = { fullName: 'Unknown' }; }
+    voterCache[uid] = userCache.getUser(uid);
   }
 
   modal.body.innerHTML = `
@@ -227,9 +225,9 @@ async function showVotersPopup(poll) {
                   return `
                     <div class="flex items-center gap-2 py-1.5 px-2 rounded-lg bg-cream-50">
                       ${u.profilePic
-                        ? `<img src="${u.profilePic}" class="w-6 h-6 rounded-full object-cover" alt=""/>`
-                        : `<div class="w-6 h-6 rounded-full bg-navy-500 text-white flex items-center justify-center text-[9px] font-bold">${name[0]}</div>`}
-                      <span class="text-sm text-navy-800">${sanitizeHTML(name)}</span>
+                        ? `<img src="${u.profilePic}" class="w-6 h-6 rounded-full object-cover" alt="" data-user-pic="${uid}"/>`
+                        : `<div class="w-6 h-6 rounded-full bg-navy-500 text-white flex items-center justify-center text-[9px] font-bold" data-user-pic="${uid}">${name[0]}</div>`}
+                      <span class="text-sm text-navy-800" data-user-name="${uid}">${sanitizeHTML(name)}</span>
                     </div>
                   `;
                 }).join('')}
@@ -300,10 +298,10 @@ function showCreatePollModal() {
 
       // Notify all classmates about the new poll
       try {
-        const usersSnap = await getDocs(collection(db, 'users'));
-        usersSnap.forEach(d => {
-          if (d.id !== authManager.currentUser.uid) {
-            createNotification('poll_created', d.id, { pollId: pollRef.id });
+        const allUsers = userCache.getAllUsers();
+        allUsers.forEach(u => {
+          if (u.id !== authManager.currentUser.uid) {
+            createNotification('poll_created', u.id, { pollId: pollRef.id });
           }
         });
       } catch (e) { console.log('Poll notification error:', e); }

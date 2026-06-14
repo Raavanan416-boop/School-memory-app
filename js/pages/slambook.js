@@ -3,6 +3,7 @@ import { authManager, awardPoints } from '../auth.js';
 import { router } from '../router.js';
 import { showToast, sanitizeHTML, timeAgo } from '../utils.js';
 import { showDeleteConfirmation } from '../delete-confirm.js';
+import { userCache } from '../services/userCache.js';
 
 let unsubSlam = null;
 let unsubBooks = null;
@@ -439,9 +440,9 @@ function openOwnerDashboard(book) {
         <div class="bg-white border border-gray-100 p-4 rounded-2xl shadow-sm cursor-pointer hover:shadow-md transition-all slambook-response-card" data-id="${r.id}">
           <div class="flex items-center justify-between mb-3">
             <div class="flex items-center gap-3">
-              <div class="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center text-lg font-bold text-indigo-600">${name.charAt(0).toUpperCase()}</div>
+              <div class="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center text-lg font-bold text-indigo-600" data-user-pic="${r.authorId}">${name.charAt(0).toUpperCase()}</div>
               <div>
-                <p class="text-sm font-bold text-navy-800">${sanitizeHTML(name)}</p>
+                <p class="text-sm font-bold text-navy-800" data-user-name="${r.authorId}">${sanitizeHTML(name)}</p>
                 <p class="text-[10px] text-gray-400 uppercase">${time}</p>
               </div>
             </div>
@@ -504,9 +505,9 @@ function openResponseReader(response, book) {
     <div class="bg-[#fcf8f2] min-h-full p-6" style="background-image: repeating-linear-gradient(transparent, transparent 29px, #e8d5b5 29px, #e8d5b5 30px); background-attachment: local;">
       <div class="mb-8 flex justify-between items-start bg-white/60 p-4 rounded-2xl border border-gray-200 backdrop-blur-sm shadow-sm">
         <div class="flex items-center gap-3">
-          <div class="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-xl font-bold text-white shadow-inner">${name.charAt(0).toUpperCase()}</div>
+          <div class="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-xl font-bold text-white shadow-inner" data-user-pic="${response.authorId}">${name.charAt(0).toUpperCase()}</div>
           <div>
-            <h2 class="font-bold text-lg text-navy-800">${sanitizeHTML(name)}</h2>
+            <h2 class="font-bold text-lg text-navy-800" data-user-name="${response.authorId}">${sanitizeHTML(name)}</h2>
             <p class="text-[10px] text-gray-500 font-sans uppercase font-bold tracking-wider">${new Date(response.createdAt?.toDate()).toLocaleString()}</p>
           </div>
         </div>
@@ -743,14 +744,10 @@ async function shareSlamBook(book) {
     </div>
   `;
 
-  // Fetch users (assuming all users are friends for this MVP, similar to how other parts work)
+  // Fetch users
   try {
-    const q = query(collection(db, 'users'), limit(50));
-    const snap = await getDocs(q);
-    const users = [];
-    snap.forEach(d => {
-      if (d.id !== authManager.currentUser.uid) users.push({ id: d.id, ...d.data() });
-    });
+    const allUsers = userCache.getAllUsers().slice(0, 50);
+    const users = allUsers.filter(u => u.id !== authManager.currentUser.uid);
 
     const listEl = modal.body.querySelector('#sb-friends-list');
     if (users.length === 0) {

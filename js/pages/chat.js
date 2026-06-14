@@ -2,7 +2,8 @@
 import { db, collection, doc, query, orderBy, onSnapshot, addDoc, getDocs, updateDoc,
   serverTimestamp, where, setDoc, arrayUnion, limit, deleteDoc, getDoc, increment, deleteField } from '../firebase-config.js';
 import { uploadMedia } from '../services/cloudinary.js';
-import { showToast, timeAgo, sanitizeHTML, debounce } from '../utils.js';
+import { timeAgo, sanitizeHTML, showToast, formatNumber, optimizeCloudinaryUrl } from '../utils.js';
+import { userCache } from '../services/userCache.js';
 import { authManager } from '../auth.js';
 import { presenceManager } from '../presence.js';
 import { callManager } from '../calls.js';
@@ -126,11 +127,11 @@ export async function renderChat(container, data) {
 
 async function showNewChatModal() {
   try {
-    const snap = await getDocs(collection(db, 'users'));
+    const allUsers = userCache.getAllUsers();
     const users = [];
-    snap.forEach(d => {
-      if (d.id !== authManager.currentUser?.uid) {
-        users.push({ id: d.id, ...d.data() });
+    allUsers.forEach(u => {
+      if (u.id !== authManager.currentUser?.uid) {
+        users.push(u);
       }
     });
 
@@ -192,9 +193,9 @@ async function startOrOpenDM(targetUid, targetName, fromProfile = false) {
 
   if (!targetName || targetName === 'Friend' || targetName === 'Classmate') {
     try {
-      const uSnap = await getDoc(doc(db, 'users', targetUid));
-      if (uSnap.exists()) {
-        targetName = uSnap.data().fullName || targetName;
+      const u = userCache.getUser(targetUid);
+      if (u.fullName) {
+        targetName = u.fullName;
       }
     } catch (e) {}
   }
@@ -332,27 +333,26 @@ function loadChatList(container) {
           const lastMsg = chat.lastMessage || 'Start a conversation';
           const time = chat.lastMessageAt?.toDate ? timeAgo(chat.lastMessageAt.toDate()) : '';
 
-          if (otherName === 'Friend' || otherName === 'Classmate') {
-            try {
-              const uSnap = await getDoc(doc(db, 'users', otherUid));
-              if (uSnap.exists()) {
-                otherName = uSnap.data().fullName || otherName;
-              }
-            } catch (e) {}
-          }
+          let finalOtherName = otherName;
+          let finalOtherPic = chat.participantPhotos?.[otherIdx];
+          try {
+            const cachedOther = userCache.getUser(otherUid);
+            if (cachedOther.fullName) finalOtherName = cachedOther.fullName;
+            if (cachedOther.profilePic) finalOtherPic = cachedOther.profilePic;
+          } catch(e) {}
 
         const item = document.createElement('div');
         item.className = `chat-item ${unread > 0 ? 'chat-item-unread' : ''}`;
         item.innerHTML = `
           <div class="relative">
-            ${chat.participantPhotos?.[otherIdx]
-              ? `<img src="${chat.participantPhotos[otherIdx]}" class="avatar" alt="${sanitizeHTML(otherName)}"/>`
-              : `<div class="avatar avatar-placeholder text-sm">${(otherName || '?')[0]}</div>`}
+            ${finalOtherPic
+              ? `<img src="${finalOtherPic}" class="avatar" alt="${sanitizeHTML(finalOtherName)}" data-user-pic="${otherUid}"/>`
+              : `<div class="avatar avatar-placeholder text-sm" data-user-pic="${otherUid}">${(finalOtherName || '?')[0]}</div>`}
             <div class="presence-dot-mini" id="presence-${otherUid}"></div>
           </div>
           <div class="flex-1 min-w-0">
             <div class="flex items-center justify-between">
-              <p class="font-semibold text-sm text-navy-800">${sanitizeHTML(otherName)}</p>
+              <p class="font-semibold text-sm text-navy-800" data-user-name="${otherUid}">${sanitizeHTML(finalOtherName)}</p>
               <span class="text-[10px] text-gray-400">${time}</span>
             </div>
             <p class="text-xs text-gray-400 truncate">${sanitizeHTML(lastMsg)}</p>
@@ -1600,11 +1600,29 @@ function _bindCallControls(callOverlay, getTimer, type) {
     }, 500);
   });
 
-  callOverlay.querySelector('#toggle-speaker')?.addEventListener('click', () => {
+  callOverlay.querySelector('#toggle-speaker')?.addEventListener('click', async () => {
     const btn = callOverlay.querySelector('#toggle-speaker');
     const audio = callOverlay.querySelector('audio[data-remote]');
     if (audio && btn) {
       const isActive = btn.classList.toggle('active-speaker');
+      
+      // Try hardware speaker switching if supported
+      if (typeof audio.setSinkId !== 'undefined') {
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const audioOutputs = devices.filter(d => d.kind === 'audiooutput');
+          // Try to find a device with 'speaker' in name, or fallback to default
+          const speakerDev = audioOutputs.find(d => d.label.toLowerCase().includes('speaker'));
+          if (isActive && speakerDev) {
+            await audio.setSinkId(speakerDev.deviceId);
+          } else {
+            await audio.setSinkId(audioOutputs[0]?.deviceId || '');
+          }
+        } catch (e) {
+          console.warn('setSinkId error:', e);
+        }
+      }
+      
       audio.volume = isActive ? 1.0 : 0.5;
       btn.querySelector('span').textContent = isActive ? 'Speaker ON' : 'Speaker';
     }

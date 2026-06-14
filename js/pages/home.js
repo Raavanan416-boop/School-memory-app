@@ -2,6 +2,7 @@
 import { db, collection, query, orderBy, limit, onSnapshot, doc, updateDoc, addDoc,
   arrayUnion, arrayRemove, serverTimestamp, getDocs, where, startAfter, increment, deleteDoc } from '../firebase-config.js';
 import { getTimeSinceSchool, EMOTIONAL_QUOTES, timeAgo, sanitizeHTML, isBirthdayToday, formatNumber, optimizeCloudinaryUrl, showToast } from '../utils.js';
+import { userCache } from '../services/userCache.js';
 import { authManager, awardPoints } from '../auth.js';
 import { router } from '../router.js';
 import { createNotification } from '../notifications.js';
@@ -272,7 +273,7 @@ async function loadThrowback(container) {
             ${post.imageUrl ? `<img src="${post.imageUrl}" class="w-14 h-14 rounded-lg object-cover" alt=""/>` : '<div class="w-14 h-14 rounded-lg bg-cream-200 flex items-center justify-center text-2xl">📷</div>'}
             <div class="flex-1 min-w-0">
               <p class="text-sm font-semibold text-navy-800 truncate">${sanitizeHTML(post.caption || 'A memory')}</p>
-              <p class="text-xs text-gray-400">${post.authorName || 'Classmate'} · ${post.createdAt?.toDate ? post.createdAt.toDate().getFullYear() : ''}</p>
+              <p class="text-xs text-gray-400"><span data-user-name="${post.authorId}">${post.authorName || 'Classmate'}</span> · ${post.createdAt?.toDate ? post.createdAt.toDate().getFullYear() : ''}</p>
             </div>
           </div>
         `).join('');
@@ -312,6 +313,10 @@ function loadFeed(container) {
         
         // Privacy filter
         if (postData.privacy === 'private' && postData.authorId !== authManager.currentUser?.uid) return;
+        if (postData.privacy === 'close_friends' && postData.authorId !== authManager.currentUser?.uid) {
+          const isCloseFriend = postData.closeFriends && postData.closeFriends.includes(authManager.currentUser?.uid);
+          if (!isCloseFriend) return;
+        }
 
         const postObj = { id: d.id, ...postData };
         const existingCard = document.getElementById(`post-${d.id}`);
@@ -354,7 +359,7 @@ function loadFeed(container) {
             // Update caption safely
             const captionEl = existingCard.querySelector('.post-caption');
             if (captionEl && postObj.caption) {
-               captionEl.innerHTML = `<span class="font-semibold">${sanitizeHTML(postObj.authorName || 'Classmate')}</span> ${sanitizeHTML(postObj.caption)}`;
+               captionEl.innerHTML = `<span class="font-semibold" data-user-name="${postObj.authorId}">${userCache.getUser(postObj.authorId).fullName || postObj.authorName || 'Classmate'}</span> ${sanitizeHTML(postObj.caption)}`;
             }
           }
         } else if (change.type === 'removed') {
@@ -417,8 +422,9 @@ async function loadMorePosts(container) {
 }
 
 export function createPostCard(post) {
-  const user = post.authorName || 'Classmate';
-  const avatar = post.authorPhoto;
+  const user = userCache.getUser(post.authorId);
+  const userName = user.fullName || post.authorName || 'Classmate';
+  const avatar = user.profilePic || post.authorPhoto;
   const time = post.createdAt?.toDate ? timeAgo(post.createdAt.toDate()) : '';
   const likes = post.likes?.length || 0;
   const commentCount = post.commentCount || 0;
@@ -444,10 +450,10 @@ export function createPostCard(post) {
     <!-- Header -->
     <div class="p-3 flex items-center gap-3">
       ${avatar
-        ? `<img src="${avatar}" class="avatar" alt="${sanitizeHTML(user)}"/>`
-        : `<div class="avatar avatar-placeholder">${user[0]}</div>`}
+        ? `<img src="${avatar}" class="avatar" alt="${sanitizeHTML(userName)}" data-user-pic="${post.authorId}"/>`
+        : `<div class="avatar avatar-placeholder" data-user-pic="${post.authorId}">${userName[0]}</div>`}
       <div class="flex-1 min-w-0">
-        <p class="font-semibold text-sm text-navy-800 post-author-name" data-uid="${post.authorId}">${sanitizeHTML(user)}</p>
+        <p class="font-semibold text-sm text-navy-800 post-author-name" data-uid="${post.authorId}" data-user-name="${post.authorId}">${sanitizeHTML(userName)}</p>
         <p class="text-xs text-gray-400">${location || time}</p>
       </div>
       ${post.category ? `<span class="text-[10px] px-2 py-1 rounded-full bg-cream-100 text-navy-500 font-medium">${sanitizeHTML(post.category)}</span>` : ''}
@@ -541,7 +547,7 @@ export function createPostCard(post) {
           </button>
         </div>
         ${post.caption ? `
-          <p class="post-caption text-sm text-navy-800 mb-1"><span class="font-semibold">${sanitizeHTML(user)}</span> ${sanitizeHTML(post.caption)}</p>
+          <p class="post-caption text-sm text-navy-800 mb-1"><span class="font-semibold" data-user-name="${post.authorId}">${sanitizeHTML(userName)}</span> ${sanitizeHTML(post.caption)}</p>
         ` : ''}
         ${mentionsHtml}
         ${commentCount > 0 ? `<button class="comment-toggle-btn text-xs text-gray-400 hover:text-navy-500" data-id="${post.id}">View all ${commentCount} comments</button>` : ''}
@@ -903,15 +909,19 @@ function showCommentsModal(post) {
       let textHtml = sanitizeHTML(c.text);
       textHtml = textHtml.replace(/@(\w+)/g, '<span class="text-navy-500 font-semibold">@$1</span>');
 
+      const cachedCommenter = userCache.getUser(c.authorId);
+      const commenterName = cachedCommenter.fullName || c.authorName || 'Unknown';
+      const commenterPic = cachedCommenter.profilePic || c.authorPhoto;
+
       const div = document.createElement('div');
       div.className = 'flex items-start gap-3 animate-fadeIn group';
       div.innerHTML = `
-        ${c.authorPhoto
-          ? `<img src="${c.authorPhoto}" class="w-8 h-8 rounded-full object-cover flex-shrink-0 border border-gray-100" />`
-          : `<div class="w-8 h-8 rounded-full bg-navy-100 text-navy-800 flex items-center justify-center text-xs font-bold flex-shrink-0">${(c.authorName || '?')[0]}</div>`
+        ${commenterPic
+          ? `<img src="${commenterPic}" class="w-8 h-8 rounded-full object-cover flex-shrink-0 border border-gray-100" data-user-pic="${c.authorId}"/>`
+          : `<div class="w-8 h-8 rounded-full bg-navy-100 text-navy-800 flex items-center justify-center text-xs font-bold flex-shrink-0" data-user-pic="${c.authorId}">${commenterName[0]}</div>`
         }
         <div class="flex-1 min-w-0">
-          <p class="text-sm"><span class="font-bold text-navy-800 mr-1">${sanitizeHTML(c.authorName || 'Unknown')}</span> <span class="text-gray-700">${textHtml}</span></p>
+          <p class="text-sm"><span class="font-bold text-navy-800 mr-1" data-user-name="${c.authorId}">${sanitizeHTML(commenterName)}</span> <span class="text-gray-700">${textHtml}</span></p>
           <div class="flex items-center gap-3 mt-1">
             <span class="text-[11px] text-gray-400">${time}</span>
             <button class="text-[11px] font-semibold text-gray-400 hover:text-navy-500">Reply</button>
@@ -944,8 +954,12 @@ function showCommentsModal(post) {
       div.querySelector('.delete-comment-btn')?.addEventListener('click', () => {
         showDeleteConfirmation('this comment', async () => {
           try {
+            const commentAuthorId = d.data().authorId;
             await deleteDoc(doc(db, 'posts', post.id, 'comments', d.id));
             await updateDoc(doc(db, 'posts', post.id), { commentCount: increment(-1) });
+            if (commentAuthorId) {
+              await awardPoints(commentAuthorId, -5, 'Comment Deleted');
+            }
           } catch (e) { console.error(e); }
         }, { element: div });
       });
@@ -1230,15 +1244,20 @@ async function checkPendingTags() {
     const q = query(
       collection(db, 'notifications'),
       where('userId', '==', myUid),
-      where('type', '==', 'tag_request'),
-      orderBy('createdAt', 'desc'),
-      limit(5)
+      where('type', '==', 'tag_request')
     );
     const snap = await getDocs(q);
     
+    // Sort locally by createdAt desc
+    const sortedDocs = snap.docs.sort((a, b) => {
+      const aTime = a.data().createdAt?.toMillis() || 0;
+      const bTime = b.data().createdAt?.toMillis() || 0;
+      return bTime - aTime;
+    });
+    
     // Find first unhandled tag request
     let pendingTag = null;
-    snap.forEach(d => {
+    sortedDocs.forEach(d => {
       const data = d.data();
       if (!data.handled && !pendingTag) {
         pendingTag = { id: d.id, ...data };

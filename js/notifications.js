@@ -444,20 +444,26 @@ class NotificationManager {
 
     const q = query(
       collection(db, 'notifications'),
-      where('userId', '==', authManager.currentUser.uid),
-      orderBy('createdAt', 'desc'),
-      limit(100)
+      where('userId', '==', authManager.currentUser.uid)
     );
 
     this.unsubscribe = onSnapshot(q, (snap) => {
       const prevCount = this.notifications.length;
       const prevIds = new Set(this.notifications.map(n => n.id));
-      this.notifications = [];
+      
+      // Get all docs, sort locally, take top 100
+      let allDocs = [];
+      snap.forEach(d => allDocs.push({ id: d.id, ...d.data() }));
+      allDocs.sort((a, b) => {
+        const aTime = a.createdAt?.toMillis() || 0;
+        const bTime = b.createdAt?.toMillis() || 0;
+        return bTime - aTime;
+      });
+      
+      this.notifications = allDocs.slice(0, 100);
+      
       this.unreadCount = 0;
-
-      snap.forEach(d => {
-        const notif = { id: d.id, ...d.data() };
-        this.notifications.push(notif);
+      this.notifications.forEach(notif => {
         if (!notif.read) this.unreadCount++;
       });
 

@@ -6,6 +6,7 @@ import { authManager, awardPoints } from '../auth.js';
 import { router } from '../router.js';
 import { showDeleteConfirmation } from '../delete-confirm.js';
 import { createNotification } from '../notifications.js';
+import { userCache } from '../services/userCache.js';
 let unsubCapsules = null;
 let countdownInterval = null;
 
@@ -167,7 +168,7 @@ function createCapsuleCard(capsule) {
           <div class="flex items-center gap-2">
             <span class="text-xl">🔓</span>
             <div>
-              <p class="font-semibold text-sm text-navy-800">${sanitizeHTML(capsule.authorName || 'A classmate')}'s Time Capsule</p>
+              <p class="font-semibold text-sm text-navy-800"><span data-user-name="${capsule.authorId}">${sanitizeHTML(capsule.authorName || 'A classmate')}</span>'s Time Capsule</p>
               <p class="text-[10px] text-gray-400">Created ${time} · Unlocked! · ${visibilityIcon} ${visibilityLabel}</p>
             </div>
           </div>
@@ -250,7 +251,7 @@ function createCapsuleCard(capsule) {
         <div class="capsule-lock-icon mb-3">
           <div class="text-4xl capsule-shake">🔒</div>
         </div>
-        <p class="font-semibold text-navy-800">${sanitizeHTML(capsule.authorName || 'A classmate')}'s Capsule</p>
+        <p class="font-semibold text-navy-800"><span data-user-name="${capsule.authorId}">${sanitizeHTML(capsule.authorName || 'A classmate')}</span>'s Capsule</p>
         <p class="text-xs text-gray-400 mt-1">Created ${time} · ${visibilityIcon} ${visibilityLabel}</p>
         <div class="mt-4 flex items-center justify-center gap-2">
           <div class="text-center w-12">
@@ -407,7 +408,7 @@ function showCapsuleReveal(capsule) {
     ${capsule.imageUrl ? `<img src="${capsule.imageUrl}" class="capsule-reveal-img" alt=""/>` : ''}
     <div class="capsule-reveal-text mt-4 max-w-xs">
       ${capsule.caption ? `<p class="font-handwriting text-xl text-white/90 italic">"${sanitizeHTML(capsule.caption)}"</p>` : ''}
-      <p class="text-xs text-white/40 mt-2">by ${sanitizeHTML(capsule.authorName || 'A classmate')}</p>
+      <p class="text-xs text-white/40 mt-2">by <span data-user-name="${capsule.authorId}">${sanitizeHTML(capsule.authorName || 'A classmate')}</span></p>
     </div>
     <button class="birthday-dismiss-btn mt-6" id="capsule-reveal-close" style="opacity:0;animation:birthdayTextPop 0.8s cubic-bezier(0.34,1.56,0.64,1) 1s forwards;">Continue ✨</button>
   `;
@@ -631,13 +632,17 @@ function openCommentsModal(capsuleId) {
       const msg = { id: d.id, ...d.data() };
       const timeStr = msg.createdAt?.toDate ? formatDate(msg.createdAt.toDate()) : 'Just now';
       
+      const cachedCommenter = userCache.getUser(msg.authorId);
+      const commenterName = cachedCommenter.fullName || msg.authorName || 'Friend';
+      const commenterPic = cachedCommenter.profilePic || msg.authorPhoto || 'default-avatar.png';
+
       const div = document.createElement('div');
       div.className = 'bg-white p-3 rounded-2xl shadow-sm border border-gray-100 flex gap-3 relative group';
       div.innerHTML = `
-        <img src="${msg.authorPhoto || 'default-avatar.png'}" class="w-10 h-10 rounded-full object-cover shrink-0 bg-gray-200" onerror="this.src='default-avatar.png'">
+        <img src="${commenterPic}" class="w-10 h-10 rounded-full object-cover shrink-0 bg-gray-200" onerror="this.src='default-avatar.png'" data-user-pic="${msg.authorId}">
         <div class="flex-1">
           <div class="flex items-baseline justify-between mb-1">
-            <p class="text-sm font-bold text-navy-800">${sanitizeHTML(msg.authorName || 'Friend')}</p>
+            <p class="text-sm font-bold text-navy-800" data-user-name="${msg.authorId}">${sanitizeHTML(commenterName)}</p>
             <p class="text-[10px] text-gray-400">${timeStr}</p>
           </div>
           <p class="text-sm text-gray-700">${sanitizeHTML(msg.text)}</p>

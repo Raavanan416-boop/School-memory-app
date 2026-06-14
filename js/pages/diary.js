@@ -6,6 +6,7 @@ import { showToast, sanitizeHTML, formatDate, MOOD_EMOJIS, timeAgo } from '../ut
 import { authManager, awardPoints } from '../auth.js';
 import { router } from '../router.js';
 import { showDeleteConfirmation, deleteDocFull } from '../delete-confirm.js';
+import { userCache } from '../services/userCache.js';
 
 let unsubDiary = null;
 let replyUnsubs = {};  // Track reply listeners per entry
@@ -152,6 +153,10 @@ function createDiaryEntry(entry) {
   const privacyIcons = { all: '🌍', close: '👥', private: '🔒' };
   const privacyLabel = { all: 'All Friends', close: 'Close Friends', private: 'Private' };
 
+  const cachedAuthor = userCache.getUser(entry.authorId);
+  const finalAuthorName = cachedAuthor.fullName || entry.authorName || 'Anonymous';
+  const finalAuthorPic = cachedAuthor.profilePic || entry.authorPhoto;
+
   const card = document.createElement('div');
   card.className = 'diary-entry-card animate-fadeIn';
   card.innerHTML = `
@@ -159,11 +164,11 @@ function createDiaryEntry(entry) {
       <!-- Header -->
       <div class="flex items-start justify-between mb-3">
         <div class="flex items-center gap-2.5">
-          ${entry.authorPhoto
-            ? `<img src="${entry.authorPhoto}" class="w-9 h-9 rounded-full object-cover border border-cream-300" alt=""/>`
-            : `<div class="w-9 h-9 rounded-full bg-navy-500 text-white flex items-center justify-center text-xs font-bold">${(entry.authorName || '?')[0]}</div>`}
+          ${finalAuthorPic
+            ? `<img src="${finalAuthorPic}" class="w-9 h-9 rounded-full object-cover border border-cream-300" alt="" data-user-pic="${entry.authorId}"/>`
+            : `<div class="w-9 h-9 rounded-full bg-navy-500 text-white flex items-center justify-center text-xs font-bold" data-user-pic="${entry.authorId}">${(finalAuthorName)[0]}</div>`}
           <div>
-            <p class="text-sm font-semibold text-navy-800">${sanitizeHTML(entry.authorName || 'Anonymous')}</p>
+            <p class="text-sm font-semibold text-navy-800" data-user-name="${entry.authorId}">${sanitizeHTML(finalAuthorName)}</p>
             <p class="text-[10px] text-gray-400">${time} · ${privacyIcons[entry.privacy] || '🌍'} ${privacyLabel[entry.privacy] || 'All'}</p>
           </div>
         </div>
@@ -336,14 +341,18 @@ function loadReplies(entryId) {
         const privacyIcon = r.privacy ? ({ all: '🌍', close: '👥', private: '🔒' }[r.privacy] || '') : '';
         const isContinuation = r.isContinuation;
 
+        const cachedRAuthor = userCache.getUser(r.authorId);
+        const finalRAuthorName = cachedRAuthor.fullName || r.authorName || 'Unknown';
+        const finalRAuthorPic = cachedRAuthor.profilePic || r.authorPhoto;
+
         const div = document.createElement('div');
         div.className = `diary-reply-item animate-fadeIn ${isContinuation ? 'diary-continuation' : ''}`;
         div.innerHTML = `
-          ${r.authorPhoto
-            ? `<img src="${r.authorPhoto}" class="w-6 h-6 rounded-full object-cover flex-shrink-0" alt=""/>`
-            : `<div class="w-6 h-6 rounded-full bg-navy-500 text-white flex items-center justify-center text-[9px] font-bold flex-shrink-0">${(r.authorName || '?')[0]}</div>`}
+          ${finalRAuthorPic
+            ? `<img src="${finalRAuthorPic}" class="w-6 h-6 rounded-full object-cover flex-shrink-0" alt="" data-user-pic="${r.authorId}"/>`
+            : `<div class="w-6 h-6 rounded-full bg-navy-500 text-white flex items-center justify-center text-[9px] font-bold flex-shrink-0" data-user-pic="${r.authorId}">${(finalRAuthorName)[0]}</div>`}
           <div class="flex-1 min-w-0">
-            <p class="text-xs"><span class="font-semibold text-navy-800">${sanitizeHTML(r.authorName || 'Unknown')}</span> ${isContinuation ? '<span class="text-[9px] text-navy-400 bg-navy-50 px-1.5 py-0.5 rounded-full ml-1">✍️ continued</span>' : ''}</p>
+            <p class="text-xs"><span class="font-semibold text-navy-800" data-user-name="${r.authorId}">${sanitizeHTML(finalRAuthorName)}</span> ${isContinuation ? '<span class="text-[9px] text-navy-400 bg-navy-50 px-1.5 py-0.5 rounded-full ml-1">✍️ continued</span>' : ''}</p>
             <p class="font-handwriting text-sm text-gray-600 mt-0.5">${sanitizeHTML(r.text)}</p>
             ${r.imageUrl ? `<img src="${r.imageUrl}" class="mt-1 max-h-32 rounded-lg" alt="" loading="lazy"/>` : ''}
             <p class="text-[9px] text-gray-400 mt-0.5">${time} ${privacyIcon}</p>
@@ -404,7 +413,7 @@ function showContinueWritingModal(entry) {
   modal.body.innerHTML = `
     <div class="p-4 space-y-4">
       <div class="p-3 bg-cream-50 rounded-xl border border-cream-200">
-        <p class="text-[10px] text-gray-400 mb-1">Original by ${sanitizeHTML(entry.authorName || 'Anonymous')}</p>
+        <p class="text-[10px] text-gray-400 mb-1">Original by <span data-user-name="${entry.authorId}">${sanitizeHTML(entry.authorName || 'Anonymous')}</span></p>
         <p class="font-handwriting text-base text-gray-600 line-clamp-3">${sanitizeHTML(entry.content?.substring(0, 150))}${entry.content?.length > 150 ? '...' : ''}</p>
       </div>
 
@@ -645,15 +654,14 @@ async function loadCloseFriendsSelector(body) {
   if (!listEl) return;
 
   try {
-    const snap = await getDocs(collection(db, 'users'));
+    const allUsers = userCache.getAllUsers();
     listEl.innerHTML = '';
-    snap.forEach(d => {
-      if (d.id === authManager.currentUser?.uid) return;
-      const u = d.data();
+    allUsers.forEach(u => {
+      if (u.id === authManager.currentUser?.uid) return;
       const label = document.createElement('label');
       label.className = 'flex items-center gap-2 p-1.5 rounded-lg hover:bg-cream-100 cursor-pointer';
       label.innerHTML = `
-        <input type="checkbox" class="close-friend-cb rounded" value="${d.id}"/>
+        <input type="checkbox" class="close-friend-cb rounded" value="${u.id}"/>
         <span class="text-sm text-navy-800">${sanitizeHTML(u.fullName || 'Unknown')}</span>
       `;
       listEl.appendChild(label);

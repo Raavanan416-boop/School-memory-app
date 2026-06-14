@@ -25,6 +25,16 @@ service cloud.firestore {
       // Any authenticated user can update points (for birthday gift transfers)
       allow update: if isAuthenticated()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['points']);
+
+      // Subcollections (savedPosts, taggedPosts)
+      match /savedPosts/{postId} {
+        allow read: if isAuthenticated();
+        allow write: if isOwner(userId) || isAdmin();
+      }
+      match /taggedPosts/{postId} {
+        allow read: if isAuthenticated();
+        allow write: if isAuthenticated(); // Anyone can tag someone
+      }
     }
 
     // Leaderboard — readable by all, writable by any authenticated user (points sync)

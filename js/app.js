@@ -582,6 +582,38 @@ function buildAppShell() {
   // Throwback Thursday check
   checkThrowbackThursday();
 
+  // ===== Android Back Button & Hardware Back Button Logic =====
+  let lastBackPress = 0;
+  history.pushState(null, '', location.href);
+  window.addEventListener('popstate', (e) => {
+    // Re-push state so we can catch it again
+    history.pushState(null, '', location.href);
+    
+    // 1. Close any open modals first
+    if (router.modalStack && router.modalStack.length > 0) {
+      router.closeModal();
+      return;
+    }
+    
+    // 2. If on Home, handle double back exit
+    if (router.currentPage === 'home') {
+      const now = Date.now();
+      if (now - lastBackPress < 2000) {
+        if (navigator.app && navigator.app.exitApp) {
+          navigator.app.exitApp();
+        } else {
+          window.close(); // Fallback for browsers if applicable
+        }
+      } else {
+        showToast('Press again to exit');
+        lastBackPress = now;
+      }
+    } else {
+      // 3. From any other page, go to Home
+      router.navigate('home');
+    }
+  });
+
   // Pending Tag Requests check
   checkPendingTags();
 }

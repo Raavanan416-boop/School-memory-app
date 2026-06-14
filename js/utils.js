@@ -154,7 +154,7 @@ export function getDaysUntil(dateStr) {
   return Math.ceil((thisYear - today) / (1000 * 60 * 60 * 24));
 }
 
-export async function compressImage(file, maxWidth = 1200, quality = 0.8) {
+export async function compressImage(file, maxWidth = 3000, quality = 1.0) {
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -181,11 +181,10 @@ export async function compressImage(file, maxWidth = 1200, quality = 0.8) {
 }
 
 // Emoji mood options for diary
-export function optimizeCloudinaryUrl(url, width = 800) {
+export function optimizeCloudinaryUrl(url, width = null) {
   if (!url || !url.includes('cloudinary.com')) return url;
-  // Cloudinary URLs typically look like: https://res.cloudinary.com/<cloud_name>/image/upload/v1234567890/folder/image.jpg
-  // We want to insert `q_auto,f_auto,w_${width}` after `/upload/`
-  return url.replace('/upload/', `/upload/q_auto,f_auto,w_${width}/`);
+  // Insert quality and format optimizations, optionally applying width
+  return url.replace('/upload/', `/upload/q_auto:best,f_auto${width ? ',w_' + width : ''}/`);
 }
 
 export const MOOD_EMOJIS = ['😊', '😢', '😂', '🥰', '😎', '🤔', '😤', '🎉', '😴', '🤗'];

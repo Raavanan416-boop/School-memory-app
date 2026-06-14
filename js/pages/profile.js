@@ -126,7 +126,7 @@ export async function renderProfile(container, data = null) {
           renderPostsTab(tabContent, userPosts, viewingOther, user);
         } else if (activeTab === 'memories') {
           const highlights = [...userPosts].sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0)).slice(0, 6);
-          renderHighlightsTab(tabContent, user, viewingOther, highlights);
+          renderHighlightsTab(tabContent, highlights);
         }
       }
     }, (error) => {
@@ -438,7 +438,7 @@ export async function renderProfile(container, data = null) {
       case 'slambook': renderSlamBookTab(tabContent, user, viewingOther); break;
       case 'memories': 
         const highlights = [...userPosts].sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0)).slice(0, 6);
-        renderHighlightsTab(tabContent, user, viewingOther, highlights); 
+        renderHighlightsTab(tabContent, highlights); 
         break;
       case 'saved': renderSavedTab(tabContent, uid); break;
     }
@@ -1318,12 +1318,14 @@ export function showPostModal(post) {
     </div>
   `;
   document.body.appendChild(overlay);
+  router.modalStack.push(overlay);
   requestAnimationFrame(() => overlay.classList.add('modal-active'));
 
   const close = () => {
     overlay.classList.remove('modal-active');
     overlay.classList.add('modal-closing');
     setTimeout(() => overlay.remove(), 300);
+    router.modalStack = router.modalStack.filter(m => m !== overlay);
   };
   overlay.querySelector('.modal-backdrop').addEventListener('click', close);
   
@@ -1390,18 +1392,41 @@ function renderTaggedTab(el, targetUid) {
     }
 
     el.innerHTML = `
-      <div class="profile-posts-grid">
-        ${posts.map(p => `
-          <div class="profile-post-cell cursor-pointer" onclick="window.location.hash='#home?postId=${p.id}'">
-            ${(p.imageUrls && p.imageUrls.length > 0) || p.imageUrl
-        ? `<img src="${(p.imageUrls && p.imageUrls.length > 0) ? p.imageUrls[0] : p.imageUrl}" class="w-full h-full object-cover" alt="" loading="lazy"/>`
-        : `<div class="w-full h-full bg-cream-200 flex items-center justify-center"><span class="text-2xl">📝</span></div>`}
-            <div class="profile-post-overlay">
-              <span class="text-white text-[10px] font-medium" data-user-name="${p.authorId}">${sanitizeHTML(p.authorName || '')}</span>
+      <div class="px-4 pt-4 pb-20">
+        <div class="grid grid-cols-2 gap-3">
+          ${posts.map(p => `
+            <div class="profile-post-clickable cursor-pointer flex flex-col bg-white rounded-2xl border border-gray-50 shadow-sm overflow-hidden" data-post-id="${p.id}">
+              <div class="aspect-[4/3] bg-cream-100 relative shrink-0">
+                ${(p.imageUrls && p.imageUrls.length > 0) || p.imageUrl
+          ? `<img src="${(p.imageUrls && p.imageUrls.length > 0) ? p.imageUrls[0] : p.imageUrl}" class="w-full h-full object-cover" alt="" loading="lazy"/>`
+          : `<div class="w-full h-full bg-gradient-to-br from-cream-200 to-cream-300 flex flex-col items-center justify-center p-2"><span class="text-2xl mb-1">📝</span></div>`}
+              </div>
+              <div class="p-2.5 flex flex-col flex-grow">
+                <p class="text-xs font-semibold text-navy-800 line-clamp-2 mb-auto">${sanitizeHTML(p.caption || 'Untitled')}</p>
+                <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-gray-50">
+                  <p class="text-[10px] text-gray-400">${(p.createdAt?.toDate ? p.createdAt.toDate() : new Date()).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+                  <span class="flex items-center gap-0.5 text-[10px] text-gray-400">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"/></svg>
+                    ${p.likes?.length || 0}
+                  </span>
+                </div>
+              </div>
             </div>
-          </div>
-        `).join('')}
+          `).join('')}
+        </div>
       </div>`;
+
+    // Add click handlers
+    el.querySelectorAll('.profile-post-clickable').forEach(item => {
+      item.addEventListener('click', () => {
+        const pid = item.dataset.postId;
+        const post = posts.find(p => p.id === pid);
+        if (post) showPostModal(post);
+      });
+    });
+  }, (err) => {
+    console.error('Tagged posts error:', err);
+    el.innerHTML = '<div class="px-4 py-12 text-center text-red-500 text-sm">Failed to load tagged memories</div>';
   });
 }
 
@@ -1421,8 +1446,8 @@ function renderSavedTab(el, targetUid) {
   }
 
   const q = query(
-    collection(db, 'savedPosts'),
-    where('userId', '==', targetUid)
+    collection(db, 'users', targetUid, 'savedPosts'),
+    orderBy('savedAt', 'desc')
   );
 
   unsubSaved = onSnapshot(q, async (snap) => {
@@ -1467,15 +1492,41 @@ function renderSavedTab(el, targetUid) {
     }
 
     el.innerHTML = `
-      <div class="profile-posts-grid">
-        ${posts.map(p => `
-          <div class="profile-post-cell cursor-pointer" onclick="window.location.hash='#home?postId=${p.id}'">
-            ${(p.imageUrls && p.imageUrls.length > 0) || p.imageUrl
-        ? `<img src="${(p.imageUrls && p.imageUrls.length > 0) ? p.imageUrls[0] : p.imageUrl}" class="w-full h-full object-cover" alt="" loading="lazy"/>`
-        : `<div class="w-full h-full bg-cream-200 flex items-center justify-center"><span class="text-2xl">📝</span></div>`}
-          </div>
-        `).join('')}
+      <div class="px-4 pt-4 pb-20">
+        <div class="grid grid-cols-2 gap-3">
+          ${posts.map(p => `
+            <div class="profile-post-clickable cursor-pointer flex flex-col bg-white rounded-2xl border border-gray-50 shadow-sm overflow-hidden" data-post-id="${p.id}">
+              <div class="aspect-[4/3] bg-cream-100 relative shrink-0">
+                ${(p.imageUrls && p.imageUrls.length > 0) || p.imageUrl
+          ? `<img src="${(p.imageUrls && p.imageUrls.length > 0) ? p.imageUrls[0] : p.imageUrl}" class="w-full h-full object-cover" alt="" loading="lazy"/>`
+          : `<div class="w-full h-full bg-gradient-to-br from-cream-200 to-cream-300 flex flex-col items-center justify-center p-2"><span class="text-2xl mb-1">📝</span></div>`}
+              </div>
+              <div class="p-2.5 flex flex-col flex-grow">
+                <p class="text-xs font-semibold text-navy-800 line-clamp-2 mb-auto">${sanitizeHTML(p.caption || 'Untitled')}</p>
+                <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-gray-50">
+                  <p class="text-[10px] text-gray-400">${(p.createdAt?.toDate ? p.createdAt.toDate() : new Date()).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+                  <span class="flex items-center gap-0.5 text-[10px] text-gray-400">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"/></svg>
+                    ${p.likes?.length || 0}
+                  </span>
+                </div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
       </div>`;
+
+    // Add click handlers
+    el.querySelectorAll('.profile-post-clickable').forEach(item => {
+      item.addEventListener('click', () => {
+        const pid = item.dataset.postId;
+        const post = posts.find(p => p.id === pid);
+        if (post) showPostModal(post);
+      });
+    });
+  }, (err) => {
+    console.error('Saved posts error:', err);
+    el.innerHTML = '<div class="px-4 py-12 text-center text-red-500 text-sm">Failed to load saved memories</div>';
   });
 }
 

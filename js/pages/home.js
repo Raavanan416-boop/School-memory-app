@@ -476,7 +476,7 @@ export function createPostCard(post) {
                   <svg class="w-12 h-12 text-white drop-shadow-lg" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                 </button>
               ` : `
-                <img src="${optimizeCloudinaryUrl(url, 600)}" class="w-full h-full object-cover" alt="Memory" loading="lazy" decoding="async" />
+                <img src="${optimizeCloudinaryUrl(url)}" class="w-full h-full object-cover" alt="Memory" loading="lazy" decoding="async" />
               `}
             </div>
           `).join('')}

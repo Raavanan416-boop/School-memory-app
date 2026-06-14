@@ -87,9 +87,9 @@ class AuthManager {
           savedSnap.forEach(d => this.userData.savedPosts.push(d.id));
 
           // Quick migration from old array
-          if (ud.savedPosts && Array.isArray(ud.savedPosts) && ud.savedPosts.length > 0 && this.userData.savedPosts.length === 0) {
+          if (this.userData.savedPosts && Array.isArray(this.userData.savedPosts) && this.userData.savedPosts.length > 0 && this.userData.savedPosts.length === 0) {
             const { setDoc, doc } = await import('./firebase-config.js');
-            for (const pid of ud.savedPosts) {
+            for (const pid of this.userData.savedPosts) {
               await setDoc(doc(db, 'users', uid, 'savedPosts', pid), { savedAt: serverTimestamp() });
               this.userData.savedPosts.push(pid);
             }
@@ -217,8 +217,7 @@ class AuthManager {
   async savePost(postId) {
     if (!this.currentUser) return;
     const { setDoc, doc, serverTimestamp } = await import('./firebase-config.js');
-    const docId = `${this.currentUser.uid}_${postId}`;
-    await setDoc(doc(db, 'savedPosts', docId), {
+    await setDoc(doc(db, 'users', this.currentUser.uid, 'savedPosts', postId), {
       userId: this.currentUser.uid,
       postId: postId,
       savedAt: serverTimestamp()
@@ -232,8 +231,7 @@ class AuthManager {
   async unsavePost(postId) {
     if (!this.currentUser) return;
     const { deleteDoc, doc } = await import('./firebase-config.js');
-    const docId = `${this.currentUser.uid}_${postId}`;
-    await deleteDoc(doc(db, 'savedPosts', docId));
+    await deleteDoc(doc(db, 'users', this.currentUser.uid, 'savedPosts', postId));
     if (this.userData) {
       this.userData.savedPosts = (this.userData.savedPosts || []).filter(id => id !== postId);
     }

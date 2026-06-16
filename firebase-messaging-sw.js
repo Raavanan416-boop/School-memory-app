@@ -12,14 +12,15 @@ importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js
 importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js');
 
 // ===== Firebase Config =====
-firebase.initializeApp({
+const firebaseConfig = {
   apiKey: "AIzaSyDs9bqr8xcafukYgVLPg9Z9q5V50gI7i8g",
   authDomain: "school-memory-app.firebaseapp.com",
+  databaseURL: "https://school-memory-app-default-rtdb.firebaseio.com",
   projectId: "school-memory-app",
   storageBucket: "school-memory-app.firebasestorage.app",
   messagingSenderId: "310068830991",
   appId: "1:310068830991:web:3c89f62e765843fd4c147a"
-});
+};
 
 const messaging = firebase.messaging();
 
@@ -129,65 +130,8 @@ self.addEventListener('fetch', (e) => {
 });
 
 
-// ========================================================================
-// PUSH NOTIFICATION HANDLING
-// ========================================================================
-
-// Track recently shown notification tags to prevent duplicates
-const recentTags = new Set();
-
-// ===== SAFETY NET: Raw push event handler =====
-// This fires for EVERY push, even if onBackgroundMessage doesn't trigger.
-// We check if the notification was already shown (via recentTags) to avoid duplicates.
-self.addEventListener('push', (event) => {
-  // Let Firebase SDK handle it first via onBackgroundMessage
-  // This handler is a safety net — it only fires if the SDK doesn't handle it
-  
-  if (!event.data) {
-    console.log('[SW-Push] Empty push event, ignoring');
-    return;
-  }
-
-  try {
-    const payload = event.data.json();
-    console.log('[SW-Push] Raw push event received:', payload);
-    
-    // If this is a Firebase message, the SDK's onBackgroundMessage will handle it
-    // We use a small delay to check if it was already handled
-    const data = payload.data || {};
-    const tag = data.tag || data.type || 'cm-notif-' + Date.now();
-    
-    // If already handled by onBackgroundMessage, skip
-    if (recentTags.has(tag)) {
-      console.log('[SW-Push] Already handled by onBackgroundMessage:', tag);
-      return;
-    }
-    
-    // If there's a notification field in the payload, the browser will auto-show it
-    // We don't need to do anything in that case
-    if (payload.notification) {
-      console.log('[SW-Push] Browser will auto-handle notification field');
-      return;
-    }
-
-    // Safety net: if we get here, onBackgroundMessage didn't fire
-    // This can happen in edge cases (SW restart, race conditions)
-    // Show notification manually from data payload
-    const waitMs = 500; // Wait 500ms to give onBackgroundMessage a chance
-    event.waitUntil(
-      new Promise(resolve => setTimeout(resolve, waitMs)).then(() => {
-        if (recentTags.has(tag)) {
-          console.log('[SW-Push] Handled by onBackgroundMessage after delay');
-          return;
-        }
-        console.log('[SW-Push] Safety net: showing notification manually');
-        return showNotificationFromData(data);
-      })
-    );
-  } catch (e) {
-    console.warn('[SW-Push] Could not parse push data:', e);
-  }
-});
+// Firebase SDK will handle the push event and route it to onBackgroundMessage
+// if the app is not in the foreground. No manual push listener is needed.
 
 // ===== FCM BACKGROUND MESSAGE HANDLER =====
 // Handles messages when app is closed, backgrounded, or phone is locked
@@ -205,21 +149,12 @@ messaging.onBackgroundMessage((payload) => {
   });
 });
 
-// ===== UNIFIED NOTIFICATION DISPLAY =====
 // Single function to show notifications from data payload
 function showNotificationFromData(data) {
   const title = data.title || '📸 Class Memories';
   const body = data.body || 'New notification';
   const tag = data.tag || data.type || 'cm-notif-' + Date.now();
   const type = data.type || 'general';
-
-  // Duplicate prevention — skip if same tag shown in last 5 seconds
-  if (recentTags.has(tag)) {
-    console.log('[FCM-SW] Skipping duplicate:', tag);
-    return;
-  }
-  recentTags.add(tag);
-  setTimeout(() => recentTags.delete(tag), 5000);
 
   // ===== CALL NOTIFICATIONS =====
   if (type === 'voice_call_incoming' || type === 'video_call_incoming') {
@@ -325,7 +260,7 @@ function showNotificationFromData(data) {
     vibrate: [200, 100, 200, 100, 200],
     tag: tag,
     renotify: true,
-    requireInteraction: true,
+    requireInteraction: false,
     silent: false,
     data: {
       url: data.targetUrl || data.url || '/',

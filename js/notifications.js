@@ -365,11 +365,11 @@ class NotificationManager {
       // Project Settings → Cloud Messaging → Web Push certificates → Key pair
       // The key should be ~87 characters long (base64url encoded)
       // If push notifications don't work, THIS IS THE FIRST THING TO CHECK
-      const VAPID_KEY = 'BHcaRPIBkT-EE5J1pT0hKGWnCqMwqSj9F3D0c79E2dM3W3HutXNvJepjMq5VKwLCe0B0a_9qW0CVfi6DfV_7lEU';
+      const VAPID_KEY = 'BB2IVcpFQwoPKSYh7PdqMIyB7Zl8xjFxlmRTGVTDehFTzsGZiFwvlez9O4BxuPCSfyt_VG8N3FS65pqliTYH3wY';
 
       console.log('[Notifications] Requesting FCM token...');
       const token = await getToken(this._messaging, {
-        vapidKey: 'BMWctXcy4hmQGMLyC48WHNvU24uP5MD-HFmnZ0EQsgCfndJv0RgYFjZqUskiKuTbYJsb118y4YYVYUrRvUgvDV8',
+        vapidKey: VAPID_KEY,
         serviceWorkerRegistration: swReg,
       }).catch((err) => {
         console.error('[Notifications] Token generation failed:', err);

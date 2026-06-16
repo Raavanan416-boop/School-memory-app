@@ -14,6 +14,7 @@ import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager
 const firebaseConfig = {
   apiKey: "AIzaSyDs9bqr8xcafukYgVLPg9Z9q5V50gI7i8g",
   authDomain: "school-memory-app.firebaseapp.com",
+  databaseURL: "https://school-memory-app-default-rtdb.firebaseio.com",
   projectId: "school-memory-app",
   storageBucket: "school-memory-app.firebasestorage.app",
   messagingSenderId: "310068830991",

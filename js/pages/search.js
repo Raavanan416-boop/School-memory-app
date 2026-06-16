@@ -140,8 +140,8 @@ export async function renderSearch(container) {
     }
   }
 
-  // Live search
-  searchInput?.addEventListener('input', debounce(async (e) => {
+  // Live search (Instant, no debounce)
+  searchInput?.addEventListener('input', async (e) => {
     const q = e.target.value.trim();
     clearBtn.classList.toggle('hidden', !q);
     
@@ -154,21 +154,29 @@ export async function renderSearch(container) {
       return;
     }
 
-    // Hide empty state, show loading
+    // Hide empty state
     emptyState.classList.add('hidden');
     recentEl.classList.add('hidden');
-    loadingEl.classList.remove('hidden');
-    resultsEl.classList.add('hidden');
-
-    await ensureDataLoaded();
-
-    loadingEl.classList.add('hidden');
-    performSearch(container, q, activeTab);
+    
+    // Instantly update users from cache for real-time people search
+    allUsers = userCache.getAllUsers();
+    
+    if (activeTab === 'people') {
+      performSearch(container, q, activeTab);
+      // Still trigger ensureDataLoaded in background so we don't break subsequent posts search
+      ensureDataLoaded();
+    } else {
+      loadingEl.classList.remove('hidden');
+      resultsEl.classList.add('hidden');
+      await ensureDataLoaded();
+      loadingEl.classList.add('hidden');
+      performSearch(container, q, activeTab);
+    }
 
     // Save to recent searches
     saveRecentSearch(q);
     loadRecentSearches(container);
-  }, 300));
+  });
 }
 
 function performSearch(container, searchQuery, tab) {
@@ -187,14 +195,22 @@ function performSearch(container, searchQuery, tab) {
   results.classList.remove('hidden');
 
   if (tab === 'people') {
-    const filtered = allUsers.filter(u =>
-      u.fullName?.toLowerCase().includes(q) ||
-      u.rollNumber?.toLowerCase().includes(q) ||
-      u.nickname?.toLowerCase().includes(q)
-    );
+    const filtered = allUsers.filter(u => {
+      const dName = (u.displayName || '').toLowerCase();
+      const uName = (u.username || '').toLowerCase();
+      const rNum = (u.rollNumber || '').toLowerCase();
+      return dName.includes(q) || uName.includes(q) || rNum.includes(q);
+    });
+
+    console.log(`[Search Debug] Search Query: "${searchQuery}"`);
+    console.log(`[Search Debug] User Count: ${filtered.length}`);
+
     results.innerHTML = filtered.length
-      ? filtered.map(u => userCard(u)).join('')
-      : '<div class="text-center py-10"><div class="text-3xl mb-2">🤷</div><p class="text-sm text-gray-400">No classmates found for "' + sanitizeHTML(searchQuery) + '"</p></div>';
+      ? filtered.map(u => {
+          console.log(`[Search Debug] Fetched Name: ${u.displayName}, Fetched UID: ${u.id}`);
+          return userCard(u);
+        }).join('')
+      : '<div class="text-center py-10"><div class="text-3xl mb-2">🤷</div><p class="text-sm text-gray-400">No users found</p></div>';
   } else {
     const filtered = allPosts.filter(p =>
       p.caption?.toLowerCase().includes(q) ||
@@ -212,11 +228,12 @@ function performSearch(container, searchQuery, tab) {
   // Real-time presence watchers for people search results
   if (tab === 'people') {
     cleanupSearchPresence();
-    const filtered = allUsers.filter(u =>
-      u.fullName?.toLowerCase().includes(q) ||
-      u.rollNumber?.toLowerCase().includes(q) ||
-      u.nickname?.toLowerCase().includes(q)
-    );
+    const filtered = allUsers.filter(u => {
+      const dName = (u.displayName || '').toLowerCase();
+      const uName = (u.username || '').toLowerCase();
+      const rNum = (u.rollNumber || '').toLowerCase();
+      return dName.includes(q) || uName.includes(q) || rNum.includes(q);
+    });
     filtered.forEach(u => {
       const unsub = onSnapshot(doc(db, 'presence', u.id), (snap) => {
         const dot = results.querySelector(`#search-presence-${u.id}`);
@@ -230,26 +247,28 @@ function performSearch(container, searchQuery, tab) {
 }
 
 function userCard(u) {
-  const cached = userCache.getUser(u.id);
-  const fullName = cached.fullName || u.fullName || '?';
-  const pic = cached.profilePic || u.profilePic;
+  const cached = userCache.getUser(u.id) || u;
+  const displayName = cached.displayName || 'User';
+  const pic = cached.photoURL || '';
+  const rollNumber = cached.rollNumber || '—';
+  const username = cached.username || '';
 
   const avatar = pic
-    ? `<img src="${pic}" class="avatar" alt="${sanitizeHTML(fullName)}" data-user-pic="${u.id}"/>`
-    : `<div class="avatar avatar-placeholder text-sm" data-user-pic="${u.id}">${fullName[0]}</div>`;
+    ? `<img src="${pic}" class="avatar" alt="${sanitizeHTML(displayName)}" data-user-pic="${u.id}"/>`
+    : `<div class="avatar avatar-placeholder text-sm" data-user-pic="${u.id}">${displayName[0]?.toUpperCase() || '?'}</div>`;
 
   return `
-    <div class="chat-item user-search-card" data-uid="${u.id}" data-name="${sanitizeHTML(fullName)}">
+    <div class="chat-item user-search-card" data-uid="${u.id}" data-name="${sanitizeHTML(displayName)}">
       <div class="relative">
         ${avatar}
         <div class="presence-dot-mini ${u.online ? 'online' : ''}" id="search-presence-${u.id}"></div>
       </div>
       <div class="flex-1 min-w-0">
-        <p class="font-semibold text-sm text-navy-800" data-user-name="${u.id}">${sanitizeHTML(fullName)}</p>
-        <p class="text-xs text-gray-400">${u.nickname ? `"${sanitizeHTML(u.nickname)}" · ` : ''}Roll #${sanitizeHTML(u.rollNumber || '—')}</p>
+        <p class="font-semibold text-sm text-navy-800" data-user-name="${u.id}">${sanitizeHTML(displayName)}</p>
+        <p class="text-xs text-gray-400">${username ? `"${sanitizeHTML(username)}" · ` : ''}Roll #${sanitizeHTML(rollNumber)}</p>
       </div>
       <div class="flex items-center gap-1">
-        <button class="dm-btn p-1.5 rounded-full hover:bg-cream-100 text-gray-400 hover:text-navy-500 transition-colors" data-uid="${u.id}" data-name="${sanitizeHTML(fullName)}" title="Message">
+        <button class="dm-btn p-1.5 rounded-full hover:bg-cream-100 text-gray-400 hover:text-navy-500 transition-colors" data-uid="${u.id}" data-name="${sanitizeHTML(displayName)}" title="Message">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 016 21c-1.052 0-2.062-.18-3-.512v-.003c0-1.113.285-2.16.786-3.07C2.859 16.023 2 14.104 2 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z"/></svg>
         </button>
       </div>

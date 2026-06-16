@@ -23,6 +23,7 @@ class UserCacheManager {
       snap.docChanges().forEach(change => {
         const uid = change.doc.id;
         const data = change.doc.data();
+        data.id = uid;
         this.users.set(uid, data);
         
         // Immediately patch the DOM for any visible elements bound to this user
@@ -40,9 +41,22 @@ class UserCacheManager {
   }
 
   getUser(uid) {
-    return this.users.get(uid) || { 
-      fullName: 'Unknown User', 
+    const user = this.users.get(uid);
+    if (user) {
+      return {
+        ...user,
+        displayName: user.displayName || user.fullName || user.username || user.nickname || 'User',
+        username: user.username || user.nickname || '',
+        photoURL: user.photoURL || user.profilePic || '',
+        rollNumber: user.rollNumber || ''
+      };
+    }
+    return { 
+      displayName: 'User',
+      fullName: 'User', 
+      photoURL: '',
       profilePic: '', 
+      username: 'Anonymous',
       nickname: 'Anonymous',
       points: 0,
       rollNumber: 'N/A'
@@ -50,13 +64,21 @@ class UserCacheManager {
   }
 
   getAllUsers() {
-    return Array.from(this.users.values()).map(u => ({ id: u.id, ...u }));
+    return Array.from(this.users.values()).map(u => ({ 
+      ...u,
+      id: u.id,
+      displayName: u.displayName || u.fullName || u.username || u.nickname || 'User',
+      username: u.username || u.nickname || '',
+      photoURL: u.photoURL || u.profilePic || '',
+      rollNumber: u.rollNumber || ''
+    }));
   }
 
   updateDOM(uid, user) {
-    const safeName = sanitizeHTML(user.fullName || 'Unknown User');
-    const safePic = user.profilePic ? sanitizeHTML(user.profilePic) : '';
-    const placeholderChar = (user.fullName || '?')[0].toUpperCase();
+    const name = user.displayName || user.fullName || user.username || user.nickname || 'User';
+    const safeName = sanitizeHTML(name);
+    const safePic = user.photoURL ? sanitizeHTML(user.photoURL) : (user.profilePic ? sanitizeHTML(user.profilePic) : '');
+    const placeholderChar = name ? name[0].toUpperCase() : '?';
 
     // 1. Update Names
     document.querySelectorAll(`[data-user-name="${uid}"]`).forEach(el => {

@@ -278,3 +278,50 @@ export async function awardPoints(userId, points, reason) {
     console.error(`[Points] Error awarding points:`, e);
   }
 }
+
+export async function transferPoints(senderId, receiverId, points, reason) {
+  console.log(`[Points Transfer] ${reason}: ${points} pts from ${senderId} to ${receiverId}`);
+  if (!senderId || !receiverId || !points || points <= 0) return false;
+
+  try {
+    const senderRef = doc(db, 'users', senderId);
+    const receiverRef = doc(db, 'users', receiverId);
+
+    await runTransaction(db, async (transaction) => {
+      const senderDoc = await transaction.get(senderRef);
+      const receiverDoc = await transaction.get(receiverRef);
+
+      if (!senderDoc.exists() || !receiverDoc.exists()) {
+        throw new Error("One or both user documents do not exist.");
+      }
+
+      const senderData = senderDoc.data();
+      const receiverData = receiverDoc.data();
+      const currentSenderPoints = senderData.points || 0;
+      const currentReceiverPoints = receiverData.points || 0;
+
+      if (currentSenderPoints < points) {
+        throw new Error("Insufficient points");
+      }
+
+      const newSenderPoints = currentSenderPoints - points;
+      const newReceiverPoints = currentReceiverPoints + points;
+
+      transaction.update(senderRef, { points: newSenderPoints });
+      transaction.update(receiverRef, { points: newReceiverPoints });
+    });
+
+    // Instantly update the local cache for the current user (sender)
+    if (senderId === authManager.currentUser?.uid && authManager.userData) {
+      authManager.userData.points = Math.max(0, (authManager.userData.points || 0) - points);
+      authManager._notify();
+    }
+
+    console.log(`[Points Transfer] ✓ Complete`);
+    return true;
+  } catch (e) {
+    console.error(`[Points Transfer] Error:`, e);
+    throw e;
+  }
+}
+

@@ -2,7 +2,7 @@
 // Fixed: manual claim, birthday person gifts points to friends, view wishes
 import { db, collection, getDocs, addDoc, doc, getDoc, updateDoc, query, where, orderBy, onSnapshot, serverTimestamp, increment } from '../firebase-config.js';
 import { showToast, sanitizeHTML, isBirthdayToday, getDaysUntil, formatDate, timeAgo } from '../utils.js';
-import { authManager, awardPoints } from '../auth.js';
+import { authManager, awardPoints, transferPoints } from '../auth.js';
 import { router } from '../router.js';
 import { createNotification } from '../notifications.js';
 
@@ -52,6 +52,25 @@ async function checkBirthdayClaimed(userId) {
     return !snap.empty;
   } catch (e) {
     console.error('Check claim error:', e);
+    return false;
+  }
+}
+
+// ===== CHECK IF ALREADY GIFTED TO FRIEND =====
+
+async function checkBirthdayGifted(userId) {
+  const currentYear = new Date().getFullYear();
+  try {
+    const q = query(
+      collection(db, 'birthdayPoints'),
+      where('senderId', '==', userId),
+      where('year', '==', currentYear),
+      where('type', '==', 'birthday_gift')
+    );
+    const snap = await getDocs(q);
+    return !snap.empty;
+  } catch (e) {
+    console.error('Check gifted error:', e);
     return false;
   }
 }
@@ -124,19 +143,24 @@ function showGiftPointsModal(allUsers) {
     <div class="p-4 space-y-4">
       <div class="text-center mb-2">
         <p class="text-sm text-navy-700">Select a friend to gift <strong>+5 points</strong></p>
-        <p class="text-[10px] text-gray-400 mt-1">You will lose 5 points. You must have enough balance.</p>
+      </div>
+
+      <div class="relative">
+        <svg class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+        <input type="text" id="gift-friend-search" placeholder="Search friends by name or roll..." class="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-navy-500 bg-gray-50/50 transition-colors" />
       </div>
 
       <div class="space-y-2 max-h-[300px] overflow-y-auto" id="gift-friends-list">
         ${friends.map(u => `
           <button class="gift-friend-btn card p-3 flex items-center gap-3 w-full text-left hover:shadow-md transition-all active:scale-[0.98]" data-uid="${u.id}" data-name="${sanitizeHTML(u.fullName || 'Unknown')}">
             ${u.profilePic
-              ? `<img src="${u.profilePic}" class="w-9 h-9 rounded-full object-cover border-2 border-white shadow-sm" alt=""/>`
-              : `<div class="w-9 h-9 rounded-full bg-navy-500 text-white flex items-center justify-center text-xs font-bold shadow-sm">${(u.fullName || '?')[0]}</div>`}
+              ? `<img src="${u.profilePic}" class="w-10 h-10 rounded-full object-cover border-2 border-white shadow-sm" alt=""/>`
+              : `<div class="w-10 h-10 rounded-full bg-navy-500 text-white flex items-center justify-center text-sm font-bold shadow-sm">${(u.fullName || '?')[0]}</div>`}
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-semibold text-navy-800 truncate">${sanitizeHTML(u.fullName || 'Unknown')}</p>
+              <p class="text-sm font-semibold text-navy-800 truncate bday-friend-name">${sanitizeHTML(u.fullName || 'Unknown')}</p>
+              ${u.rollNumber ? `<p class="text-[11px] text-gray-500 font-medium mt-0.5 truncate bday-friend-roll">Roll: ${sanitizeHTML(u.rollNumber)}</p>` : ''}
             </div>
-            <span class="text-xs px-2.5 py-1 rounded-full bg-amber-50 text-amber-600 font-semibold whitespace-nowrap">🎁 +5 pts</span>
+            <span class="text-xs px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-600 font-bold whitespace-nowrap">🎁 +5</span>
           </button>
         `).join('')}
       </div>
@@ -147,65 +171,114 @@ function showGiftPointsModal(allUsers) {
 
   modal.body.querySelector('#cancel-gift')?.addEventListener('click', () => modal.close());
 
+  // Search filtering
+  modal.body.querySelector('#gift-friend-search')?.addEventListener('input', (e) => {
+    const term = e.target.value.toLowerCase();
+    modal.body.querySelectorAll('.gift-friend-btn').forEach(btn => {
+      const name = btn.querySelector('.bday-friend-name')?.textContent.toLowerCase() || '';
+      const roll = btn.querySelector('.bday-friend-roll')?.textContent.toLowerCase() || '';
+      if (name.includes(term) || roll.includes(term)) {
+        btn.style.display = 'flex';
+      } else {
+        btn.style.display = 'none';
+      }
+    });
+  });
+
   // Handle friend selection
   modal.body.querySelectorAll('.gift-friend-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
+    btn.addEventListener('click', () => {
       const targetId = btn.dataset.uid;
       const targetName = btn.dataset.name;
 
-      // Disable all buttons
-      modal.body.querySelectorAll('.gift-friend-btn').forEach(b => { b.disabled = true; b.style.opacity = '0.5'; });
-      btn.style.opacity = '1';
-      btn.querySelector('span').textContent = 'Sending...';
+      // Show confirmation modal
+      const confirmOverlay = document.createElement('div');
+      confirmOverlay.className = 'fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4 transition-opacity';
+      confirmOverlay.innerHTML = `
+        <div class="bg-white rounded-2xl p-6 w-full max-w-sm text-center shadow-xl transform transition-transform scale-95">
+          <h3 class="text-lg font-bold text-navy-800 mb-6">Send 5 Birthday Points to ${sanitizeHTML(targetName)}?</h3>
+          <div class="flex gap-3">
+            <button id="confirm-cancel" class="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-500 hover:bg-gray-50">Cancel</button>
+            <button id="confirm-send" class="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-sm font-semibold shadow-md hover:shadow-lg transition-all flex items-center justify-center">Send</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(confirmOverlay);
 
-      const currentYear = new Date().getFullYear();
+      requestAnimationFrame(() => {
+        confirmOverlay.querySelector('.bg-white').classList.remove('scale-95');
+        confirmOverlay.querySelector('.bg-white').classList.add('scale-100');
+      });
 
-      try {
-        // Check if already gifted this year
-        const dupeQ = query(
-          collection(db, 'birthdayPoints'),
-          where('senderId', '==', currentUser.uid),
-          where('year', '==', currentYear),
-          where('type', '==', 'birthday_gift')
-        );
-        const dupeSnap = await getDocs(dupeQ);
+      confirmOverlay.querySelector('#confirm-cancel').addEventListener('click', () => {
+        confirmOverlay.remove();
+      });
 
-        if (!dupeSnap.empty) {
-          showToast('You already gifted points this birthday!', 'warning');
+      confirmOverlay.querySelector('#confirm-send').addEventListener('click', async (e) => {
+        const sendBtn = e.currentTarget;
+        sendBtn.disabled = true;
+        sendBtn.innerHTML = '<div class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>';
+
+        const currentYear = new Date().getFullYear();
+
+        try {
+          // Check if already gifted this year
+          const dupeQ = query(
+            collection(db, 'birthdayPoints'),
+            where('senderId', '==', currentUser.uid),
+            where('year', '==', currentYear),
+            where('type', '==', 'birthday_gift')
+          );
+          const dupeSnap = await getDocs(dupeQ);
+
+          if (!dupeSnap.empty) {
+            showToast('You already gifted points this birthday!', 'warning');
+            confirmOverlay.remove();
+            modal.close();
+            return;
+          }
+
+          // Single point award (free gift, sender doesn't lose points)
+          await awardPoints(targetId, 5, 'Birthday Gift Received');
+
+          // Create birthday gift record
+          await addDoc(collection(db, 'birthdayPoints'), {
+            type: 'birthday_gift',
+            receiverId: targetId,
+            targetUserId: targetId, // Kept for safety
+            senderId: currentUser.uid,
+            senderName: userData.fullName || 'Unknown',
+            points: 5,
+            year: currentYear,
+            createdAt: serverTimestamp(),
+            timestamp: serverTimestamp()
+          });
+
+          // Send notification to friend
+          await createNotification('friend_bonus', targetId, {
+            points: 5,
+            message: `🎂 ${userData.fullName || 'Someone'} sent you a Birthday Gift!\n🎁 +5 Points Added`
+          });
+
+          showToast(`🎉 Gifted +5 points to ${targetName}!`, 'success');
+          
+          // Update UI Button
+          const mainBtn = document.querySelector('.gift-points-btn');
+          if (mainBtn) {
+            mainBtn.disabled = true;
+            mainBtn.className = 'px-5 py-2.5 rounded-full text-sm font-semibold shadow-md gift-points-btn bg-emerald-500 text-white opacity-60';
+            mainBtn.textContent = '✅ Birthday Gift Sent';
+          }
+
+          confirmOverlay.remove();
           modal.close();
-          return;
+        } catch (err) {
+          console.error('Gift points error:', err);
+          showToast('Failed to gift points. Try again.', 'error');
+          sendBtn.disabled = false;
+          sendBtn.textContent = 'Send';
         }
-
-        // Create birthday gift record
-        await addDoc(collection(db, 'birthdayPoints'), {
-          type: 'birthday_gift',
-          targetUserId: targetId,
-          senderId: currentUser.uid,
-          senderName: userData.fullName || 'Unknown',
-          points: 5,
-          year: currentYear,
-          createdAt: serverTimestamp()
-        });
-
-        // Add 5 to birthday person
-        awardPoints(currentUser.uid, 5, 'Birthday Gift Given');
-
-        // Add 5 to friend
-        awardPoints(targetId, 5, 'Birthday Gift Received');
-
-        // Send notification to friend
-        await createNotification('friend_bonus', targetId, {
-          points: 5,
-          message: `🎁 ${userData.fullName || 'Someone'} gifted you +5 Birthday Points!`
-        });
-
-        showToast(`🎉 Gifted +5 points to ${targetName}!`, 'success');
-        modal.close();
-      } catch (e) {
-        console.error('Gift points error:', e);
-        showToast('Failed to gift points. Try again.', 'error');
-        modal.close();
-      }
+      });
     });
   });
 }
@@ -239,8 +312,10 @@ export async function renderBirthday(container) {
 
   // Check if already claimed (for birthday person)
   let alreadyClaimed = false;
+  let alreadyGifted = false;
   if (iAmBirthdayPerson) {
     alreadyClaimed = await checkBirthdayClaimed(currentUserId);
+    alreadyGifted = await checkBirthdayGifted(currentUserId);
   }
 
   const months = ['January', 'February', 'March', 'April', 'May', 'June',
@@ -281,8 +356,8 @@ export async function renderBirthday(container) {
                       ${alreadyClaimed ? '✅ Birthday Gift Claimed' : '🎁 Claim Birthday Gift (+10 Points)'}
                     </button>
                     <!-- Birthday Person: Gift 5 Points to Friend -->
-                    <button class="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-full text-sm font-semibold shadow-md gift-points-btn">
-                      🎁 Gift 5 Birthday Points to a Friend
+                    <button class="px-5 py-2.5 rounded-full text-sm font-semibold shadow-md gift-points-btn ${alreadyGifted ? 'bg-emerald-500 text-white opacity-60' : 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white'}" ${alreadyGifted ? 'disabled' : ''}>
+                      ${alreadyGifted ? '✅ Birthday Gift Sent' : '🎁 Gift 5 Birthday Points to a Friend'}
                     </button>
                   ` : `
                     <!-- Not Birthday Person: Send Wish only (no wish data shown) -->

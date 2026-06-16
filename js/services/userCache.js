@@ -47,7 +47,8 @@ class UserCacheManager {
         ...user,
         displayName: user.displayName || user.fullName || user.username || user.nickname || 'User',
         username: user.username || user.nickname || '',
-        photoURL: user.photoURL || user.profilePic || '',
+        photoURL: (user.photoURL && user.photoURL !== 'undefined') ? user.photoURL : ((user.profilePic && user.profilePic !== 'undefined') ? user.profilePic : ''),
+        profilePic: (user.photoURL && user.photoURL !== 'undefined') ? user.photoURL : ((user.profilePic && user.profilePic !== 'undefined') ? user.profilePic : ''),
         rollNumber: user.rollNumber || ''
       };
     }
@@ -69,7 +70,8 @@ class UserCacheManager {
       id: u.id,
       displayName: u.displayName || u.fullName || u.username || u.nickname || 'User',
       username: u.username || u.nickname || '',
-      photoURL: u.photoURL || u.profilePic || '',
+      photoURL: (u.photoURL && u.photoURL !== 'undefined') ? u.photoURL : ((u.profilePic && u.profilePic !== 'undefined') ? u.profilePic : ''),
+      profilePic: (u.photoURL && u.photoURL !== 'undefined') ? u.photoURL : ((u.profilePic && u.profilePic !== 'undefined') ? u.profilePic : ''),
       rollNumber: u.rollNumber || ''
     }));
   }
@@ -77,7 +79,8 @@ class UserCacheManager {
   updateDOM(uid, user) {
     const name = user.displayName || user.fullName || user.username || user.nickname || 'User';
     const safeName = sanitizeHTML(name);
-    const safePic = user.photoURL ? sanitizeHTML(user.photoURL) : (user.profilePic ? sanitizeHTML(user.profilePic) : '');
+    let safePic = user.photoURL ? user.photoURL : (user.profilePic ? user.profilePic : '');
+    if (safePic) safePic = safePic.replace(/&amp;/g, '&');
     const placeholderChar = name ? name[0].toUpperCase() : '?';
 
     // 1. Update Names
@@ -100,9 +103,14 @@ class UserCacheManager {
         el.replaceWith(div);
       }
       // If it's a placeholder div and the user uploaded a photo -> convert to img
-      else if (el.tagName !== 'IMG' && safePic) {
+      else if (el.tagName !== 'IMG' && safePic && safePic !== 'undefined' && safePic !== 'null') {
         const img = document.createElement('img');
-        img.className = el.className.replace('flex items-center justify-center font-bold bg-navy-100 text-navy-800', 'object-cover');
+        // Safely replace ALL possible placeholder classes with object-cover
+        let newClasses = el.className
+          .replace(/flex|items-center|justify-center|font-bold|text-[\w-]+|bg-[\w-]+/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        img.className = newClasses + ' object-cover';
         img.setAttribute('data-user-pic', uid);
         img.src = safePic;
         img.alt = "";

@@ -70,6 +70,14 @@ export async function renderOwnerPanel(container) {
         </div>
 
         <div id="tab-reset" class="owner-tab-content hidden space-y-4">
+          <!-- NEW: Massive Full App Reset Button -->
+          <div class="bg-red-900/20 border-2 border-red-500/50 rounded-2xl p-6 text-center shadow-[0_0_20px_rgba(239,68,68,0.2)] animate-pulse hover:animate-none transition-all cursor-pointer group" id="btn-full-app-reset">
+            <h2 class="text-2xl font-black text-red-500 tracking-wider mb-2 flex items-center justify-center gap-3">
+              <span class="text-3xl">🔴</span> FULL APP RESET
+            </h2>
+            <p class="text-sm text-red-300 font-medium opacity-80 group-hover:opacity-100 transition-opacity">Start a fresh season. Wipes points, claims, and activities.</p>
+          </div>
+
           <div class="bg-[#1e293b] border border-red-500/30 rounded-2xl p-5 shadow-[0_0_15px_rgba(239,68,68,0.1)] relative">
             <h3 class="text-white font-bold mb-4 flex items-center gap-2">
               <svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
@@ -185,6 +193,7 @@ export async function renderOwnerPanel(container) {
   await loadUsers(container);
 
   // Bind extreme actions
+  container.querySelector('#btn-full-app-reset').addEventListener('click', () => showFullAppResetModal(container));
   container.querySelector('#btn-execute-reset').addEventListener('click', () => executeAdvancedReset(container));
   
   // Connect "Everything" checkbox logic
@@ -278,8 +287,8 @@ function renderUserList(container, users) {
   listEl.innerHTML = users?.map(u => `
     <button class="w-full flex items-center gap-3 p-3 bg-[#1e293b] hover:bg-[#334155] border border-gray-700/50 rounded-xl transition-colors text-left" onclick="window.openOwnerUserEdit('${u?.id || ''}')">
       <div class="relative flex-shrink-0">
-        ${u?.profilePic 
-          ? `<img src="${u.profilePic}" class="w-10 h-10 rounded-lg object-cover border border-gray-600"/>`
+        ${(u?.photoURL && u?.photoURL !== 'undefined') || (u?.profilePic && u?.profilePic !== 'undefined') 
+          ? `<img src="${(u.photoURL && u.photoURL !== 'undefined' ? u.photoURL : u.profilePic)}" class="w-10 h-10 rounded-lg object-cover border border-gray-600"/>`
           : `<div class="w-10 h-10 rounded-lg bg-gray-700 flex items-center justify-center text-gray-300 font-bold">${(u?.fullName || '?')[0]?.toUpperCase() || '?'}</div>`}
         ${u?.flagged ? '<div class="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border border-[#1e293b]"></div>' : ''}
       </div>
@@ -414,8 +423,8 @@ window.openOwnerUserEdit = async (uid) => {
         
         <!-- Header Identity -->
         <div class="flex items-center gap-4 bg-[#0f172a] p-4 rounded-xl border border-gray-800 shadow-inner relative group">
-          ${user.profilePic 
-            ? `<img src="${user.profilePic}" class="w-16 h-16 rounded-xl object-cover border border-gray-600"/>`
+          ${(user.photoURL && user.photoURL !== 'undefined') || (user.profilePic && user.profilePic !== 'undefined') 
+            ? `<img src="${(user.photoURL && user.photoURL !== 'undefined' ? user.photoURL : user.profilePic)}" class="w-16 h-16 rounded-xl object-cover border border-gray-600"/>`
             : `<div class="w-16 h-16 rounded-xl bg-gray-700 flex items-center justify-center text-xl text-gray-300 font-bold">${(user.fullName || '?')[0].toUpperCase()}</div>`}
           <div class="flex-1 min-w-0">
             <div class="flex items-center justify-between">
@@ -1047,3 +1056,203 @@ window.executeRecalcLeaderboard = async () => {
 
   if (btn) btn.innerHTML = '<span class="text-lg">🧮</span> Recalculate Leaderboard';
 };
+
+// ==========================================
+// FULL APP RESET
+// ==========================================
+
+function showFullAppResetModal(container) {
+  const overlay = document.createElement('div');
+  overlay.className = 'fixed inset-0 z-[300] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm animate-fade-in';
+  overlay.innerHTML = `
+    <div class="bg-[#0f172a] rounded-2xl p-6 w-full max-w-md border border-red-500/50 shadow-[0_0_30px_rgba(239,68,68,0.3)] relative">
+      <div class="w-16 h-16 bg-red-500/20 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border-2 border-red-500">
+        <svg class="w-8 h-8" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+      </div>
+      <h3 class="text-xl font-bold text-white text-center mb-4">Reset Entire App?</h3>
+      <p class="text-sm text-gray-300 text-center mb-6 leading-relaxed">
+        <span class="text-red-400 font-bold block mb-2">⚠️ This will permanently reset the entire application.</span>
+        All points, leaderboard data, claims, activities and temporary data will be removed.<br><br>
+        <span class="text-green-400 font-semibold">User accounts and basic profile information will remain.</span>
+      </p>
+
+      <!-- Progress indicator for Full Reset -->
+      <div id="full-reset-progress-container" class="hidden mb-6 bg-gray-900 p-4 rounded-xl border border-gray-700">
+        <div class="flex justify-between text-xs font-mono mb-2">
+          <span id="full-reset-progress-text" class="text-blue-400">Initializing...</span>
+          <span id="full-reset-progress-pct" class="text-blue-400 font-bold">0%</span>
+        </div>
+        <div class="w-full bg-gray-800 rounded-full h-2 overflow-hidden">
+          <div id="full-reset-progress-bar" class="bg-gradient-to-r from-red-500 to-orange-500 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+        </div>
+      </div>
+
+      <div class="flex gap-3" id="full-reset-buttons">
+        <button id="full-reset-cancel" class="flex-1 py-3 rounded-xl border border-gray-600 text-sm font-bold text-gray-400 hover:bg-gray-800 transition-colors">Cancel</button>
+        <button id="full-reset-confirm" class="flex-1 py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-bold shadow-[0_0_15px_rgba(220,38,38,0.4)] transition-all">Reset App</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const cancelBtn = overlay.querySelector('#full-reset-cancel');
+  const confirmBtn = overlay.querySelector('#full-reset-confirm');
+
+  cancelBtn.addEventListener('click', () => overlay.remove());
+
+  confirmBtn.addEventListener('click', async () => {
+    // Only allow owner
+    if (!authManager.isOwner) return;
+
+    confirmBtn.disabled = true;
+    cancelBtn.style.display = 'none';
+    confirmBtn.innerHTML = '<svg class="animate-spin h-5 w-5 mx-auto text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>';
+    
+    const progContainer = overlay.querySelector('#full-reset-progress-container');
+    progContainer.classList.remove('hidden');
+
+    const updateFullProgress = (pct, text) => {
+      overlay.querySelector('#full-reset-progress-pct').textContent = pct + '%';
+      overlay.querySelector('#full-reset-progress-bar').style.width = pct + '%';
+      if (text) overlay.querySelector('#full-reset-progress-text').textContent = text;
+    };
+
+    try {
+      await executeFullAppResetLogic(updateFullProgress);
+      updateFullProgress(100, 'Reset Complete! 🚀');
+      confirmBtn.innerHTML = '✅ DONE';
+      confirmBtn.classList.replace('bg-red-600', 'bg-green-600');
+      confirmBtn.classList.replace('hover:bg-red-700', 'hover:bg-green-700');
+      
+      setTimeout(() => {
+        overlay.remove();
+        showToast('Application fully reset for a new season!', 'success');
+      }, 2000);
+    } catch (e) {
+      console.error('Full App Reset Error:', e);
+      showToast('Reset failed. Check console.', 'error');
+      confirmBtn.innerHTML = 'Error';
+      cancelBtn.style.display = 'block';
+      confirmBtn.disabled = false;
+    }
+  });
+}
+
+async function executeFullAppResetLogic(updateProgress) {
+  // We have 8 stages for 100%
+  const step = Math.floor(100 / 8); 
+  let currentPct = 0;
+
+  // 1. Reset Users (Points: 0, SavedPosts: [])
+  updateProgress(currentPct, 'Resetting User Points & Data...');
+  const usersSnap = await getDocs(collection(db, 'users'));
+  let userRefs = [];
+  usersSnap.forEach(d => userRefs.push(d.ref));
+  for (let i = 0; i < userRefs.length; i += 400) {
+    const chunk = userRefs.slice(i, i + 400);
+    const batch = writeBatch(db);
+    chunk.forEach(ref => {
+      batch.update(ref, { 
+        points: 0,
+        savedPosts: []
+      });
+    });
+    await batch.commit();
+  }
+  currentPct += step;
+
+  // 2. Clear Birthday Gifts & Claims
+  updateProgress(currentPct, 'Clearing Birthday Data...');
+  const bdaySnap = await getDocs(collection(db, 'birthdayPoints'));
+  let bRefs = [];
+  bdaySnap.forEach(d => bRefs.push(d.ref));
+  await deleteInBatches(bRefs, 'Birthdays', null, 0, 100);
+  currentPct += step;
+
+  // 3. Clear Poll Votes
+  updateProgress(currentPct, 'Clearing Poll Votes...');
+  const pollsSnap = await getDocs(collection(db, 'polls'));
+  let pollUpdates = [];
+  pollsSnap.forEach(d => pollUpdates.push({ ref: d.ref, data: d.data() }));
+  for (let i = 0; i < pollUpdates.length; i += 400) {
+    const chunk = pollUpdates.slice(i, i + 400);
+    const batch = writeBatch(db);
+    chunk.forEach(p => {
+      const opts = p.data.options || [];
+      const clearedOpts = opts.map(o => ({ text: o.text, votes: [] }));
+      batch.update(p.ref, { options: clearedOpts });
+    });
+    await batch.commit();
+  }
+  currentPct += step;
+
+  // 4. Clear Post Likes, Comments & Tags
+  updateProgress(currentPct, 'Clearing Post Activity...');
+  const postsSnap = await getDocs(collection(db, 'posts'));
+  let postsToUpdate = [];
+  let commentsToDelete = [];
+  
+  for (const pDoc of postsSnap.docs) {
+    postsToUpdate.push(pDoc.ref);
+    const cSnap = await getDocs(collection(db, 'posts', pDoc.id, 'comments'));
+    cSnap.forEach(c => commentsToDelete.push(c.ref));
+  }
+  
+  // Update posts first
+  for (let i = 0; i < postsToUpdate.length; i += 400) {
+    const chunk = postsToUpdate.slice(i, i + 400);
+    const batch = writeBatch(db);
+    chunk.forEach(ref => {
+      batch.update(ref, { 
+        likes: [],
+        pendingTags: [],
+        taggedFriends: [],
+        commentCount: 0
+      });
+    });
+    await batch.commit();
+  }
+  
+  // Then delete comments
+  updateProgress(currentPct + (step/2), 'Clearing Comments...');
+  await deleteInBatches(commentsToDelete, 'Comments', null, 0, 100);
+  currentPct += step;
+
+  // 5. Clear Diary Reactions
+  updateProgress(currentPct, 'Clearing Diary Reactions...');
+  const diarySnap = await getDocs(collection(db, 'diary'));
+  let diaryRefs = [];
+  diarySnap.forEach(d => diaryRefs.push(d.ref));
+  for (let i = 0; i < diaryRefs.length; i += 400) {
+    const chunk = diaryRefs.slice(i, i + 400);
+    const batch = writeBatch(db);
+    chunk.forEach(ref => {
+      batch.update(ref, { reactions: [] });
+    });
+    await batch.commit();
+  }
+  currentPct += step;
+
+  // 6. Clear Badges / Activity Logs
+  updateProgress(currentPct, 'Clearing Activity Logs...');
+  const badgeSnap = await getDocs(collection(db, 'badges'));
+  let badgeRefs = [];
+  badgeSnap.forEach(d => badgeRefs.push(d.ref));
+  await deleteInBatches(badgeRefs, 'Badges', null, 0, 100);
+  currentPct += step;
+
+  // 7. Clear Notifications
+  updateProgress(currentPct, 'Clearing Notifications...');
+  const notifSnap = await getDocs(collection(db, 'notifications'));
+  let notifRefs = [];
+  notifSnap.forEach(d => notifRefs.push(d.ref));
+  await deleteInBatches(notifRefs, 'Notifications', null, 0, 100);
+  currentPct += step;
+
+  // 8. Final Realtime Flush / Check
+  updateProgress(95, 'Syncing Realtime State...');
+  // Force userCache and other local states to catch up if needed
+  // onSnapshot listeners will auto-trigger because the DB changed!
+  // Wait a moment for firestore to flush locally
+  await new Promise(r => setTimeout(r, 1000));
+}

@@ -531,7 +531,16 @@ function buildAppShell() {
   }).catch(e => console.log('Festival themes init:', e));
 
   // Apply saved theme from localStorage (instant) and sync from Firestore
-  const savedTheme = localStorage.getItem('app_theme');
+    // Debug script
+    import('./firebase-config.js').then(({ db, getDocs, collection }) => {
+      getDocs(collection(db, 'users')).then(snap => {
+        let debugUsers = [];
+        snap.forEach(d => debugUsers.push(d.data()));
+        console.log('DEBUG USERS:', debugUsers.map(u => ({ name: u.fullName, photoURL: u.photoURL, profilePic: u.profilePic })));
+      });
+    });
+
+    const savedTheme = localStorage.getItem('app_theme');
   if (savedTheme && savedTheme !== 'theme-cream') {
     document.body.className = document.body.className.replace(/theme-\w+/g, '').trim();
     document.body.classList.add(savedTheme);

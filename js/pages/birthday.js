@@ -153,8 +153,8 @@ function showGiftPointsModal(allUsers) {
       <div class="space-y-2 max-h-[300px] overflow-y-auto" id="gift-friends-list">
         ${friends.map(u => `
           <button class="gift-friend-btn card p-3 flex items-center gap-3 w-full text-left hover:shadow-md transition-all active:scale-[0.98]" data-uid="${u.id}" data-name="${sanitizeHTML(u.fullName || 'Unknown')}">
-            ${u.profilePic
-              ? `<img src="${u.profilePic}" class="w-10 h-10 rounded-full object-cover border-2 border-white shadow-sm" alt=""/>`
+            ${(u.photoURL && u.photoURL !== 'undefined') || (u.profilePic && u.profilePic !== 'undefined')
+              ? `<img src="${(u.photoURL && u.photoURL !== 'undefined' ? u.photoURL : u.profilePic)}" class="w-10 h-10 rounded-full object-cover border-2 border-white shadow-sm" alt=""/>`
               : `<div class="w-10 h-10 rounded-full bg-navy-500 text-white flex items-center justify-center text-sm font-bold shadow-sm">${(u.fullName || '?')[0]}</div>`}
             <div class="flex-1 min-w-0">
               <p class="text-sm font-semibold text-navy-800 truncate bday-friend-name">${sanitizeHTML(u.fullName || 'Unknown')}</p>
@@ -408,8 +408,8 @@ export async function renderBirthday(container) {
                 <p class="text-lg font-bold text-navy-500">${monthUsers.length}</p>
                 <div class="flex justify-center gap-0.5 mt-1">
                   ${monthUsers.slice(0, 4).map(u =>
-                    u.profilePic
-                      ? `<img src="${u.profilePic}" class="w-5 h-5 rounded-full object-cover border border-white" alt=""/>`
+                    (u.photoURL && u.photoURL !== 'undefined') || (u.profilePic && u.profilePic !== 'undefined')
+                      ? `<img src="${(u.photoURL !== 'undefined' ? u.photoURL : u.profilePic)}" class="w-5 h-5 rounded-full object-cover border border-white" alt=""/>`
                       : `<div class="w-5 h-5 rounded-full bg-navy-100 text-navy-600 flex items-center justify-center text-[8px] font-bold">${(u.fullName || '?')[0]}</div>`
                   ).join('')}
                   ${monthUsers.length > 4 ? `<div class="w-5 h-5 rounded-full bg-cream-200 text-gray-500 flex items-center justify-center text-[8px]">+${monthUsers.length - 4}</div>` : ''}
@@ -576,8 +576,8 @@ function renderBirthdayCard(u, showFullDate = false) {
 
   return `
     <div class="card p-3 flex items-center gap-3 hover:shadow-sm transition-shadow">
-      ${u.profilePic
-        ? `<img src="${u.profilePic}" class="w-10 h-10 rounded-full object-cover border-2 border-white shadow-sm" alt=""/>`
+      ${(u.photoURL && u.photoURL !== 'undefined') || (u.profilePic && u.profilePic !== 'undefined')
+        ? `<img src="${(u.photoURL && u.photoURL !== 'undefined' ? u.photoURL : u.profilePic)}" class="w-10 h-10 rounded-full object-cover border-2 border-white shadow-sm" alt=""/>`
         : `<div class="w-10 h-10 rounded-full bg-navy-500 text-white flex items-center justify-center text-sm font-bold shadow-sm">${(u.fullName || '?')[0]}</div>`}
       <div class="flex-1 min-w-0">
         <p class="text-sm font-semibold text-navy-800">${sanitizeHTML(u.fullName || 'Unknown')}</p>
@@ -639,7 +639,7 @@ function showWishModal(userId, userName) {
         targetUserId: userId,
         authorId: authManager.currentUser.uid,
         authorName: authManager.userData?.fullName || 'Unknown',
-        authorPhoto: authManager.userData?.profilePic || '',
+        authorPhoto: authManager.userData?.photoURL || authManager.userData?.profilePic || '',
         message: text,
         year: currentYear,
         createdAt: serverTimestamp()
@@ -724,7 +724,7 @@ function showViewWishesModal(userId, userName) {
           return `
             <div class="card p-4 border border-pink-100 hover:border-pink-200 transition-all" style="animation: msgSlideIn 0.3s ease-out ${i * 0.08}s both;">
               <div class="flex items-start gap-3">
-                ${w.authorPhoto
+                ${(w.authorPhoto)
                   ? `<img src="${w.authorPhoto}" class="w-10 h-10 rounded-full object-cover border-2 border-pink-200 shadow-sm flex-shrink-0" alt=""/>`
                   : `<div class="w-10 h-10 rounded-full bg-gradient-to-br from-pink-400 to-rose-500 text-white flex items-center justify-center text-sm font-bold shadow-sm flex-shrink-0">${(w.authorName || '?')[0]}</div>`}
                 <div class="flex-1 min-w-0">

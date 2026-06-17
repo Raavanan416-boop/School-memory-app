@@ -166,7 +166,7 @@ function showNotificationFromData(data) {
       body: `Incoming ${callType} Call`,
       icon: '/icons/icon-192.png',
       badge: '/icons/icon-192.png',
-      vibrate: [500, 200, 500, 200, 500, 200, 500],
+      vibrate: [1000, 500, 1000, 500, 1000, 500, 1000, 500, 1000, 500, 1000, 500, 1000, 500, 1000],
       tag: 'incoming-call-' + callId,
       renotify: true,
       requireInteraction: true,

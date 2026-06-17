@@ -92,13 +92,16 @@ exports.sendPushNotification = onDocumentCreated('notifications/{notifId}', asyn
     const isCallNotif = type.includes('call_incoming');
     const ttl = isCallNotif ? 30 : 86400; // Calls expire in 30s, others in 24h
 
-    // Build the FCM message — DATA-ONLY payload
-    // No `notification` field = service worker's onBackgroundMessage ALWAYS fires
-    // This gives us full control over notification display in ALL app states
+    const channelId = isCallNotif ? 'class_memories_calls' : 
+                      (type === 'chat_message' ? 'class_memories_messages' : 'class_memories_general');
+
+    // Build the FCM message — BOTH notification AND data payload as requested
     const message = {
       token: fcmToken,
-      // DATA-ONLY: All notification info is in the data field
-      // The service worker reads these and shows the notification
+      notification: {
+        title: String(title),
+        body: String(body),
+      },
       data: {
         title: String(title),
         body: String(body),
@@ -109,34 +112,32 @@ exports.sendPushNotification = onDocumentCreated('notifications/{notifId}', asyn
         fromId: String(notif.fromId || ''),
         fromName: String(notif.fromName || ''),
         fromPhoto: String(notif.fromPhoto || ''),
-        // Call-specific fields
         callId: String(notif.callId || ''),
         callType: String(notif.callType || ''),
         callerName: String(notif.fromName || ''),
         callerId: String(notif.fromId || ''),
-        // Message-specific fields
         messagePreview: String(notif.messagePreview || ''),
       },
-      // Web push configuration
+      android: {
+        priority: 'high',
+        ttl: ttl * 1000,
+        notification: {
+          channelId: channelId,
+          sound: 'default',
+          defaultSound: true,
+          visibility: 'public',
+          clickAction: 'FLUTTER_NOTIFICATION_CLICK' // Common for native wrappers
+        }
+      },
       webpush: {
         headers: {
           Urgency: 'high',
           TTL: String(ttl),
         },
-        // NO notification field here — data-only for full SW control
         fcmOptions: {
           link: targetUrl,
         },
       },
-      // Android configuration (for future native app support)
-      android: {
-        priority: 'high',
-        ttl: ttl * 1000, // milliseconds
-        data: {
-          channelId: isCallNotif ? 'incoming_calls' : 'class_memories_notifications',
-        },
-      },
-      // iOS/APNs configuration (for future native app support)
       apns: {
         headers: {
           'apns-priority': '10',

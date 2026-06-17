@@ -157,6 +157,26 @@ const NOTIF_CONFIG = {
     bodyTemplate: (name) => `${name} pinned your Slam Book response!`,
     getUrl: (data) => `/?page=profile&userId=${data.fromId || ''}&tab=slambook`,
   },
+  friend_request: {
+    title: '👋 Friend Request',
+    bodyTemplate: (name) => `${name} sent you a friend request.`,
+    getUrl: (data) => `/?page=profile&userId=${data.fromId || ''}`,
+  },
+  friend_accepted: {
+    title: '✅ Request Accepted',
+    bodyTemplate: (name) => `${name} accepted your friend request.`,
+    getUrl: (data) => `/?page=profile&userId=${data.fromId || ''}`,
+  },
+  group_message: {
+    title: '👥 Group Message',
+    bodyTemplate: (name) => `${name} sent a message to the group.`,
+    getUrl: (data) => `/?page=chat&groupId=${data.groupId || ''}`,
+  },
+  poll_vote: {
+    title: '📊 Poll Vote',
+    bodyTemplate: (name) => `${name} voted in your poll.`,
+    getUrl: (data) => `/?page=polls&id=${data.pollId || ''}`,
+  },
 };
 
 class NotificationManager {
@@ -230,7 +250,7 @@ class NotificationManager {
 
       // Handle foreground messages — show in-app notification
       onMessage(this._messaging, (payload) => {
-        console.log('[Notifications] Foreground message:', payload);
+        console.log('Foreground notification received:', payload);
         const data = payload.data || {};
         const notifPayload = payload.notification || {};
         const type = data.type || 'general';
@@ -305,6 +325,7 @@ class NotificationManager {
     try {
       const permission = await Notification.requestPermission();
       this.pushPermission = permission;
+      console.log('Notification Permission:', permission);
 
       if (permission === 'granted') {
         console.log('[Notifications] Push permission granted');
@@ -385,7 +406,7 @@ class NotificationManager {
           pushEnabled: true,
           fcmTokenUpdatedAt: serverTimestamp(),
         });
-        console.log('[Notifications] ✅ FCM token saved:', token.substring(0, 20) + '...');
+        console.log('FCM Token Generated:', token);
       } else if (!token) {
         console.warn('[Notifications] ❌ No token returned — check VAPID key and SW registration');
       }
@@ -482,6 +503,25 @@ class NotificationManager {
             if (!callTypes.includes(newest.type)) {
               this._showInAppNotification(newest);
               this._playNotificationSound();
+            }
+          } else {
+            // FALLBACK: App is in background tab! Show system notification locally (Bypasses the need for Firebase Blaze!)
+            if ('Notification' in window && Notification.permission === 'granted') {
+              navigator.serviceWorker.ready.then(reg => {
+                const title = newest.title || this._getNotificationTitle(newest);
+                const body = newest.body || this._getNotificationText(newest);
+                const url = newest.targetUrl || this._getNotificationUrl(newest);
+                
+                reg.showNotification(title, {
+                  body: body,
+                  icon: '/icons/icon-192.png',
+                  badge: '/icons/icon-192.png',
+                  vibrate: [200, 100, 200, 100, 200],
+                  tag: 'local-' + newest.id,
+                  data: { url: url, notifId: newest.id }
+                });
+                this._playNotificationSound();
+              }).catch(e => console.error('Fallback notification failed:', e));
             }
           }
         }

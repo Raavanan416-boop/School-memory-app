@@ -34,6 +34,10 @@ export async function renderNotifications(container) {
               <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z"/></svg>
             </button>
             <div id="notif-menu-dropdown" class="hidden absolute right-0 top-9 bg-white rounded-xl shadow-lg border border-gray-100 py-1 min-w-[160px] z-20">
+              <button id="open-diagnostics" class="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-navy-600 hover:bg-navy-50 transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.34 15.84c-.688-.06-1.386-.054-2.066.01M15.84 10.34c.06-.688.054-1.386-.01-2.066m0 0l-1.586-1.586a1.5 1.5 0 00-2.121 0l-4.243 4.243a1.5 1.5 0 000 2.121l1.586 1.586m4.243-4.243l4.243 4.243a1.5 1.5 0 010 2.121l-1.586 1.586a1.5 1.5 0 01-2.121 0l-4.243-4.243"/></svg>
+                Push Diagnostics
+              </button>
               <button id="delete-all-notifs" class="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 transition-colors">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
                 Delete All
@@ -50,6 +54,37 @@ export async function renderNotifications(container) {
 
       <div id="notifs-container" class="space-y-1"></div>
     </section>
+
+    <!-- Diagnostics Modal -->
+    <div id="diagnostics-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div class="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl">
+        <div class="p-4 border-b border-gray-100 flex justify-between items-center">
+          <h3 class="font-bold text-navy-800 flex items-center gap-2">
+            <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.34 15.84c-.688-.06-1.386-.054-2.066.01M15.84 10.34c.06-.688.054-1.386-.01-2.066m0 0l-1.586-1.586a1.5 1.5 0 00-2.121 0l-4.243 4.243a1.5 1.5 0 000 2.121l1.586 1.586m4.243-4.243l4.243 4.243a1.5 1.5 0 010 2.121l-1.586 1.586a1.5 1.5 0 01-2.121 0l-4.243-4.243"/></svg>
+            Push Diagnostics
+          </h3>
+          <button id="close-diagnostics" class="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+        </div>
+        <div class="p-5 space-y-4">
+          <div class="flex justify-between items-center">
+            <span class="text-sm font-semibold text-gray-600">Permission:</span>
+            <span id="diag-permission" class="text-xs font-mono bg-gray-100 px-2 py-1 rounded">Checking...</span>
+          </div>
+          <div class="flex justify-between items-center">
+            <span class="text-sm font-semibold text-gray-600">Service Worker:</span>
+            <span id="diag-sw" class="text-xs font-mono bg-gray-100 px-2 py-1 rounded">Checking...</span>
+          </div>
+          <div class="space-y-1">
+            <span class="text-sm font-semibold text-gray-600 flex justify-between">FCM Token: <button id="diag-copy-token" class="text-blue-500 text-xs hover:underline hidden">Copy</button></span>
+            <div id="diag-token" class="text-[10px] font-mono bg-gray-50 text-gray-500 p-2 rounded border border-gray-100 break-all h-16 overflow-y-auto">Checking...</div>
+          </div>
+          <button id="diag-test-push-btn" class="w-full py-2.5 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-xl transition-colors mt-2">
+            Trigger Test Push
+          </button>
+          <p class="text-[10px] text-gray-400 text-center leading-tight">Note: Pushes while app is completely closed require Firebase Blaze plan.</p>
+        </div>
+      </div>
+    </div>
   `;
 
   // Event listeners
@@ -73,6 +108,78 @@ export async function renderNotifications(container) {
     menuDropdown?.classList.add('hidden');
     if (confirm('Delete all notifications? This cannot be undone.')) {
       await notificationManager.deleteAllNotifications();
+    }
+  });
+
+  // Diagnostics Modal Logic
+  const diagModal = container.querySelector('#diagnostics-modal');
+  let currentToken = '';
+
+  container.querySelector('#open-diagnostics')?.addEventListener('click', async () => {
+    menuDropdown?.classList.add('hidden');
+    diagModal?.classList.remove('hidden');
+    
+    const permEl = document.getElementById('diag-permission');
+    const swEl = document.getElementById('diag-sw');
+    const tokenEl = document.getElementById('diag-token');
+    const copyBtn = document.getElementById('diag-copy-token');
+    
+    // Check permission
+    const perm = Notification.permission;
+    permEl.textContent = perm;
+    permEl.className = `text-xs font-mono px-2 py-1 rounded ${perm === 'granted' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`;
+    
+    // Check Service Worker
+    try {
+      const swReg = await navigator.serviceWorker.getRegistration('/');
+      swEl.textContent = swReg ? 'Registered' : 'Missing';
+      swEl.className = `text-xs font-mono px-2 py-1 rounded ${swReg ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`;
+    } catch (e) {
+      swEl.textContent = 'Error';
+    }
+    
+    // Fetch FCM Token from User DB
+    if (authManager.currentUser) {
+      const userDoc = await getDoc(doc(db, 'users', authManager.currentUser.uid));
+      if (userDoc.exists() && userDoc.data().fcmToken) {
+        currentToken = userDoc.data().fcmToken;
+        tokenEl.textContent = currentToken;
+        copyBtn.classList.remove('hidden');
+      } else {
+        tokenEl.textContent = 'No token found. Try reloading or allowing permissions.';
+        copyBtn.classList.add('hidden');
+      }
+    }
+  });
+
+  container.querySelector('#close-diagnostics')?.addEventListener('click', () => {
+    diagModal?.classList.add('hidden');
+  });
+  
+  container.querySelector('#diag-copy-token')?.addEventListener('click', () => {
+    navigator.clipboard.writeText(currentToken);
+    import('../utils.js').then(m => m.showToast('Token copied!', 'success'));
+  });
+
+  container.querySelector('#diag-test-push-btn')?.addEventListener('click', async () => {
+    if (!authManager.currentUser) return;
+    const uid = authManager.currentUser.uid;
+    
+    try {
+      await addDoc(collection(db, 'notifications'), {
+        userId: uid,
+        fromId: uid,
+        fromName: authManager.userData?.fullName || 'Admin',
+        type: 'general',
+        title: '🧪 Test Push Delivered',
+        body: 'If you see this, notifications are working perfectly!',
+        targetUrl: '/?page=notifications',
+        createdAt: serverTimestamp(),
+        read: false
+      });
+      import('../utils.js').then(m => m.showToast('Test push triggered!', 'success'));
+    } catch (err) {
+      console.error('Failed to trigger test push:', err);
     }
   });
 
@@ -250,6 +357,10 @@ function createNotifCard(notif) {
     tag_declined: { icon: '❌', color: 'bg-red-50 border-red-100' },
     badge_suggestion: { icon: '🏅', color: 'bg-amber-50 border-amber-100' },
     miss_you: { icon: '❤️', color: 'bg-pink-50 border-pink-100' },
+    friend_request: { icon: '👋', color: 'bg-blue-50 border-blue-100' },
+    friend_accepted: { icon: '✅', color: 'bg-green-50 border-green-100' },
+    group_message: { icon: '👥', color: 'bg-indigo-50 border-indigo-100' },
+    poll_vote: { icon: '📊', color: 'bg-purple-50 border-purple-100' },
   };
 
   const config = typeConfig[notif.type] || { icon: '🔔', color: 'bg-gray-50 border-gray-100' };
@@ -483,6 +594,10 @@ function getDefaultTitle(type) {
     tag_declined: '❌ Tag Declined',
     badge_suggestion: '🏅 New Badge',
     miss_you: '❤️ Someone Misses You',
+    friend_request: '👋 Friend Request',
+    friend_accepted: '✅ Request Accepted',
+    group_message: '👥 Group Message',
+    poll_vote: '📊 Poll Vote',
   };
   return titles[type] || '🔔 Notification';
 }
@@ -524,6 +639,10 @@ function getDefaultBody(notif) {
     tag_declined: `${name} declined your tag.`,
     badge_suggestion: `${name} suggested a new title for you.`,
     miss_you: `${name} misses you ❤️🥺`,
+    friend_request: `${name} sent you a friend request.`,
+    friend_accepted: `${name} accepted your friend request.`,
+    group_message: `${name} sent a message to the group.`,
+    poll_vote: `${name} voted in your poll.`,
   };
   return bodies[notif.type] || notif.message || 'New notification';
 }

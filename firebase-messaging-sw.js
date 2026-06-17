@@ -136,7 +136,7 @@ self.addEventListener('fetch', (e) => {
 // ===== FCM BACKGROUND MESSAGE HANDLER =====
 // Handles messages when app is closed, backgrounded, or phone is locked
 messaging.onBackgroundMessage((payload) => {
-  console.log('[FCM-SW] Background message:', payload);
+  console.log('Background notification received.', payload);
 
   const notifData = payload.notification || {};
   const data = payload.data || {};

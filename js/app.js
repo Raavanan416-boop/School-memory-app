@@ -949,15 +949,17 @@ function startChatBadgeListener() {
     );
 
     unsubChatBadge = onSnapshot(q, (snap) => {
-      let totalUnread = 0;
+      let unreadConversations = 0;
 
       snap.forEach(d => {
         const data = d.data();
         const unread = data.unreadCount?.[uid] || 0;
-        totalUnread += unread;
+        if (unread > 0) {
+          unreadConversations++;
+        }
       });
 
-      updateChatBadge(totalUnread);
+      updateChatBadge(unreadConversations);
     }, (err) => {
       console.warn('[ChatBadge] Listener error:', err);
     });

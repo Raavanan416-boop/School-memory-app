@@ -473,31 +473,51 @@ img { -webkit-user-drag: none; user-drag: none; }
   cursor: pointer; transition: all 0.2s; flex-shrink: 0;
 }
 .voice-record-btn:active { transform: scale(0.9); }
-.voice-record-btn.recording {
-  background: #ef4444;
-  animation: recordPulse 1s ease-in-out infinite;
-}
-@keyframes recordPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
-  50% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
-}
-.voice-recording-bar {
+
+/* Recording UI (Step 1) */
+.voice-recording-ui {
   display: flex; align-items: center; gap: 8px;
-  flex: 1; padding: 8px 12px;
+  flex: 1; padding: 6px 12px;
   background: rgba(239, 68, 68, 0.08); border-radius: 20px;
 }
 .voice-recording-dot {
-  width: 8px; height: 8px; border-radius: 50%;
+  width: 10px; height: 10px; border-radius: 50%;
   background: #ef4444; animation: recordPulse 1s ease-in-out infinite;
+}
+@keyframes recordPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+}
+.voice-recording-text {
+  font-size: 13px; font-weight: 600; color: #ef4444; margin-right: 4px;
 }
 .voice-recording-time {
   font-size: 13px; font-weight: 600; color: #ef4444;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: tabular-nums; flex: 1;
 }
-.voice-recording-cancel {
-  font-size: 12px; color: #9ca3af; cursor: pointer;
-  margin-left: auto;
+.voice-action-btn {
+  width: 32px; height: 32px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  border: none; cursor: pointer; transition: all 0.2s; flex-shrink: 0;
 }
+.voice-action-btn:active { transform: scale(0.9); }
+.voice-cancel-btn { background: rgba(0,0,0,0.05); color: #6b7280; font-size: 14px; }
+.voice-stop-btn { background: #ef4444; color: #fff; font-size: 14px; }
+
+/* Preview UI (Step 2) */
+.voice-preview-ui {
+  display: flex; align-items: center; gap: 8px;
+  flex: 1; padding: 6px 12px;
+  background: #f0f4f8; border-radius: 20px;
+  border: 1px solid rgba(30,58,95,0.1);
+}
+.voice-preview-info {
+  flex: 1; display: flex; flex-direction: column;
+}
+.voice-preview-title { font-size: 12px; font-weight: 600; color: #1e3a5f; display: flex; align-items: center; gap: 4px; }
+.voice-preview-duration { font-size: 10px; color: #6b7280; font-variant-numeric: tabular-nums; }
+.voice-preview-play-btn { background: #1e3a5f; color: #fff; font-size: 14px; }
+.voice-preview-delete-btn { background: rgba(239, 68, 68, 0.1); color: #ef4444; font-size: 14px; }
 
 /* ===== GROUP INFO MODAL ===== */
 .group-info-photo {

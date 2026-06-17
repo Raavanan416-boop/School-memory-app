@@ -15,6 +15,7 @@ let unsubMessages = null;
 let unsubTyping = null;
 let currentChatId = null;
 let chatViewOpen = false;
+let cachedAudioStream = null;
 
 export function destroyChat() {
   if (unsubChats) unsubChats();
@@ -37,6 +38,13 @@ export async function renderChat(container, data) {
   router.registerDestroy('chat', destroyChat);
   destroyChat();
   chatContainer = container;
+
+  // Preload microphone for instant voice notes
+  if (!cachedAudioStream && navigator.mediaDevices) {
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then(stream => { cachedAudioStream = stream; })
+      .catch(err => { console.log('Mic preload ignored/denied'); });
+  }
 
   container.innerHTML = `
     <section class="px-4 pt-4" id="chat-section">
@@ -1011,61 +1019,143 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false, fro
   let audioChunks = [];
   let recordTimer = null;
   let recordSeconds = 0;
-  
+  let activeRecording = false;
+  let previewBlob = null;
+  let previewAudioUrl = null;
+  let previewAudioObj = null;
+
+  const resetRecordingUI = () => {
+    activeRecording = false;
+    msgInput.style.display = '';
+    attachBtn.style.display = '';
+    voiceBtn.classList.remove('recording');
+    const recBar = chatView.querySelector('.voice-recording-ui');
+    if (recBar) recBar.remove();
+    const previewBar = chatView.querySelector('.voice-preview-ui');
+    if (previewBar) previewBar.remove();
+    clearInterval(recordTimer);
+    if (previewAudioObj) {
+      previewAudioObj.pause();
+      previewAudioObj = null;
+    }
+  };
+
   const startRecording = async () => {
+    if (activeRecording) {
+      showToast('Finish or delete current recording first.', 'warning');
+      return;
+    }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorder = new MediaRecorder(stream);
+      if (!cachedAudioStream) {
+        cachedAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
+      mediaRecorder = new MediaRecorder(cachedAudioStream);
       audioChunks = [];
+      activeRecording = true;
       
       mediaRecorder.ondataavailable = e => {
         if (e.data.size > 0) audioChunks.push(e.data);
       };
       
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-        stream.getTracks().forEach(t => t.stop());
-        
-        // Hide recording UI
-        const recBar = chatView.querySelector('.voice-recording-bar');
-        if (recBar) recBar.remove();
-        msgInput.style.display = '';
-        attachBtn.style.display = '';
-        voiceBtn.classList.remove('recording');
+        // Do NOT stop tracks to reuse the cached stream
         clearInterval(recordTimer);
         
-        if (recordSeconds < 1) return; // Too short
-
-        try {
-          showToast('Sending voice message...', 'info');
-          const res = await uploadMedia(audioBlob, 'raw');
-          const audioUrl = res.url;
-
-          const msgData = {
-            audioUrl,
-            duration: recordSeconds,
-            senderId: authManager.currentUser.uid,
-            senderName: authManager.userData?.fullName || 'Unknown',
-            createdAt: serverTimestamp(),
-            status: 'sent'
-          };
-          
-          await addDoc(collection(db, 'chats', currentChatId, 'messages'), msgData);
-          await updateDoc(doc(db, 'chats', currentChatId), {
-            lastMessage: '🎤 Voice message',
-            lastMessageAt: serverTimestamp()
-          });
-
-          if (otherUid) {
-            await updateDoc(doc(db, 'chats', currentChatId), {
-              [`unreadCount.${otherUid}`]: increment(1)
-            });
-            createNotification('chat_message', otherUid, { chatId: currentChatId, message: '🎤 Voice message', messagePreview: '🎤 Voice message' });
-          }
-        } catch (err) {
-          console.error(err);
-          showToast('Failed to send voice message', 'error');
+        // Hide recording UI
+        const recBar = chatView.querySelector('.voice-recording-ui');
+        if (recBar) recBar.remove();
+        voiceBtn.classList.remove('recording');
+        
+        if (recordSeconds < 1) {
+          resetRecordingUI();
+          return; // Too short
         }
+
+        previewBlob = new Blob(audioChunks, { type: 'audio/webm' });
+        previewAudioUrl = URL.createObjectURL(previewBlob);
+
+        // Show Preview UI (Step 2)
+        const previewBar = document.createElement('div');
+        previewBar.className = 'voice-preview-ui';
+        
+        const durationStr = `${Math.floor(recordSeconds / 60)}:${(recordSeconds % 60).toString().padStart(2, '0')}`;
+        
+        previewBar.innerHTML = `
+          <button class="voice-action-btn voice-preview-play-btn" title="Play">▶</button>
+          <div class="voice-preview-info">
+            <span class="voice-preview-title">🎵 Voice Note</span>
+            <span class="voice-preview-duration">Duration: ${durationStr}</span>
+          </div>
+          <button class="voice-action-btn voice-preview-delete-btn" title="Delete">🗑</button>
+          <button class="voice-action-btn voice-preview-send-btn flex items-center justify-center" title="Send" style="background:#2563eb;color:#fff;">
+            <svg class="w-4 h-4 translate-x-[1px]" fill="currentColor" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+          </button>
+        `;
+        msgInput.parentNode.insertBefore(previewBar, msgInput);
+
+        const playBtn = previewBar.querySelector('.voice-preview-play-btn');
+        let isPlaying = false;
+        
+        playBtn.addEventListener('click', () => {
+          if (!previewAudioObj) {
+            previewAudioObj = new Audio(previewAudioUrl);
+            previewAudioObj.onended = () => {
+              isPlaying = false;
+              playBtn.textContent = '▶';
+            };
+          }
+          if (isPlaying) {
+            previewAudioObj.pause();
+            playBtn.textContent = '▶';
+          } else {
+            document.querySelectorAll('audio').forEach(a => a.pause());
+            document.querySelectorAll('.voice-play-btn').forEach(b => b.textContent = '▶️');
+            previewAudioObj.play().catch(console.error);
+            playBtn.textContent = '⏸';
+          }
+          isPlaying = !isPlaying;
+        });
+
+        previewBar.querySelector('.voice-preview-delete-btn').addEventListener('click', () => {
+          resetRecordingUI();
+        });
+
+        previewBar.querySelector('.voice-preview-send-btn').addEventListener('click', async () => {
+          const finalSeconds = recordSeconds;
+          const blobToUpload = previewBlob;
+          resetRecordingUI();
+          
+          try {
+            showToast('Sending voice message...', 'info');
+            const res = await uploadMedia(blobToUpload, 'raw');
+            const audioUrl = res.url;
+
+            const msgData = {
+              audioUrl,
+              duration: finalSeconds,
+              senderId: authManager.currentUser.uid,
+              senderName: authManager.userData?.fullName || 'Unknown',
+              createdAt: serverTimestamp(),
+              status: 'sent'
+            };
+            
+            await addDoc(collection(db, 'chats', currentChatId, 'messages'), msgData);
+            await updateDoc(doc(db, 'chats', currentChatId), {
+              lastMessage: '🎤 Voice message',
+              lastMessageAt: serverTimestamp()
+            });
+
+            if (otherUid) {
+              await updateDoc(doc(db, 'chats', currentChatId), {
+                [`unreadCount.${otherUid}`]: increment(1)
+              });
+              createNotification('chat_message', otherUid, { chatId: currentChatId, message: '🎤 Voice message', messagePreview: '🎤 Voice message' });
+            }
+          } catch (err) {
+            console.error(err);
+            showToast('Failed to send voice message', 'error');
+          }
+        });
       };
       
       mediaRecorder.start();
@@ -1076,13 +1166,27 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false, fro
       voiceBtn.classList.add('recording');
       
       const recBar = document.createElement('div');
-      recBar.className = 'voice-recording-bar';
+      recBar.className = 'voice-recording-ui';
       recBar.innerHTML = `
         <div class="voice-recording-dot"></div>
+        <span class="voice-recording-text">Recording...</span>
         <span class="voice-recording-time">0:00</span>
-        <span class="voice-recording-cancel">Slide to cancel ⟨</span>
+        <button class="voice-action-btn voice-cancel-btn" title="Cancel">❌</button>
+        <button class="voice-action-btn voice-stop-btn" title="Stop">⏹</button>
       `;
       msgInput.parentNode.insertBefore(recBar, msgInput);
+
+      recBar.querySelector('.voice-cancel-btn').addEventListener('click', () => {
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+          recordSeconds = 0; // force too short to drop it
+          mediaRecorder.stop();
+        }
+      });
+      recBar.querySelector('.voice-stop-btn').addEventListener('click', () => {
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+          mediaRecorder.stop();
+        }
+      });
       
       recordSeconds = 0;
       recordTimer = setInterval(() => {
@@ -1095,50 +1199,14 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false, fro
     } catch (e) {
       console.error('Microphone error:', e);
       showToast('Microphone access denied', 'error');
+      activeRecording = false;
     }
   };
 
-  const stopRecording = () => {
-    if (mediaRecorder && mediaRecorder.state === 'recording') {
-      mediaRecorder.stop();
-    }
-  };
-
-  // Touch and mouse events for recording
-  let isRecording = false;
-  let startX = 0;
-
-  voiceBtn?.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    isRecording = true;
-    startX = e.touches[0].clientX;
+  // Simple click to start recording
+  voiceBtn?.addEventListener('click', () => {
     startRecording();
-  }, { passive: false });
-
-  voiceBtn?.addEventListener('touchmove', (e) => {
-    if (!isRecording) return;
-    const currentX = e.touches[0].clientX;
-    if (startX - currentX > 50) { // Cancel on slide left
-      isRecording = false;
-      if (mediaRecorder && mediaRecorder.state === 'recording') {
-        recordSeconds = 0; // Force cancel
-        mediaRecorder.stop();
-      }
-    }
   });
-
-  voiceBtn?.addEventListener('touchend', (e) => {
-    e.preventDefault();
-    if (isRecording) {
-      isRecording = false;
-      stopRecording();
-    }
-  });
-  
-  // Mouse fallback
-  voiceBtn?.addEventListener('mousedown', () => { isRecording = true; startRecording(); });
-  voiceBtn?.addEventListener('mouseup', () => { if (isRecording) { isRecording = false; stopRecording(); }});
-  voiceBtn?.addEventListener('mouseleave', () => { if (isRecording) { isRecording = false; recordSeconds = 0; stopRecording(); }});
 
   const sendMessage = async () => {
     const text = msgInput.value.trim();

@@ -705,6 +705,9 @@ class NotificationManager {
     try {
       this._ringtoneCtx = new (window.AudioContext || window.webkitAudioContext)();
       const ctx = this._ringtoneCtx;
+      
+      // Attempt to resume immediately in case it was suspended
+      ctx.resume().catch(() => {});
 
       const playRingCycle = () => {
         if (!this._ringtoneCtx) return;
@@ -737,6 +740,48 @@ class NotificationManager {
       playRingCycle();
       this._ringtoneRepeat = setInterval(playRingCycle, 2000);
     } catch (e) { /* Web Audio not supported */ }
+  }
+
+  // ===== OUTGOING DIAL TONE =====
+  playDialTone() {
+    this.stopIncomingRingtone();
+    try {
+      this._ringtoneCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = this._ringtoneCtx;
+      ctx.resume().catch(() => {});
+
+      const playDialCycle = () => {
+        if (!this._ringtoneCtx) return;
+        const now = ctx.currentTime;
+        
+        // Classic European/UK dial ringing tone: 400Hz + 450Hz, 0.4s on, 0.2s off, 0.4s on, 2s off
+        [400, 450].forEach(freq => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = freq;
+          
+          gain.gain.setValueAtTime(0, now);
+          // First ring
+          gain.gain.linearRampToValueAtTime(0.1, now + 0.05);
+          gain.gain.setValueAtTime(0.1, now + 0.35);
+          gain.gain.linearRampToValueAtTime(0, now + 0.4);
+          // Second ring
+          gain.gain.setValueAtTime(0, now + 0.6);
+          gain.gain.linearRampToValueAtTime(0.1, now + 0.65);
+          gain.gain.setValueAtTime(0.1, now + 0.95);
+          gain.gain.linearRampToValueAtTime(0, now + 1.0);
+          
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now);
+          osc.stop(now + 1.0);
+        });
+      };
+      
+      playDialCycle();
+      this._ringtoneRepeat = setInterval(playDialCycle, 3000);
+    } catch (e) {}
   }
 
   // Stop the incoming call ringtone
@@ -835,6 +880,33 @@ class NotificationManager {
         deleteDoc(doc(db, 'notifications', n.id))
       ));
     } catch (e) { console.error('Delete all notifications error:', e); }
+  }
+
+  async clearChatNotifications(chatId) {
+    if (!authManager.currentUser || !chatId) return;
+    try {
+      const q = query(
+        collection(db, 'notifications'),
+        where('userId', '==', authManager.currentUser.uid),
+        where('type', '==', 'chat_message'),
+        where('chatId', '==', chatId)
+      );
+      const snap = await getDocs(q);
+      await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
+    } catch (e) { console.error('Clear chat notifs error:', e); }
+  }
+
+  async clearCallNotification(callId) {
+    if (!authManager.currentUser || !callId) return;
+    try {
+      const q = query(
+        collection(db, 'notifications'),
+        where('userId', '==', authManager.currentUser.uid),
+        where('callId', '==', callId)
+      );
+      const snap = await getDocs(q);
+      await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
+    } catch (e) { console.error('Clear call notifs error:', e); }
   }
 
   // ===== CREATE NOTIFICATION =====

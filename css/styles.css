@@ -7165,3 +7165,12 @@ body > * {
   0% { transform: translateY(0) scale(1) rotate(0deg); opacity: 0.8; } 
   100% { transform: translateY(-100vh) scale(0.3) rotate(360deg); opacity: 0; } 
 }
+
+/* ===== PROFILE MENU SCROLL FIX ===== */
+.menu-scroll-container {
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 20px;
+}
+

@@ -923,33 +923,15 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false, fro
     }
   });
 
-  // Clear unread count
-  if (authManager.currentUser) {
-    updateDoc(doc(db, 'chats', chatId), {
-      [`unreadCount.${authManager.currentUser.uid}`]: 0
-    }).catch(() => {});
-    
-    // Also mark global chat push notifications as read
-    if (otherUid) {
-      const q = query(
-        collection(db, 'notifications'), 
-        where('userId', '==', authManager.currentUser.uid), 
-        where('fromId', '==', otherUid),
-        where('type', '==', 'chat_message'),
-        where('read', '==', false)
-      );
-      getDocs(q).then(snap => {
-        snap.forEach(d => {
-          updateDoc(doc(db, 'notifications', d.id), { read: true }).catch(() => {});
-          // Decrement global badge immediately
-          if (notificationManager.unreadCount > 0) {
-            notificationManager.unreadCount--;
-            notificationManager._updateBadge();
-          }
-        });
-      }).catch(err => console.warn('Failed to clear chat notifs:', err));
+    // Clear unread count in chat
+    if (authManager.currentUser) {
+      updateDoc(doc(db, 'chats', chatId), {
+        [`unreadCount.${authManager.currentUser.uid}`]: 0
+      }).catch(() => {});
+      
+      // Also strictly delete global chat push notifications for this chat to instantly update real-time counters
+      notificationManager.clearChatNotifications(chatId);
     }
-  }
 
   // Send message
   const sendBtn = chatView.querySelector('#send-msg-btn') || document.querySelector('#send-msg-btn');

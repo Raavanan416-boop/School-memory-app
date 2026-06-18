@@ -1,15 +1,15 @@
 // Presence system — Real-time online status & typing indicators
-import { db, doc, updateDoc, setDoc, onSnapshot, serverTimestamp, deleteField } from './firebase-config.js';
+import { db, rtdb, ref, rtdbSet, onValue, onDisconnect, rtdbServerTimestamp, doc, updateDoc, setDoc, serverTimestamp, deleteField } from './firebase-config.js';
 import { authManager } from './auth.js';
 
 class PresenceManager {
   constructor() {
     this.typingTimers = {};
-    // Firestore unsubscribe functions keyed by userId
-    this._firestoreUnsubs = {};
-    // Current callbacks keyed by userId — always updated, even if Firestore listener already exists
+    // RTDB unsubscribe functions keyed by userId
+    this._rtdbUnsubs = {};
+    // Current callbacks keyed by userId — always updated
     this._callbacks = {};
-    // Latest status cache keyed by userId — so new callbacks get instant data
+    // Latest status cache keyed by userId
     this._statusCache = {};
     this._boundBeforeUnload = null;
     this._boundVisChange = null;
@@ -20,11 +20,27 @@ class PresenceManager {
     if (!authManager.currentUser) return;
     try {
       const uid = authManager.currentUser.uid;
+      // Setup RTDB presence
+      if (rtdb) {
+        const myConnectionsRef = ref(rtdb, `presence/${uid}/online`);
+        const lastOnlineRef = ref(rtdb, `presence/${uid}/lastSeen`);
+        const connectedRef = ref(rtdb, '.info/connected');
+
+        onValue(connectedRef, (snap) => {
+          if (snap.val() === true) {
+            rtdbSet(myConnectionsRef, true);
+            onDisconnect(myConnectionsRef).set(false);
+            onDisconnect(lastOnlineRef).set(rtdbServerTimestamp());
+          }
+        });
+      }
+      
+      // Update Firestore for legacy queries
       await setDoc(doc(db, 'presence', uid), {
         online: true,
         lastSeen: serverTimestamp()
       }, { merge: true });
-    } catch (e) { /* ignore */ }
+    } catch (e) { console.error('Presence setOnline error:', e); }
   }
 
   // Set current user offline
@@ -32,6 +48,13 @@ class PresenceManager {
     if (!authManager.currentUser) return;
     try {
       const uid = authManager.currentUser.uid;
+      if (rtdb) {
+        const myConnectionsRef = ref(rtdb, `presence/${uid}/online`);
+        const lastOnlineRef = ref(rtdb, `presence/${uid}/lastSeen`);
+        rtdbSet(myConnectionsRef, false);
+        rtdbSet(lastOnlineRef, rtdbServerTimestamp());
+      }
+      
       await setDoc(doc(db, 'presence', uid), {
         online: false,
         lastSeen: serverTimestamp()
@@ -101,45 +124,37 @@ class PresenceManager {
   }
 
   /**
-   * Watch a user's online status (from dedicated presence collection).
-   * 
-   * KEY FIX: The callback is ALWAYS updated even if a Firestore listener
-   * already exists for this userId. This is critical because the chat list
-   * re-renders on every onSnapshot update (innerHTML = ''), destroying DOM.
-   * The new callback references the new DOM elements, so the existing
-   * Firestore listener must invoke the LATEST callback.
+   * Watch a user's online status using RTDB.
    */
   watchUser(userId, callback) {
-    // Always update the callback reference
     this._callbacks[userId] = callback;
 
-    // If we already have cached status, invoke the new callback immediately
-    // so the UI reflects the current state right away (no flicker)
     if (this._statusCache[userId]) {
       callback(this._statusCache[userId]);
     }
 
-    // Only create ONE Firestore listener per userId
-    if (this._firestoreUnsubs[userId]) return;
+    if (this._rtdbUnsubs[userId]) return;
 
-    this._firestoreUnsubs[userId] = onSnapshot(doc(db, 'presence', userId), (snap) => {
+    if (!rtdb) return;
+
+    const userPresenceRef = ref(rtdb, `presence/${userId}`);
+    this._rtdbUnsubs[userId] = onValue(userPresenceRef, (snap) => {
       let status;
       if (snap.exists()) {
-        const data = snap.data();
-        const lastSeen = data.lastSeen?.toDate ? data.lastSeen.toDate() : null;
+        const data = snap.val();
+        const lastSeen = data.lastSeen ? new Date(data.lastSeen) : null;
         let isOnline = data.online || false;
-        // Staleness check: if heartbeat hasn't been received in 2.5 min,
-        // the user likely crashed/force-closed — treat as offline
-        if (isOnline && lastSeen && (Date.now() - lastSeen.getTime() > 150000)) {
+        
+        // Safety check if heartbeat is extremely stale (e.g. 5 mins)
+        if (isOnline && lastSeen && (Date.now() - lastSeen.getTime() > 300000)) {
           isOnline = false;
         }
         status = { online: isOnline, lastSeen };
       } else {
         status = { online: false, lastSeen: null };
       }
-      // Cache the latest status
+      
       this._statusCache[userId] = status;
-      // Always invoke the LATEST callback (not the stale one from initial registration)
       if (this._callbacks[userId]) {
         this._callbacks[userId](status);
       }
@@ -161,9 +176,9 @@ class PresenceManager {
 
   // Stop watching a user
   unwatchUser(userId) {
-    if (this._firestoreUnsubs[userId]) {
-      this._firestoreUnsubs[userId]();
-      delete this._firestoreUnsubs[userId];
+    if (this._rtdbUnsubs[userId]) {
+      this._rtdbUnsubs[userId]();
+      delete this._rtdbUnsubs[userId];
     }
     delete this._callbacks[userId];
     delete this._statusCache[userId];
@@ -171,8 +186,8 @@ class PresenceManager {
 
   // Cleanup all listeners
   cleanup() {
-    Object.values(this._firestoreUnsubs).forEach(unsub => unsub());
-    this._firestoreUnsubs = {};
+    Object.values(this._rtdbUnsubs).forEach(unsub => unsub());
+    this._rtdbUnsubs = {};
     this._callbacks = {};
     this._statusCache = {};
     Object.values(this.typingTimers).forEach(t => clearTimeout(t));

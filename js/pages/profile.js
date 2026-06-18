@@ -1,5 +1,5 @@
 // Profile page — Instagram-style with cover photo, tabs, hidden settings menu
-import { db, doc, getDoc, getDocs, collection, query, where, orderBy, addDoc, onSnapshot, serverTimestamp, arrayUnion, arrayRemove, updateDoc, deleteDoc } from '../firebase-config.js';
+import { db, doc, getDoc, getDocs, collection, query, where, orderBy, addDoc, onSnapshot, serverTimestamp, arrayUnion, arrayRemove, updateDoc, deleteDoc, rtdb, ref, onValue } from '../firebase-config.js';
 import { uploadMedia } from '../services/cloudinary.js';
 import { sanitizeHTML, formatNumber, timeAgo, showToast, EMOTIONAL_QUOTES } from '../utils.js';
 import { userCache } from '../services/userCache.js';
@@ -163,7 +163,7 @@ export async function renderProfile(container, data = null) {
       ? `<img src="${user.profilePic}" class="w-full h-full object-cover" alt="${sanitizeHTML(user.fullName || '')}" id="profile-pic-img" data-user-pic="${user.id}"/>`
       : `<div class="w-full h-full flex items-center justify-center text-white text-4xl font-bold" data-user-pic="${user.id}">${(user.fullName || '?')[0]}</div>`}
           </div>
-          <div class="absolute bottom-1 right-1 w-5 h-5 rounded-full ${user.online ? 'bg-green-400' : 'bg-gray-300'} border-3 border-white" id="profile-online-dot"></div>
+          ${viewingOther ? `<div class="absolute bottom-1 right-1 w-5 h-5 rounded-full ${user.online ? 'bg-green-400' : 'bg-gray-300'} border-3 border-white" id="profile-online-dot"></div>` : ''}
           ${isBirthday ? '<div class="absolute -top-1 -right-1"><span class="birthday-badge">🎂</span></div>' : ''}
         </div>
 
@@ -657,13 +657,15 @@ export async function renderProfile(container, data = null) {
   // Real-time presence watcher for other user profiles
   if (viewingOther && data?.userId) {
     if (profilePresenceUnsub) { profilePresenceUnsub(); profilePresenceUnsub = null; }
-    profilePresenceUnsub = onSnapshot(doc(db, 'presence', data.userId), (snap) => {
-      const dot = container.querySelector('#profile-online-dot');
-      if (dot && snap.exists()) {
-        const isOnline = snap.data().online || false;
-        dot.className = `absolute bottom-1 right-1 w-5 h-5 rounded-full ${isOnline ? 'bg-green-400' : 'bg-gray-300'} border-3 border-white`;
-      }
-    });
+    if (rtdb) {
+      profilePresenceUnsub = onValue(ref(rtdb, `presence/${data.userId}`), (snap) => {
+        const dot = container.querySelector('#profile-online-dot');
+        if (dot && snap.exists()) {
+          const isOnline = snap.val().online || false;
+          dot.className = `absolute bottom-1 right-1 w-5 h-5 rounded-full ${isOnline ? 'bg-green-400' : 'bg-gray-300'} border-3 border-white`;
+        }
+      });
+    }
   }
 
   // ===== MISS YOU BUTTON =====
@@ -1110,18 +1112,15 @@ async function showFriendsListModal(uid) {
     // Real-time presence watchers for each friend
     cleanupFriendPresence();
     friends.forEach(f => {
-      const unsub = onSnapshot(doc(db, 'presence', f.id), (snap) => {
+      presenceManager.watchUser(f.id, (status) => {
         const dot = modal.body.querySelector(`#friend-dot-${f.id}`);
         const statusEl = modal.body.querySelector(`#friend-status-${f.id}`);
-        if (snap.exists()) {
-          const isOnline = snap.data().online || false;
-          if (dot) dot.classList.toggle('online', isOnline);
-          if (statusEl) {
-            statusEl.textContent = `${f.rollNumber || ''} · ${isOnline ? '🟢 Online' : presenceManager.getLastSeenText({ online: false, lastSeen: snap.data().lastSeen?.toDate ? snap.data().lastSeen.toDate() : null })}`;
-          }
+        if (dot) dot.classList.toggle('online', status.online);
+        if (statusEl) {
+          statusEl.textContent = `${f.rollNumber || ''} · ${status.online ? '🟢 Online' : presenceManager.getLastSeenText(status)}`;
         }
       });
-      friendPresenceUnsubs.push(unsub);
+      friendPresenceUnsubs.push(() => presenceManager.unwatchUser(f.id));
     });
   } catch (e) {
     console.error('Friends list error:', e);

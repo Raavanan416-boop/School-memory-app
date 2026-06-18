@@ -8,6 +8,8 @@ import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager
   arrayUnion, arrayRemove, increment, startAfter, endAt, writeBatch, deleteField,
   startAt, endBefore, getCountFromServer, runTransaction }
   from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import { getDatabase, ref, onDisconnect, set as rtdbSet, onValue, serverTimestamp as rtdbServerTimestamp, get as rtdbGet }
+  from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js';
 
 
 // ⚠️ REPLACE with your Firebase project config
@@ -26,14 +28,16 @@ const auth = getAuth(app);
 const db = initializeFirestore(app, {
   localCache: persistentLocalCache({tabManager: persistentMultipleTabManager()})
 });
+const rtdb = getDatabase(app);
 
 
 export {
-  app, auth, db,
+  app, auth, db, rtdb,
   signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail,
   updatePassword, EmailAuthProvider, reauthenticateWithCredential,
   collection, doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc,
   query, where, orderBy, limit, limitToLast, onSnapshot, serverTimestamp, Timestamp,
   arrayUnion, arrayRemove, increment, startAfter, endAt, writeBatch, deleteField,
-  startAt, endBefore, getCountFromServer, runTransaction
+  startAt, endBefore, getCountFromServer, runTransaction,
+  ref, onDisconnect, rtdbSet, onValue, rtdbServerTimestamp, rtdbGet
 };

@@ -1,5 +1,5 @@
 // Search page — Empty initial state, live search with results only after typing
-import { db, collection, getDocs, query, where, orderBy, limit, doc, onSnapshot } from '../firebase-config.js';
+import { db, collection, getDocs, query, where, orderBy, limit, doc, onSnapshot, rtdb, ref, onValue } from '../firebase-config.js';
 import { sanitizeHTML, debounce } from '../utils.js';
 import { authManager } from '../auth.js';
 import { router } from '../router.js';
@@ -235,10 +235,11 @@ function performSearch(container, searchQuery, tab) {
       return dName.includes(q) || uName.includes(q) || rNum.includes(q);
     });
     filtered.forEach(u => {
-      const unsub = onSnapshot(doc(db, 'presence', u.id), (snap) => {
+      if (!rtdb) return;
+      const unsub = onValue(ref(rtdb, `presence/${u.id}`), (snap) => {
         const dot = results.querySelector(`#search-presence-${u.id}`);
         if (dot && snap.exists()) {
-          dot.classList.toggle('online', snap.data().online || false);
+          dot.classList.toggle('online', snap.val().online || false);
         }
       });
       searchPresenceUnsubs.push(unsub);
@@ -280,7 +281,7 @@ function postSearchCard(p) {
   const authorName = cached.fullName || p.authorName || '';
 
   return `
-    <div class="card p-3 flex items-center gap-3">
+    <div class="card p-3 flex items-center gap-3 post-search-card cursor-pointer hover:bg-cream-100 transition-colors" data-post-id="${p.id}">
       ${p.imageUrl ? `<img src="${p.imageUrl}" class="w-14 h-14 rounded-lg object-cover flex-shrink-0" alt="" loading="lazy"/>` : `<div class="w-14 h-14 rounded-lg bg-cream-200 flex items-center justify-center text-2xl flex-shrink-0">📝</div>`}
       <div class="flex-1 min-w-0">
         <p class="text-sm text-navy-800 truncate">${sanitizeHTML(p.caption || 'Memory')}</p>
@@ -302,6 +303,13 @@ function bindUserCardEvents(container) {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       router.navigate('chat', { userId: btn.dataset.uid, userName: btn.dataset.name });
+    });
+  });
+
+  container.querySelectorAll('.post-search-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const postId = card.dataset.postId;
+      router.navigate('home', { postId: postId });
     });
   });
 }

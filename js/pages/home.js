@@ -45,7 +45,7 @@ export function destroyHome() {
   isFirstLoad = true;
 }
 
-export async function renderHome(container) {
+export async function renderHome(container, data = null) {
   router.registerDestroy('home', destroyHome);
   destroyHome();
 
@@ -140,7 +140,7 @@ export async function renderHome(container) {
   });
 
   // Load feed IMMEDIATELY
-  loadFeed(container);
+  loadFeed(container, data);
 
   // Refresh
   container.querySelector('#refresh-feed')?.addEventListener('click', () => {
@@ -283,7 +283,7 @@ async function loadThrowback(container) {
 }
 
 let isFirstLoad = true;
-function loadFeed(container) {
+function loadFeed(container, data = null) {
   const feedEl = container.querySelector('#feed-container');
   try {
     const q = query(collection(db, 'posts'), orderBy('createdAt', 'desc'), limit(10));
@@ -373,6 +373,35 @@ function loadFeed(container) {
 
       if (snap.size >= 10 && feedEl.children.length >= 10) {
         container.querySelector('#load-more-container')?.classList.remove('hidden');
+      }
+
+      // If data.postId exists, scroll to it
+      if (data && data.postId) {
+        const targetId = data.postId;
+        data.postId = null; // Prevent re-scrolling on future snapshot updates
+        setTimeout(async () => {
+          let targetCard = document.getElementById(`post-${targetId}`);
+          if (!targetCard) {
+            // fetch it specifically
+            const { getDoc, doc } = await import('../firebase-config.js');
+            const pDoc = await getDoc(doc(db, 'posts', targetId));
+            if (pDoc.exists()) {
+               const pData = pDoc.data();
+               targetCard = createPostCard({ id: pDoc.id, ...pData });
+               feedEl.insertBefore(targetCard, feedEl.firstChild);
+            }
+          }
+          if (targetCard) {
+            targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            // Flash highlight
+            const originalBg = targetCard.style.backgroundColor;
+            targetCard.style.transition = 'background-color 0.5s ease';
+            targetCard.style.backgroundColor = '#fffbeb'; // cream-100
+            setTimeout(() => {
+              targetCard.style.backgroundColor = originalBg;
+            }, 2000);
+          }
+        }, 300);
       }
     }, () => {
       feedEl.innerHTML = `

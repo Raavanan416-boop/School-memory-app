@@ -678,6 +678,13 @@ class CallManager {
     this._remoteDescSet = false;
     this._pendingCandidates = [];
 
+    // Safety: Ensure hardware streams are released even if error occurred
+    if (this.localStream) {
+      this.localStream.getTracks().forEach(track => track.stop());
+      this.localStream = null;
+    }
+    this.remoteStreams = {};
+
     clearTimeout(this._ringTimeout);
     this._ringTimeout = null;
     clearTimeout(this._connectionCheckTimer);

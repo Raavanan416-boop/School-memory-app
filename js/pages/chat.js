@@ -15,7 +15,6 @@ let unsubMessages = null;
 let unsubTyping = null;
 let currentChatId = null;
 let chatViewOpen = false;
-let cachedAudioStream = null;
 
 export function destroyChat() {
   if (unsubChats) unsubChats();
@@ -38,13 +37,6 @@ export async function renderChat(container, data) {
   router.registerDestroy('chat', destroyChat);
   destroyChat();
   chatContainer = container;
-
-  // Preload microphone for instant voice notes
-  if (!cachedAudioStream && navigator.mediaDevices) {
-    navigator.mediaDevices.getUserMedia({ audio: true })
-      .then(stream => { cachedAudioStream = stream; })
-      .catch(err => { console.log('Mic preload ignored/denied'); });
-  }
 
   container.innerHTML = `
     <section class="px-4 pt-4" id="chat-section">
@@ -1046,10 +1038,14 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false, fro
       return;
     }
     try {
-      if (!cachedAudioStream) {
-        cachedAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      let currentStream;
+      try {
+        currentStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (err) {
+        showToast('Microphone access denied', 'error');
+        return;
       }
-      mediaRecorder = new MediaRecorder(cachedAudioStream);
+      mediaRecorder = new MediaRecorder(currentStream);
       audioChunks = [];
       activeRecording = true;
       
@@ -1058,7 +1054,10 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false, fro
       };
       
       mediaRecorder.onstop = async () => {
-        // Do NOT stop tracks to reuse the cached stream
+        // Explicitly stop all hardware tracks to release microphone
+        if (currentStream) {
+          currentStream.getTracks().forEach(track => track.stop());
+        }
         clearInterval(recordTimer);
         
         // Hide recording UI

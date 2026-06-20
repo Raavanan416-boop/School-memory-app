@@ -22,6 +22,7 @@ const firebaseConfig = {
   appId: "1:310068830991:web:3c89f62e765843fd4c147a"
 };
 
+firebase.initializeApp(firebaseConfig);
 const messaging = firebase.messaging();
 
 // ===== CACHING (migrated from sw.js) =====

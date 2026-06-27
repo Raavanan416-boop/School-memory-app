@@ -14,6 +14,19 @@ function cleanupListeners() {
   _activeListeners = [];
 }
 
+// ===== AVATAR HELPER =====
+function renderAvatar(u, imgClass, fallbackBgClass, fallbackTextClass) {
+  const dpUrl = u.profileImage || u.photoURL || u.profilePic || u.avatar;
+  const validUrl = dpUrl && dpUrl !== 'undefined' && dpUrl !== 'null' ? dpUrl : null;
+  const initialChar = (u.fullName || u.authorName || '?')[0].toUpperCase();
+  const fallbackHtml = `<div class="${imgClass} ${fallbackBgClass} ${fallbackTextClass} flex items-center justify-center font-bold">${initialChar}</div>`;
+  if (validUrl) {
+    const safeFallback = fallbackHtml.replace(/'/g, "\\'").replace(/"/g, "&quot;");
+    return `<img src="${validUrl}" loading="lazy" class="${imgClass} object-cover bg-gray-50" alt="${initialChar}" onerror="this.outerHTML='${safeFallback}'" />`;
+  }
+  return fallbackHtml;
+}
+
 // ===== CORE FILTER FUNCTIONS =====
 
 function filterUpcomingTenDays(users, maxDays = 10) {
@@ -153,9 +166,7 @@ function showGiftPointsModal(allUsers) {
       <div class="space-y-2 max-h-[300px] overflow-y-auto" id="gift-friends-list">
         ${friends.map(u => `
           <button class="gift-friend-btn card p-3 flex items-center gap-3 w-full text-left hover:shadow-md transition-all active:scale-[0.98]" data-uid="${u.id}" data-name="${sanitizeHTML(u.fullName || 'Unknown')}">
-            ${(u.photoURL && u.photoURL !== 'undefined') || (u.profilePic && u.profilePic !== 'undefined')
-              ? `<img src="${(u.photoURL && u.photoURL !== 'undefined' ? u.photoURL : u.profilePic)}" class="w-10 h-10 rounded-full object-cover border-2 border-white shadow-sm" alt=""/>`
-              : `<div class="w-10 h-10 rounded-full bg-navy-500 text-white flex items-center justify-center text-sm font-bold shadow-sm">${(u.fullName || '?')[0]}</div>`}
+            ${renderAvatar(u, 'w-10 h-10 rounded-full border-2 border-white shadow-sm', 'bg-navy-500', 'text-white text-sm')}
             <div class="flex-1 min-w-0">
               <p class="text-sm font-semibold text-navy-800 truncate bday-friend-name">${sanitizeHTML(u.fullName || 'Unknown')}</p>
               ${u.rollNumber ? `<p class="text-[11px] text-gray-500 font-medium mt-0.5 truncate bday-friend-roll">Roll: ${sanitizeHTML(u.rollNumber)}</p>` : ''}
@@ -407,11 +418,7 @@ export async function renderBirthday(container) {
                 <p class="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">${monthAbbr[idx]}</p>
                 <p class="text-lg font-bold text-navy-500">${monthUsers.length}</p>
                 <div class="flex justify-center gap-0.5 mt-1">
-                  ${monthUsers.slice(0, 4).map(u =>
-                    (u.photoURL && u.photoURL !== 'undefined') || (u.profilePic && u.profilePic !== 'undefined')
-                      ? `<img src="${(u.photoURL !== 'undefined' ? u.photoURL : u.profilePic)}" class="w-5 h-5 rounded-full object-cover border border-white" alt=""/>`
-                      : `<div class="w-5 h-5 rounded-full bg-navy-100 text-navy-600 flex items-center justify-center text-[8px] font-bold">${(u.fullName || '?')[0]}</div>`
-                  ).join('')}
+                  ${monthUsers.slice(0, 4).map(u => renderAvatar(u, 'w-5 h-5 rounded-full border border-white', 'bg-navy-100', 'text-navy-600 text-[8px]')).join('')}
                   ${monthUsers.length > 4 ? `<div class="w-5 h-5 rounded-full bg-cream-200 text-gray-500 flex items-center justify-center text-[8px]">+${monthUsers.length - 4}</div>` : ''}
                 </div>
               </button>
@@ -576,9 +583,7 @@ function renderBirthdayCard(u, showFullDate = false) {
 
   return `
     <div class="card p-3 flex items-center gap-3 hover:shadow-sm transition-shadow">
-      ${(u.photoURL && u.photoURL !== 'undefined') || (u.profilePic && u.profilePic !== 'undefined')
-        ? `<img src="${(u.photoURL && u.photoURL !== 'undefined' ? u.photoURL : u.profilePic)}" class="w-10 h-10 rounded-full object-cover border-2 border-white shadow-sm" alt=""/>`
-        : `<div class="w-10 h-10 rounded-full bg-navy-500 text-white flex items-center justify-center text-sm font-bold shadow-sm">${(u.fullName || '?')[0]}</div>`}
+      ${renderAvatar(u, 'w-10 h-10 rounded-full border-2 border-white shadow-sm', 'bg-navy-500', 'text-white text-sm')}
       <div class="flex-1 min-w-0">
         <p class="text-sm font-semibold text-navy-800">${sanitizeHTML(u.fullName || 'Unknown')}</p>
         <p class="text-xs text-gray-400">${dateStr}</p>
@@ -724,9 +729,7 @@ function showViewWishesModal(userId, userName) {
           return `
             <div class="card p-4 border border-pink-100 hover:border-pink-200 transition-all" style="animation: msgSlideIn 0.3s ease-out ${i * 0.08}s both;">
               <div class="flex items-start gap-3">
-                ${(w.authorPhoto)
-                  ? `<img src="${w.authorPhoto}" class="w-10 h-10 rounded-full object-cover border-2 border-pink-200 shadow-sm flex-shrink-0" alt=""/>`
-                  : `<div class="w-10 h-10 rounded-full bg-gradient-to-br from-pink-400 to-rose-500 text-white flex items-center justify-center text-sm font-bold shadow-sm flex-shrink-0">${(w.authorName || '?')[0]}</div>`}
+                ${renderAvatar({ photoURL: w.authorPhoto, fullName: w.authorName }, 'w-10 h-10 rounded-full border-2 border-pink-200 shadow-sm flex-shrink-0', 'bg-gradient-to-br from-pink-400 to-rose-500', 'text-white text-sm')}
                 <div class="flex-1 min-w-0">
                   <p class="text-sm font-semibold text-navy-800">${sanitizeHTML(w.authorName || 'Unknown')} ❤️</p>
                   <p class="text-sm text-navy-700 font-handwriting leading-relaxed mt-1">"${sanitizeHTML(w.message)}"</p>

@@ -25,8 +25,8 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const messaging = firebase.messaging();
 
-// ===== CACHING (migrated from sw.js) =====
-const CACHE_NAME = 'class-memories-v9';
+// ===== CACHING =====
+const CACHE_NAME = 'class-memories-v10';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -70,18 +70,31 @@ const STATIC_ASSETS = [
   '/manifest.json'
 ];
 
-// Install — cache all static assets
+// URLs that must NEVER be cached
+function shouldSkipCache(url) {
+  return url.includes('firebaseio.com') ||
+    url.includes('googleapis.com') ||
+    url.includes('gstatic.com') ||
+    url.includes('firebasestorage.app') ||
+    url.includes('fcm.googleapis.com') ||
+    url.includes('fcm/') ||
+    url.includes('identitytoolkit') ||
+    url.includes('securetoken');
+}
+
+// ===== INSTALL =====
 self.addEventListener('install', (e) => {
   console.log('[SW] Installing unified service worker...');
   e.waitUntil(
     caches.open(CACHE_NAME)
       .then(c => c.addAll(STATIC_ASSETS))
       .then(() => console.log('[SW] Static assets cached'))
+      .catch(err => console.warn('[SW] Cache addAll failed (non-fatal):', err.message))
   );
-  self.skipWaiting(); // Activate immediately
+  self.skipWaiting();
 });
 
-// Activate — purge old caches + claim all clients immediately
+// ===== ACTIVATE =====
 self.addEventListener('activate', (e) => {
   console.log('[SW] Activating unified service worker...');
   e.waitUntil(
@@ -90,36 +103,26 @@ self.addEventListener('activate', (e) => {
         console.log('[SW] Deleting old cache:', k);
         return caches.delete(k);
       }))
-    ).then(() => self.clients.claim()) // Take control of all open tabs immediately
+    ).then(() => self.clients.claim())
+     .then(() => {
+       console.log('[SW] Claimed all clients');
+       // Verify push subscription is still alive
+       return self.registration.pushManager.getSubscription();
+     })
+     .then(sub => {
+       if (sub) {
+         console.log('[SW] Push subscription active:', sub.endpoint.substring(0, 60) + '...');
+       } else {
+         console.warn('[SW] No push subscription found — client will re-subscribe on next load');
+       }
+     })
   );
 });
 
-// Fetch — Network first, fallback to cache
+// ===== FETCH — Network first, cache fallback =====
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
-
-  // Skip Firebase and external API requests from cache
-  if (e.request.url.includes('firebaseio.com') ||
-      e.request.url.includes('googleapis.com') ||
-      e.request.url.includes('gstatic.com') ||
-      e.request.url.includes('firebasestorage.app') ||
-      e.request.url.includes('fcm/')) {
-    return;
-  }
-
-  // Force network-first for manifest and icon files to ensure fresh icons
-  if (e.request.url.includes('manifest.json') ||
-      e.request.url.includes('/icons/') ||
-      e.request.url.includes('favicon')) {
-    e.respondWith(
-      fetch(e.request).then(r => {
-        const clone = r.clone();
-        caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
-        return r;
-      }).catch(() => caches.match(e.request))
-    );
-    return;
-  }
+  if (shouldSkipCache(e.request.url)) return;
 
   e.respondWith(
     fetch(e.request).then(r => {
@@ -131,45 +134,97 @@ self.addEventListener('fetch', (e) => {
 });
 
 
-// Firebase SDK will handle the push event and route it to onBackgroundMessage
-// if the app is not in the foreground. No manual push listener is needed.
+// ========================================================================
+// PUSH EVENT — Raw push handler (safety net)
+// ========================================================================
+// This fires for EVERY push event before Firebase SDK processes it.
+// For data-only payloads, Firebase SDK calls onBackgroundMessage.
+// This listener ensures we always show a notification even if
+// onBackgroundMessage doesn't fire for any reason.
+// ========================================================================
+let _pushHandledByFirebase = false;
 
-// ===== FCM BACKGROUND MESSAGE HANDLER =====
-// Handles messages when app is closed, backgrounded, or phone is locked
+self.addEventListener('push', (event) => {
+  console.log('[SW] 🔔 Push event received!');
+  _pushHandledByFirebase = false;
+
+  if (!event.data) {
+    console.log('[SW] Push event has no data, skipping');
+    return;
+  }
+
+  let payload;
+  try {
+    payload = event.data.json();
+    console.log('[SW] Push payload:', JSON.stringify(payload));
+  } catch (err) {
+    console.warn('[SW] Could not parse push data as JSON:', err);
+    return;
+  }
+
+  // Give Firebase SDK a moment to handle via onBackgroundMessage
+  // If it does, _pushHandledByFirebase will be set to true
+  const data = payload.data || {};
+
+  // If there's a top-level notification field, the browser will auto-display it.
+  // For data-only messages, we need to ensure showNotification is called.
+  if (payload.notification) {
+    console.log('[SW] Push has notification field — browser will auto-display');
+    return; // Let browser handle it
+  }
+
+  // Data-only message — show notification via our handler
+  // Wait briefly to let onBackgroundMessage fire first
+  event.waitUntil(
+    new Promise(resolve => setTimeout(resolve, 500)).then(() => {
+      if (_pushHandledByFirebase) {
+        console.log('[SW] Push already handled by onBackgroundMessage');
+        return;
+      }
+      console.log('[SW] Push NOT handled by onBackgroundMessage — showing notification via safety net');
+      return showNotificationFromData(data);
+    })
+  );
+});
+
+
+// ========================================================================
+// FCM BACKGROUND MESSAGE HANDLER
+// ========================================================================
+// Handles data-only messages when app is closed, backgrounded, or locked
 messaging.onBackgroundMessage((payload) => {
-  console.log('Background notification received.', payload);
+  console.log('[SW] 📩 onBackgroundMessage fired!', JSON.stringify(payload));
+  _pushHandledByFirebase = true;
 
   const notifData = payload.notification || {};
   const data = payload.data || {};
 
   return showNotificationFromData({
     ...data,
-    // Fallback to notification field values if data field is empty
     title: data.title || notifData.title,
     body: data.body || notifData.body,
   });
 });
 
-// Single function to show notifications from data payload
+
+// ========================================================================
+// SHOW NOTIFICATION — Unified handler for all notification types
+// ========================================================================
 async function showNotificationFromData(data) {
   const title = data.title || '📸 Class Memories';
   const body = data.body || 'New notification';
   const tag = data.tag || data.type || 'cm-notif-' + Date.now();
   const type = data.type || 'general';
 
-  console.log(`[SW] Preparing to show notification. Title: "${title}", Type: "${type}", Tag: "${tag}"`);
-
-  // Prevent duplicate notifications if already displaying
-  const existingNotifications = await self.registration.getNotifications({ tag });
-  if (existingNotifications.length > 0) {
-    console.log(`[SW] Notification with tag "${tag}" already exists. Replacing/Updating it.`);
-  }
+  console.log(`[SW] showNotification → Title: "${title}", Type: "${type}", Tag: "${tag}"`);
 
   // ===== CALL NOTIFICATIONS =====
   if (type === 'voice_call_incoming' || type === 'video_call_incoming') {
     const callerName = data.fromName || data.callerName || 'Someone';
     const callType = type === 'video_call_incoming' ? 'Video' : 'Voice';
     const callId = data.callId || '';
+
+    console.log(`[SW] 📞 Incoming ${callType} call from ${callerName}`);
 
     const options = {
       body: `Incoming ${callType} Call`,
@@ -289,11 +344,12 @@ async function showNotificationFromData(data) {
 // ========================================================================
 // NOTIFICATION CLICK HANDLER
 // ========================================================================
-// Deep link to correct page based on notification type and action
 self.addEventListener('notificationclick', (event) => {
   const notification = event.notification;
   const data = notification.data || {};
   const action = event.action;
+
+  console.log(`[SW] Notification clicked! Action: "${action}", Type: "${data.type}", URL: "${data.url}"`);
 
   notification.close();
 
@@ -320,7 +376,6 @@ self.addEventListener('notificationclick', (event) => {
     const targetUrl = `/?page=chat&acceptCallId=${data.callId || ''}`;
     event.waitUntil(
       clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
-        // Try to focus existing window
         for (const client of clientList) {
           if (client.url.includes(self.location.origin)) {
             client.focus();
@@ -333,7 +388,6 @@ self.addEventListener('notificationclick', (event) => {
             return;
           }
         }
-        // No window — open new one
         return clients.openWindow(new URL(targetUrl, self.location.origin).href);
       })
     );
@@ -368,11 +422,9 @@ self.addEventListener('notificationclick', (event) => {
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
-      // Try to focus an existing window and navigate
       for (const client of clientList) {
         if (client.url.includes(self.location.origin)) {
           client.focus();
-          // Post message to client for in-app navigation
           client.postMessage({
             type: 'NOTIFICATION_CLICK',
             url: targetUrl,
@@ -381,10 +433,17 @@ self.addEventListener('notificationclick', (event) => {
           return;
         }
       }
-      // No existing window — open new one
       return clients.openWindow(fullUrl);
     })
   );
+});
+
+
+// ========================================================================
+// NOTIFICATION CLOSE HANDLER
+// ========================================================================
+self.addEventListener('notificationclose', (event) => {
+  console.log('[SW] Notification closed:', event.notification.tag);
 });
 
 

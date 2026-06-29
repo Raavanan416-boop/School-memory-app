@@ -192,7 +192,8 @@ class NotificationManager {
     this._ringtoneAudio = null;
     this._soundUnlocked = false;
     this._tokenRefreshInterval = null;
-    this._swRegistration = null; // Cache SW registration
+    this._swRegistration = null;
+    this._fcmInitialized = false; // Prevent double init
   }
 
   onChange(cb) { this.listeners.push(cb); }
@@ -202,44 +203,70 @@ class NotificationManager {
 
   // ===== FCM INITIALIZATION =====
 
-  // Initialize Firebase Cloud Messaging
-  // Uses the UNIFIED service worker (firebase-messaging-sw.js) which handles
-  // both caching and push notifications — no dual-SW conflict
   async initFCM() {
-    try {
-      // Wait for the unified service worker to be ready
-      // It's registered by index.html — we just need to get its registration
-      let swReg = await navigator.serviceWorker.getRegistration('/');
-      
-      // If not registered yet, register it
-      if (!swReg) {
-        console.log('[Notifications] Registering unified SW...');
-        swReg = await navigator.serviceWorker.register('/firebase-messaging-sw.js', {
-          scope: '/'
-        });
-      }
-      
-      console.log('[Notifications] Using SW registration:', swReg.scope);
+    // Prevent double initialization
+    if (this._fcmInitialized) {
+      console.log('[Notifications] FCM already initialized, skipping');
+      return this._swRegistration;
+    }
 
-      // Wait for the SW to be active
+    try {
+      if (!('serviceWorker' in navigator)) {
+        console.warn('[Notifications] Service Workers not supported');
+        return null;
+      }
+
+      // Register the SOLE service worker
+      console.log('[Notifications] Registering firebase-messaging-sw.js...');
+      let swReg = await navigator.serviceWorker.register('/firebase-messaging-sw.js', {
+        scope: '/'
+      });
+      console.log('[Notifications] SW registered, scope:', swReg.scope);
+
+      // Wait for it to become active
       if (swReg.installing) {
-        await new Promise(resolve => {
-          swReg.installing.addEventListener('statechange', function handler(e) {
+        console.log('[Notifications] SW is installing, waiting for activation...');
+        await new Promise((resolve, reject) => {
+          const sw = swReg.installing;
+          sw.addEventListener('statechange', function handler(e) {
+            console.log('[Notifications] SW state changed to:', e.target.state);
             if (e.target.state === 'activated') {
               resolve();
               e.target.removeEventListener('statechange', handler);
             }
+            if (e.target.state === 'redundant') {
+              reject(new Error('SW became redundant'));
+              e.target.removeEventListener('statechange', handler);
+            }
           });
+          setTimeout(() => resolve(), 10000); // Timeout fallback
         });
       } else if (swReg.waiting) {
-        // If there's a waiting SW, tell it to skip waiting
+        console.log('[Notifications] SW is waiting, sending SKIP_WAITING...');
         swReg.waiting.postMessage({ type: 'SKIP_WAITING' });
         await new Promise(resolve => {
           navigator.serviceWorker.addEventListener('controllerchange', resolve, { once: true });
+          setTimeout(resolve, 5000);
         });
       }
 
+      // Re-fetch registration to get the active one
+      swReg = await navigator.serviceWorker.getRegistration('/');
+      if (!swReg || !swReg.active) {
+        console.warn('[Notifications] SW not active after registration');
+        return null;
+      }
+
       this._swRegistration = swReg;
+      console.log('[Notifications] SW is active:', swReg.active.scriptURL);
+
+      // Verify push subscription
+      const pushSub = await swReg.pushManager.getSubscription();
+      if (pushSub) {
+        console.log('[Notifications] Push subscription exists:', pushSub.endpoint.substring(0, 60) + '...');
+      } else {
+        console.log('[Notifications] No push subscription yet — will be created when token is requested');
+      }
 
       // Dynamic import of Firebase Messaging
       const { getMessaging, getToken, onMessage } = await import(
@@ -247,21 +274,22 @@ class NotificationManager {
       );
 
       this._messaging = getMessaging(app);
+      console.log('[Notifications] Firebase Messaging initialized');
 
-      // Handle foreground messages — show in-app notification
+      // Handle foreground messages — show in-app toast only (no system notification)
       onMessage(this._messaging, (payload) => {
-        console.log('Foreground notification received:', payload);
+        console.log('[Notifications] 📩 Foreground message received:', JSON.stringify(payload));
         const data = payload.data || {};
         const notifPayload = payload.notification || {};
         const type = data.type || 'general';
 
         // For incoming calls in foreground, don't show toast — the call UI handles it
         if (type === 'voice_call_incoming' || type === 'video_call_incoming') {
-          console.log('[Notifications] Call notification received in foreground — call UI will handle');
+          console.log('[Notifications] Call notification in foreground — call UI will handle');
           return;
         }
 
-        // Show in-app notification (toast + sound) for foreground
+        // Show in-app toast + sound only (no system notification to avoid duplicates)
         this._showForegroundNotification({
           title: data.title || notifPayload.title || '📸 Class Memories',
           body: data.body || notifPayload.body || 'New notification',
@@ -277,34 +305,32 @@ class NotificationManager {
         if (event.data?.type === 'NOTIFICATION_CLICK') {
           this._handleNotificationClick(event.data.url, event.data.notifId);
         }
-        // Handle call accept from notification
         if (event.data?.type === 'ACCEPT_CALL') {
           this._handleCallAcceptFromNotification(event.data);
         }
-        // Handle call reject from notification
         if (event.data?.type === 'REJECT_CALL') {
           this._handleCallRejectFromNotification(event.data);
         }
       });
 
-      console.log('[Notifications] FCM initialized successfully');
+      this._fcmInitialized = true;
+      console.log('[Notifications] ✅ FCM fully initialized');
       return swReg;
     } catch (e) {
-      console.warn('[Notifications] FCM init failed:', e);
+      console.error('[Notifications] FCM init failed:', e);
       return null;
     }
   }
 
   // Handle call accept from push notification action
   _handleCallAcceptFromNotification(data) {
-    // Import call manager dynamically to avoid circular dependency
     import('./calls.js').then(({ callManager }) => {
       if (callManager.onIncomingCall) {
         callManager.onIncomingCall({
           id: data.callId,
           callerId: data.callerId,
           callerName: data.callerName,
-          type: 'voice', // will be overridden by actual call data
+          type: 'voice',
           autoAccept: true
         });
       }
@@ -325,15 +351,11 @@ class NotificationManager {
     try {
       const permission = await Notification.requestPermission();
       this.pushPermission = permission;
-      console.log('Notification Permission:', permission);
+      console.log('[Notifications] Permission result:', permission);
 
       if (permission === 'granted') {
-        console.log('[Notifications] Push permission granted');
         await this._registerFCMToken();
-        // Start periodic token refresh (every 6 hours)
         this._startTokenRefresh();
-      } else {
-        console.log('[Notifications] Push permission:', permission);
       }
       return permission;
     } catch (e) {
@@ -342,7 +364,7 @@ class NotificationManager {
     }
   }
 
-  // Register FCM token and save to user document
+  // Register FCM token and save to Firestore + localStorage
   async _registerFCMToken() {
     if (!this._messaging || !authManager.currentUser) {
       console.log('[Notifications] Cannot register token — messaging or user not ready');
@@ -354,10 +376,9 @@ class NotificationManager {
         'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js'
       );
 
-      // Use cached SW registration or get it fresh
       let swReg = this._swRegistration || await navigator.serviceWorker.getRegistration('/');
       if (!swReg) {
-        console.warn('[Notifications] No service worker registration found');
+        console.warn('[Notifications] No SW registration found');
         return;
       }
 
@@ -377,15 +398,16 @@ class NotificationManager {
               e.target.removeEventListener('statechange', handler);
             }
           });
-          // Timeout after 10s
           setTimeout(() => reject(new Error('SW activation timeout')), 10000);
         });
       }
 
-      // ⚠️ VAPID KEY — Get this from Firebase Console:
-      // Project Settings → Cloud Messaging → Web Push certificates → Key pair
-      // The key should be ~87 characters long (base64url encoded)
-      // If push notifications don't work, THIS IS THE FIRST THING TO CHECK
+      // Verify push subscription exists
+      let pushSub = await swReg.pushManager.getSubscription();
+      if (!pushSub) {
+        console.log('[Notifications] No push subscription — getToken will create one');
+      }
+
       const VAPID_KEY = 'BB2IVcpFQwoPKSYh7PdqMIyB7Zl8xjFxlmRTGVTDehFTzsGZiFwvlez9O4BxuPCSfyt_VG8N3FS65pqliTYH3wY';
 
       console.log('[Notifications] Requesting FCM token...');
@@ -393,26 +415,39 @@ class NotificationManager {
         vapidKey: VAPID_KEY,
         serviceWorkerRegistration: swReg,
       }).catch((err) => {
-        console.error('[Notifications] Token generation failed:', err);
-        console.error('[Notifications] ⚠️ If you see "messaging/permission-blocked", check browser notification permission');
-        console.error('[Notifications] ⚠️ If you see other errors, verify your VAPID key is correct');
+        console.error('[Notifications] ❌ Token generation failed:', err);
         return null;
       });
 
       if (token && authManager.currentUser) {
-        // Save token to localStorage
-        localStorage.setItem('fcmToken', token);
-        console.log('[Notifications] Token saved to localStorage:', token);
+        const oldToken = localStorage.getItem('fcmToken');
 
-        // Save token to user document securely
-        await setDoc(doc(db, 'users', authManager.currentUser.uid), {
-          fcmToken: token,
-          pushEnabled: true,
-          fcmTokenUpdatedAt: serverTimestamp(),
-        }, { merge: true });
-        console.log('[Notifications] FCM Token saved to Firestore:', token);
+        // Save to localStorage
+        localStorage.setItem('fcmToken', token);
+        console.log('[Notifications] Token saved to localStorage');
+
+        // Only write to Firestore if token changed
+        if (token !== oldToken) {
+          console.log('[Notifications] Token changed, updating Firestore...');
+          await setDoc(doc(db, 'users', authManager.currentUser.uid), {
+            fcmToken: token,
+            pushEnabled: true,
+            fcmTokenUpdatedAt: serverTimestamp(),
+          }, { merge: true });
+          console.log('[Notifications] ✅ FCM Token saved to Firestore');
+        } else {
+          console.log('[Notifications] Token unchanged, skipping Firestore write');
+        }
+
+        // Log the push subscription for debugging
+        const sub = await swReg.pushManager.getSubscription();
+        if (sub) {
+          console.log('[Notifications] Push subscription endpoint:', sub.endpoint.substring(0, 80) + '...');
+        }
+
+        console.log('[Notifications] ✅ FCM Token:', token.substring(0, 30) + '...');
       } else if (!token) {
-        console.warn('[Notifications] ❌ No token returned — check VAPID key and SW registration');
+        console.warn('[Notifications] ❌ No token returned');
       }
     } catch (e) {
       console.error('[Notifications] FCM token registration failed:', e.message);
@@ -423,11 +458,10 @@ class NotificationManager {
   // Periodically refresh FCM token (Google rotates tokens)
   _startTokenRefresh() {
     if (this._tokenRefreshInterval) clearInterval(this._tokenRefreshInterval);
-    // Refresh token every 6 hours
     this._tokenRefreshInterval = setInterval(() => {
       console.log('[Notifications] Periodic token refresh...');
       this._registerFCMToken();
-    }, 6 * 60 * 60 * 1000);
+    }, 6 * 60 * 60 * 1000); // Every 6 hours
   }
 
   _stopTokenRefresh() {
@@ -440,12 +474,14 @@ class NotificationManager {
   // Remove FCM token on logout
   async removeFCMToken() {
     this._stopTokenRefresh();
+    localStorage.removeItem('fcmToken');
     if (!authManager.currentUser) return;
     try {
       await updateDoc(doc(db, 'users', authManager.currentUser.uid), {
         fcmToken: null,
         pushEnabled: false,
       });
+      console.log('[Notifications] FCM token removed from Firestore');
     } catch (e) { /* non-critical */ }
   }
 

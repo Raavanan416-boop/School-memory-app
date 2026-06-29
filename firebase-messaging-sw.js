@@ -151,11 +151,19 @@ messaging.onBackgroundMessage((payload) => {
 });
 
 // Single function to show notifications from data payload
-function showNotificationFromData(data) {
+async function showNotificationFromData(data) {
   const title = data.title || '📸 Class Memories';
   const body = data.body || 'New notification';
   const tag = data.tag || data.type || 'cm-notif-' + Date.now();
   const type = data.type || 'general';
+
+  console.log(`[SW] Preparing to show notification. Title: "${title}", Type: "${type}", Tag: "${tag}"`);
+
+  // Prevent duplicate notifications if already displaying
+  const existingNotifications = await self.registration.getNotifications({ tag });
+  if (existingNotifications.length > 0) {
+    console.log(`[SW] Notification with tag "${tag}" already exists. Replacing/Updating it.`);
+  }
 
   // ===== CALL NOTIFICATIONS =====
   if (type === 'voice_call_incoming' || type === 'video_call_incoming') {

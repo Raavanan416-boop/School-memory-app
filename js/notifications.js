@@ -3,7 +3,7 @@
 // Fixed: token refresh, call types, ringtone management, foreground notification
 // v2: Unified SW registration, data-only payloads, robust token lifecycle
 import { db, app, collection, doc, addDoc, deleteDoc, query, where, orderBy, limit,
-  onSnapshot, updateDoc, serverTimestamp, getDocs } from './firebase-config.js';
+  onSnapshot, updateDoc, setDoc, serverTimestamp, getDocs } from './firebase-config.js';
 import { authManager } from './auth.js';
 import { showToast } from './utils.js';
 
@@ -400,13 +400,17 @@ class NotificationManager {
       });
 
       if (token && authManager.currentUser) {
-        // Save token to user document
-        await updateDoc(doc(db, 'users', authManager.currentUser.uid), {
+        // Save token to localStorage
+        localStorage.setItem('fcmToken', token);
+        console.log('[Notifications] Token saved to localStorage:', token);
+
+        // Save token to user document securely
+        await setDoc(doc(db, 'users', authManager.currentUser.uid), {
           fcmToken: token,
           pushEnabled: true,
           fcmTokenUpdatedAt: serverTimestamp(),
-        });
-        console.log('FCM Token Generated:', token);
+        }, { merge: true });
+        console.log('[Notifications] FCM Token saved to Firestore:', token);
       } else if (!token) {
         console.warn('[Notifications] ❌ No token returned — check VAPID key and SW registration');
       }

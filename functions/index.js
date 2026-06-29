@@ -156,6 +156,9 @@ exports.sendPushNotification = onDocumentCreated('notifications/{notifId}', asyn
       },
     };
 
+    // Log the payload being sent
+    console.log(`[FCM] Preparing to send push to ${receiverId}. Payload:`, JSON.stringify(message, null, 2));
+
     // Send with retry logic
     const response = await sendWithRetry(message, 2);
     console.log('[FCM] ✅ Push sent successfully:', response, '| type:', type, '| to:', receiverId);
@@ -164,6 +167,8 @@ exports.sendPushNotification = onDocumentCreated('notifications/{notifId}', asyn
     await logDeliveryStatus(notifId, 'sent', receiverId, response);
 
   } catch (error) {
+    console.error(`[FCM] ❌ Failed to send push to ${receiverId}. Error details:`, error);
+    
     // Handle invalid/expired tokens
     if (error.code === 'messaging/invalid-registration-token' ||
         error.code === 'messaging/registration-token-not-registered') {

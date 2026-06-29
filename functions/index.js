@@ -95,13 +95,11 @@ exports.sendPushNotification = onDocumentCreated('notifications/{notifId}', asyn
     const channelId = isCallNotif ? 'class_memories_calls' : 
                       (type === 'chat_message' ? 'class_memories_messages' : 'class_memories_general');
 
-    // Build the FCM message — BOTH notification AND data payload as requested
+    // Build the FCM message
+    // Note: Top-level notification is omitted so Web Push receives data-only,
+    // ensuring onBackgroundMessage fires. Mobile receives the notification in overrides.
     const message = {
       token: fcmToken,
-      notification: {
-        title: String(title),
-        body: String(body),
-      },
       data: {
         title: String(title),
         body: String(body),
@@ -122,6 +120,8 @@ exports.sendPushNotification = onDocumentCreated('notifications/{notifId}', asyn
         priority: 'high',
         ttl: ttl * 1000,
         notification: {
+          title: String(title),
+          body: String(body),
           channelId: channelId,
           sound: 'default',
           defaultSound: true,
@@ -134,9 +134,8 @@ exports.sendPushNotification = onDocumentCreated('notifications/{notifId}', asyn
           Urgency: 'high',
           TTL: String(ttl),
         },
-        fcmOptions: {
-          link: targetUrl,
-        },
+        // fcmOptions.link removed because relative URLs cause silent crashes in FCM Web Push.
+        // Our service worker handles notificationclick routing manually using data.url.
       },
       apns: {
         headers: {
@@ -146,6 +145,10 @@ exports.sendPushNotification = onDocumentCreated('notifications/{notifId}', asyn
         },
         payload: {
           aps: {
+            alert: {
+              title: String(title),
+              body: String(body),
+            },
             'content-available': 1,
             'mutable-content': 1,
             sound: 'default',

@@ -374,8 +374,10 @@ async function doLogin(email, password) {
 
   try {
     await authManager.login(email, password);
-    showToast('Welcome back! 🎓', 'success');
-    MusicPlayer.start();
+    if (authManager.userData && authManager.userData.passwordChanged) {
+      showToast('Welcome back! 🎓', 'success');
+      MusicPlayer.start();
+    }
   } catch (err) {
     console.error('Login error:', err);
     let msg = 'Login failed. Please try again.';
@@ -449,6 +451,7 @@ function buildAppShell() {
   router.register('birthday', lazyPage('./pages/birthday.js', 'renderBirthday'));
   router.register('leaderboard', lazyPage('./pages/leaderboard.js', 'renderLeaderboard'));
   router.register('polls', lazyPage('./pages/polls.js', 'renderPolls'));
+  router.register('feedback', lazyPage('./pages/feedback.js', 'renderFeedback'));
 
   navEl.querySelectorAll('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -754,6 +757,80 @@ function showTagRequestModal(notifId, notif, post) {
       });
       await updateDoc(doc(db, 'notifications', notifId), { handled: true, body: 'You rejected the tag request.', read: true });
     } catch (e) { console.error(e); }
+  });
+}
+
+// ===== FORCED PASSWORD CHANGE MODAL =====
+function showForcedPasswordModal() {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 z-[300] flex items-center justify-center p-4 bg-navy-900/90 backdrop-blur-md transition-opacity duration-300';
+    overlay.innerHTML = `
+      <div class="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl p-6">
+        <h2 class="text-2xl font-playfair font-bold text-navy-800 mb-2">Update Password</h2>
+        <p class="text-sm text-gray-600 mb-6">For your security, please change your default password before continuing.</p>
+        
+        <form id="force-password-form" class="space-y-4">
+          <div>
+            <label class="text-xs font-bold text-navy-700 uppercase tracking-wider mb-1 block">Current Password (DOB)</label>
+            <input type="password" id="current-pass" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-navy-500 outline-none" required>
+          </div>
+          <div>
+            <label class="text-xs font-bold text-navy-700 uppercase tracking-wider mb-1 block">New Password</label>
+            <input type="password" id="new-pass" minlength="6" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-navy-500 outline-none" required>
+          </div>
+          <div>
+            <label class="text-xs font-bold text-navy-700 uppercase tracking-wider mb-1 block">Confirm New Password</label>
+            <input type="password" id="confirm-pass" minlength="6" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-navy-500 outline-none" required>
+          </div>
+          <div id="pwd-error" class="text-red-500 text-xs hidden font-medium"></div>
+          <button type="submit" id="pwd-submit" class="w-full bg-navy-600 text-white font-bold py-3 rounded-xl shadow-md hover:bg-navy-700 transition-colors mt-2">
+            Update Password
+          </button>
+        </form>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const form = overlay.querySelector('#force-password-form');
+    const errEl = overlay.querySelector('#pwd-error');
+    const btn = overlay.querySelector('#pwd-submit');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errEl.classList.add('hidden');
+      const current = overlay.querySelector('#current-pass').value;
+      const newPass = overlay.querySelector('#new-pass').value;
+      const confirmPass = overlay.querySelector('#confirm-pass').value;
+
+      if (newPass !== confirmPass) {
+        errEl.textContent = 'New passwords do not match.';
+        errEl.classList.remove('hidden');
+        return;
+      }
+      if (newPass.length < 6) {
+        errEl.textContent = 'Password must be at least 6 characters.';
+        errEl.classList.remove('hidden');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Updating...';
+
+      try {
+        await authManager.changePassword(current, newPass);
+        await authManager.updateProfile({ passwordChanged: true });
+        overlay.remove();
+        showToast('Password updated successfully!', 'success');
+        resolve();
+      } catch (err) {
+        console.error(err);
+        btn.disabled = false;
+        btn.textContent = 'Update Password';
+        errEl.textContent = err.message || 'Failed to update password. Check your current password.';
+        errEl.classList.remove('hidden');
+      }
+    });
   });
 }
 
@@ -1199,13 +1276,25 @@ async function init() {
 
   let appShellBuilt = false;
 
-  authManager.onChange((user) => {
+  authManager.onChange(async (user) => {
     if (user) {
       console.log('[ClassMemories] User logged in:', user.email);
       hideLogin();
-      if (!appShellBuilt) {
-        buildAppShell();
-        appShellBuilt = true;
+      
+      const initApp = () => {
+        if (!appShellBuilt) {
+          buildAppShell();
+          appShellBuilt = true;
+        }
+      };
+
+      if (authManager.userData && !authManager.userData.passwordChanged) {
+        await showForcedPasswordModal();
+        initApp();
+        showToast('Welcome back! 🎓', 'success');
+        MusicPlayer.start();
+      } else {
+        initApp();
       }
     } else {
       console.log('[ClassMemories] No user, showing login...');

@@ -1,6 +1,6 @@
 // Search page — Empty initial state, live search with results only after typing
-import { db, collection, getDocs, query, where, orderBy, limit, doc, onSnapshot, rtdb, ref, onValue } from '../firebase-config.js';
-import { sanitizeHTML, debounce } from '../utils.js';
+import { db, collection, getDocs, query, orderBy, limit } from '../firebase-config.js';
+import { sanitizeHTML } from '../utils.js';
 import { authManager } from '../auth.js';
 import { router } from '../router.js';
 import { presenceManager } from '../presence.js';
@@ -235,14 +235,13 @@ function performSearch(container, searchQuery, tab) {
       return dName.includes(q) || uName.includes(q) || rNum.includes(q);
     });
     filtered.forEach(u => {
-      if (!rtdb) return;
-      const unsub = onValue(ref(rtdb, `presence/${u.id}`), (snap) => {
+      presenceManager.watchUser(u.id, (status) => {
         const dot = results.querySelector(`#search-presence-${u.id}`);
-        if (dot && snap.exists()) {
-          dot.classList.toggle('online', snap.val().online || false);
+        if (dot) {
+          dot.classList.toggle('online', status.online || false);
         }
       });
-      searchPresenceUnsubs.push(unsub);
+      searchPresenceUnsubs.push(() => presenceManager.unwatchUser(u.id));
     });
   }
 }

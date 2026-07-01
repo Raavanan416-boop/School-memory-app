@@ -244,5 +244,25 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow create: if isAdmin();
     }
+
+    // Feedback
+    match /feedback/{docId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+      allow delete: if isAdmin();
+    }
+
+    // Login History
+    match /loginHistory/{docId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+      allow delete: if isAdmin();
+    }
+
+    // Settings (Features)
+    match /settings/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
   }
 }

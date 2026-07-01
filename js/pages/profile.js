@@ -657,15 +657,14 @@ export async function renderProfile(container, data = null) {
   // Real-time presence watcher for other user profiles
   if (viewingOther && data?.userId) {
     if (profilePresenceUnsub) { profilePresenceUnsub(); profilePresenceUnsub = null; }
-    if (rtdb) {
-      profilePresenceUnsub = onValue(ref(rtdb, `presence/${data.userId}`), (snap) => {
-        const dot = container.querySelector('#profile-online-dot');
-        if (dot && snap.exists()) {
-          const isOnline = snap.val().online || false;
-          dot.className = `absolute bottom-1 right-1 w-5 h-5 rounded-full ${isOnline ? 'bg-green-400' : 'bg-gray-300'} border-3 border-white`;
-        }
-      });
-    }
+    presenceManager.watchUser(data.userId, (status) => {
+      const dot = container.querySelector('#profile-online-dot');
+      if (dot) {
+        const isOnline = status.online || false;
+        dot.className = `absolute bottom-1 right-1 w-5 h-5 rounded-full ${isOnline ? 'bg-green-400' : 'bg-gray-300'} border-3 border-white`;
+      }
+    });
+    profilePresenceUnsub = () => presenceManager.unwatchUser(data.userId);
   }
 
   // ===== MISS YOU BUTTON =====

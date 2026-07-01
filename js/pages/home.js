@@ -11,6 +11,7 @@ import { showDeleteConfirmation, deleteDocFull } from '../delete-confirm.js';
 let timerInterval = null;
 let quoteInterval = null;
 let unsubFeed = null;
+let unsubBdayFeature = null;
 let lastDoc = null;
 let loadingMore = false;
 let allPostsLoaded = false;
@@ -39,8 +40,9 @@ export function destroyHome() {
   if (timerInterval) clearInterval(timerInterval);
   if (quoteInterval) clearInterval(quoteInterval);
   if (unsubFeed) unsubFeed();
+  if (unsubBdayFeature) unsubBdayFeature();
   if (feedObserver) { feedObserver.disconnect(); feedObserver = null; }
-  timerInterval = null; quoteInterval = null; unsubFeed = null;
+  timerInterval = null; quoteInterval = null; unsubFeed = null; unsubBdayFeature = null;
   lastDoc = null; loadingMore = false; allPostsLoaded = false;
   isFirstLoad = true;
 }
@@ -83,6 +85,7 @@ export async function renderHome(container, data = null) {
         <button class="quick-action-chip" data-action="leaderboard">🏆 Leaderboard</button>
         <button class="quick-action-chip" data-action="birthday">🎂 Birthdays</button>
         <button class="quick-action-chip" data-action="games">🎮 Games</button>
+        <button class="quick-action-chip" data-action="feedback">📝 Feedback</button>
       </div>
     </section>
 
@@ -198,32 +201,44 @@ export async function renderHome(container, data = null) {
           birthdayUsers.push({ id: d.id, ...u });
         }
       });
-      if (birthdayUsers.length > 0) {
+      
+      if (unsubBdayFeature) unsubBdayFeature();
+      
+      unsubBdayFeature = onSnapshot(doc(db, 'settings', 'features'), (docSnap) => {
+        const isEnabled = docSnap.exists() ? docSnap.data().birthdayEnabled ?? false : false;
         const bSection = container.querySelector('#birthday-section');
-        if (bSection) {
-          bSection.innerHTML = `
-            <section class="px-4 pt-4">
-              <div class="birthday-banner">
-                <div class="confetti-container" id="confetti-box"></div>
-                <div class="relative z-10 text-center">
-                  <div class="text-3xl mb-2">🎂🎉</div>
-                  <h3 class="font-bold text-navy-800 text-lg">Happy Birthday!</h3>
-                  <p class="text-sm text-navy-600">${birthdayUsers.map(u => u.fullName).join(', ')}</p>
-                  <button class="mt-3 px-4 py-2 bg-navy-500 text-white rounded-full text-xs font-semibold" id="wish-birthday-btn">
-                    Send Wishes 🎈
-                  </button>
+        const bActionBtn = container.querySelector('[data-action="birthday"]');
+        
+        if (!isEnabled && !authManager.isOwner) {
+          if (bSection) bSection.innerHTML = '';
+        } else {
+          if (bSection && birthdayUsers.length > 0) {
+            bSection.innerHTML = `
+              <section class="px-4 pt-4">
+                <div class="birthday-banner">
+                  <div class="confetti-container" id="confetti-box"></div>
+                  <div class="relative z-10 text-center">
+                    <div class="text-3xl mb-2">🎂🎉</div>
+                    <h3 class="font-bold text-navy-800 text-lg">Happy Birthday!</h3>
+                    <p class="text-sm text-navy-600">${birthdayUsers.map(u => u.fullName).join(', ')}</p>
+                    <button class="mt-3 px-4 py-2 bg-navy-500 text-white rounded-full text-xs font-semibold" id="wish-birthday-btn">
+                      Send Wishes 🎈
+                    </button>
+                  </div>
                 </div>
-              </div>
-            </section>
-          `;
-          bSection.querySelector('#wish-birthday-btn')?.addEventListener('click', () => {
-            router.navigate('birthday');
-          });
-          if (window.spawnConfetti) {
-            window.spawnConfetti(bSection.querySelector('#confetti-box'));
+              </section>
+            `;
+            bSection.querySelector('#wish-birthday-btn')?.addEventListener('click', () => {
+              router.navigate('birthday');
+            });
+            if (window.spawnConfetti) {
+              window.spawnConfetti(bSection.querySelector('#confetti-box'));
+            }
+          } else if (bSection) {
+            bSection.innerHTML = '';
           }
         }
-      }
+      });
     } catch (e) { }
   }, 1000);
 

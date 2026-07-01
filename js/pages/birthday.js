@@ -316,6 +316,25 @@ export async function renderBirthday(container) {
     snap.forEach(d => users.push({ id: d.id, ...d.data() }));
   } catch (e) { }
 
+  const renderUI = async (birthdayEnabled) => {
+    if (!birthdayEnabled && !authManager.isOwner) {
+      container.innerHTML = `
+        <section class="px-4 pt-16 pb-24 h-full flex flex-col items-center justify-center min-h-[60vh] relative">
+          <div class="flex w-full items-center gap-3 absolute top-4 left-4">
+            <button id="bday-back-btn-cs" class="p-2 -ml-2 rounded-full hover:bg-gray-100 transition-colors">
+              <svg class="w-6 h-6 text-navy-800" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+            </button>
+            <h2 class="text-xl font-bold text-navy-800 flex-1">🎂 Birthdays</h2>
+          </div>
+          <div class="text-6xl mb-4 opacity-50 mt-10">🎂</div>
+          <h2 class="text-2xl font-bold text-navy-800 text-center mb-2">Coming Soon</h2>
+          <p class="text-gray-500 text-center text-sm px-4 max-w-xs">We are preparing something special for birthdays. Stay tuned!</p>
+        </section>
+      `;
+      container.querySelector('#bday-back-btn-cs')?.addEventListener('click', () => router.navigateBack());
+      return;
+    }
+
   const currentUserId = authManager.currentUser?.uid;
   const todayBirthdays = users.filter(u => isBirthdayToday(u.dateOfBirth));
   const upcomingTen = filterUpcomingTenDays(users, 10);
@@ -553,6 +572,20 @@ export async function renderBirthday(container) {
       }
     });
   }
+  }; // end renderUI
+
+  const unsubSettings = onSnapshot(doc(db, 'settings', 'features'), (docSnap) => {
+    let isEnabled = false;
+    if (docSnap.exists()) {
+      isEnabled = docSnap.data().birthdayEnabled ?? false;
+    }
+    renderUI(isEnabled);
+  }, (err) => {
+    console.error('Settings snapshot error:', err);
+    renderUI(false);
+  });
+
+  _activeListeners.push(unsubSettings);
 }
 
 

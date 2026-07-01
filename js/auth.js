@@ -4,6 +4,7 @@ import { auth, db, signInWithEmailAndPassword, signOut, onAuthStateChanged, send
   doc, getDoc, updateDoc, setDoc, serverTimestamp, Timestamp, increment,
   runTransaction } from './firebase-config.js';
 import { uploadMedia } from './services/cloudinary.js';
+import { presenceManager } from './presence.js';
 
 const OWNER_EMAIL = 'kaviraj@school.com';
 
@@ -126,26 +127,19 @@ class AuthManager {
 
   async _setOnline(status) {
     if (!this.currentUser) return;
-    try {
-      const uid = this.currentUser.uid;
-      await updateDoc(doc(db, 'users', uid), {
-        online: status,
-        lastSeen: serverTimestamp()
-      });
-      // Dedicated presence collection for real-time online indicators
-      await setDoc(doc(db, 'presence', uid), {
-        online: status,
-        lastSeen: serverTimestamp()
-      }, { merge: true });
-      if (this.userData) this.userData.online = status;
-    } catch (e) { /* silently fail on disconnect */ }
+    if (status) {
+      await presenceManager.setOnline();
+    } else {
+      await presenceManager.setOffline();
+    }
+    if (this.userData) this.userData.online = status;
   }
 
   _startHeartbeat() {
     this._stopHeartbeat();
     this._presenceInterval = setInterval(() => {
-      this._setOnline(true);
-    }, 60000); // Every 60 seconds
+      presenceManager.setOnline();
+    }, 30000); // Every 30 seconds
   }
 
   _stopHeartbeat() {
@@ -161,6 +155,20 @@ class AuthManager {
     await this._loadUserData(cred.user.uid);
     await this._setOnline(true);
     this._startHeartbeat();
+    
+    try {
+      const { addDoc, collection, serverTimestamp } = await import('./firebase-config.js');
+      const ua = navigator.userAgent;
+      await addDoc(collection(db, 'loginHistory'), {
+        uid: cred.user.uid,
+        userName: this.userData?.fullName || cred.user.email,
+        loginTime: serverTimestamp(),
+        device: /Mobile|Android|iPhone/i.test(ua) ? 'Mobile' : 'Desktop',
+        browser: ua.includes('Chrome') ? 'Chrome' : (ua.includes('Safari') ? 'Safari' : (ua.includes('Firefox') ? 'Firefox' : 'Other')),
+        platform: navigator.platform
+      });
+    } catch (e) { console.error('Failed to log login history', e); }
+
     return cred.user;
   }
 

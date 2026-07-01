@@ -1,4 +1,4 @@
-import { db, collection, getDocs, doc, updateDoc, writeBatch, deleteDoc, query, limit, getDoc, onSnapshot, addDoc, serverTimestamp } from '../firebase-config.js';
+import { db, collection, getDocs, doc, updateDoc, writeBatch, deleteDoc, query, limit, getDoc, onSnapshot, addDoc, serverTimestamp, orderBy } from '../firebase-config.js';
 import { authManager } from '../auth.js';
 import { router } from '../router.js';
 import { showToast, sanitizeHTML } from '../utils.js';
@@ -55,6 +55,8 @@ export async function renderOwnerPanel(container) {
           <button class="owner-tab-btn active" data-tab="users">👥 Users</button>
           <button class="owner-tab-btn" data-tab="posts">📸 Posts</button>
           <button class="owner-tab-btn" data-tab="system">⚙️ System</button>
+          <button class="owner-tab-btn" data-tab="feedback">📝 Feedback</button>
+          <button class="owner-tab-btn" data-tab="history">🕒 Logins</button>
           <button class="owner-tab-btn" data-tab="reset">☢️ Reset</button>
         </div>
 
@@ -137,7 +139,34 @@ export async function renderOwnerPanel(container) {
           </div>
         </div>
 
+        <div id="tab-feedback" class="owner-tab-content hidden space-y-4">
+          <div class="flex justify-between items-center mb-2">
+            <h3 class="text-white font-bold">User Feedback</h3>
+            <button id="btn-refresh-feedback" class="text-xs text-blue-400 hover:text-blue-300">Refresh</button>
+          </div>
+          <div id="owner-feedback-list" class="space-y-3 max-h-[60vh] overflow-y-auto hide-scrollbar">
+            <p class="text-center text-gray-500 py-4 font-mono text-sm">Loading feedback...</p>
+          </div>
+        </div>
+
+        <div id="tab-history" class="owner-tab-content hidden space-y-4">
+          <div class="flex justify-between items-center mb-2">
+            <h3 class="text-white font-bold">Login History</h3>
+            <button id="btn-refresh-history" class="text-xs text-blue-400 hover:text-blue-300">Refresh</button>
+          </div>
+          <div id="owner-history-list" class="space-y-3 max-h-[60vh] overflow-y-auto hide-scrollbar">
+            <p class="text-center text-gray-500 py-4 font-mono text-sm">Loading login history...</p>
+          </div>
+        </div>
+
         <div id="tab-system" class="owner-tab-content hidden space-y-4">
+          <div class="bg-[#1e293b] rounded-2xl p-4 border border-gray-700/50 shadow-md flex items-center justify-between">
+            <h3 class="text-white font-bold text-sm">Birthday Feature</h3>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="toggle-birthday" class="sr-only peer">
+              <div class="w-11 h-6 bg-gray-700 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
           <div class="bg-[#1e293b] rounded-2xl p-4 border border-gray-700/50 shadow-md">
             <h3 class="text-white font-bold mb-3">Global Announcement</h3>
             <textarea id="announcement-text" class="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 mb-3 text-sm" rows="3" placeholder="Type a message to send to all 37 users..."></textarea>
@@ -210,13 +239,20 @@ export async function renderOwnerPanel(container) {
   
   // Bind system actions
   container.querySelector('#btn-refresh-posts').addEventListener('click', () => loadPosts(container));
+  container.querySelector('#btn-refresh-feedback').addEventListener('click', () => loadFeedback(container));
+  container.querySelector('#btn-refresh-history').addEventListener('click', () => loadHistory(container));
   container.querySelector('#btn-send-announcement').addEventListener('click', () => executeSendAnnouncement(container));
   container.querySelector('#btn-reset-notifs').addEventListener('click', () => executeResetNotifications());
   container.querySelector('#btn-force-refresh').addEventListener('click', () => executeForceRefresh());
   container.querySelector('#btn-recalc-leaderboard').addEventListener('click', () => executeRecalcLeaderboard());
 
-  // Load posts in background
+  // Setup birthday toggle
+  setupBirthdayToggle(container);
+
+  // Load data in background
   setTimeout(() => loadPosts(container), 500);
+  setTimeout(() => loadFeedback(container), 1000);
+  setTimeout(() => loadHistory(container), 1500);
 
   } catch (err) {
     console.error('Owner Panel Error:', err);
@@ -1255,4 +1291,103 @@ async function executeFullAppResetLogic(updateProgress) {
   // onSnapshot listeners will auto-trigger because the DB changed!
   // Wait a moment for firestore to flush locally
   await new Promise(r => setTimeout(r, 1000));
+}
+
+async function loadFeedback(container) {
+  const listEl = container.querySelector('#owner-feedback-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<p class="text-center text-gray-500 py-4 font-mono text-sm">Loading feedback...</p>';
+  try {
+    const q = query(collection(db, 'feedback'), orderBy('createdAt', 'desc'), limit(50));
+    const snap = await getDocs(q);
+    if (snap.empty) {
+      listEl.innerHTML = '<p class="text-center text-gray-500 py-4 font-mono text-sm">No feedback found.</p>';
+      return;
+    }
+    let html = '';
+    snap.forEach(docSnap => {
+      const d = docSnap.data();
+      const date = d.createdAt ? d.createdAt.toDate().toLocaleString() : 'Unknown Time';
+      html += `
+        <div class="bg-[#1e293b] p-3 rounded-xl border border-gray-700/50 shadow-sm flex flex-col gap-2">
+          <div class="flex justify-between items-center text-xs text-gray-400">
+            <span class="font-bold text-white">${sanitizeHTML(d.userName || 'Unknown')}</span>
+            <span>${date}</span>
+          </div>
+          <p class="text-sm text-gray-300 whitespace-pre-wrap">${sanitizeHTML(d.feedback)}</p>
+          <div class="text-[10px] text-gray-500 uppercase tracking-widest text-right">Device: ${d.device || 'Unknown'} | v${d.appVersion || '?'}</div>
+        </div>
+      `;
+    });
+    listEl.innerHTML = html;
+  } catch (e) {
+    listEl.innerHTML = '<p class="text-center text-red-500 py-4 font-mono text-sm">Error loading feedback.</p>';
+    console.error(e);
+  }
+}
+
+async function loadHistory(container) {
+  const listEl = container.querySelector('#owner-history-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<p class="text-center text-gray-500 py-4 font-mono text-sm">Loading login history...</p>';
+  try {
+    const q = query(collection(db, 'loginHistory'), orderBy('loginTime', 'desc'), limit(50));
+    const snap = await getDocs(q);
+    if (snap.empty) {
+      listEl.innerHTML = '<p class="text-center text-gray-500 py-4 font-mono text-sm">No login history found.</p>';
+      return;
+    }
+    let html = '';
+    snap.forEach(docSnap => {
+      const d = docSnap.data();
+      const date = d.loginTime ? d.loginTime.toDate().toLocaleString() : 'Unknown Time';
+      html += `
+        <div class="bg-[#1e293b] p-3 rounded-xl border border-gray-700/50 shadow-sm flex items-center justify-between gap-3">
+          <div class="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-white font-bold text-sm">
+            ${(d.userName || '?')[0].toUpperCase()}
+          </div>
+          <div class="flex-1 min-w-0">
+            <p class="font-bold text-white text-sm truncate">${sanitizeHTML(d.userName || 'Unknown')}</p>
+            <p class="text-xs text-gray-400">${date}</p>
+          </div>
+          <div class="text-[10px] text-gray-500 text-right uppercase">
+            ${d.device || 'Unknown'}<br>${d.browser || 'Unknown'}
+          </div>
+        </div>
+      `;
+    });
+    listEl.innerHTML = html;
+  } catch (e) {
+    listEl.innerHTML = '<p class="text-center text-red-500 py-4 font-mono text-sm">Error loading login history.</p>';
+    console.error(e);
+  }
+}
+
+async function setupBirthdayToggle(container) {
+  const toggle = container.querySelector('#toggle-birthday');
+  if (!toggle) return;
+  
+  try {
+    const settingsRef = doc(db, 'settings', 'features');
+    const snap = await getDoc(settingsRef);
+    if (snap.exists()) {
+      toggle.checked = snap.data().birthdayEnabled ?? false;
+    }
+  } catch (e) { console.error('Error fetching settings:', e); }
+
+  toggle.addEventListener('change', async (e) => {
+    try {
+      const settingsRef = doc(db, 'settings', 'features');
+      await updateDoc(settingsRef, { birthdayEnabled: e.target.checked }).catch(async () => {
+        // Create document if it doesn't exist
+        const { setDoc } = await import('../firebase-config.js');
+        await setDoc(settingsRef, { birthdayEnabled: e.target.checked });
+      });
+      showToast('Birthday Feature ' + (e.target.checked ? 'Enabled' : 'Disabled'), 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to update setting', 'error');
+      e.target.checked = !e.target.checked;
+    }
+  });
 }

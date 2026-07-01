@@ -253,15 +253,34 @@ service cloud.firestore {
     }
 
     // Login History
-    match /loginHistory/{docId} {
-      allow read: if isAdmin();
-      allow create: if isAuthenticated();
-      allow delete: if isAdmin();
+    match /loginHistory/{userId} {
+      allow read, write: if isAdmin();
+      
+      match /sessions/{sessionId} {
+        allow read: if isAdmin();
+        allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid;
+        allow update: if isAuthenticated() && resource.data.uid == request.auth.uid;
+        allow delete: if isAdmin();
+      }
     }
 
     // Settings (Features)
     match /settings/{docId} {
       allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // App Usage History
+    match /appUsage/{sessionId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid;
+      allow update: if isAuthenticated() && resource.data.uid == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+
+    // System Settings (Launch control, etc.)
+    match /systemSettings/{docId} {
+      allow read: if true;
       allow write: if isAdmin();
     }
   }

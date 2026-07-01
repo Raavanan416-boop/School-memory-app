@@ -155,19 +155,6 @@ class AuthManager {
     await this._loadUserData(cred.user.uid);
     await this._setOnline(true);
     this._startHeartbeat();
-    
-    try {
-      const { addDoc, collection, serverTimestamp } = await import('./firebase-config.js');
-      const ua = navigator.userAgent;
-      await addDoc(collection(db, 'loginHistory'), {
-        uid: cred.user.uid,
-        userName: this.userData?.fullName || cred.user.email,
-        loginTime: serverTimestamp(),
-        device: /Mobile|Android|iPhone/i.test(ua) ? 'Mobile' : 'Desktop',
-        browser: ua.includes('Chrome') ? 'Chrome' : (ua.includes('Safari') ? 'Safari' : (ua.includes('Firefox') ? 'Firefox' : 'Other')),
-        platform: navigator.platform
-      });
-    } catch (e) { console.error('Failed to log login history', e); }
 
     return cred.user;
   }

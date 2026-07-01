@@ -6,6 +6,18 @@
         ".read": "auth != null",
         ".write": "auth != null && $userId === auth.uid"
       }
+    },
+    "usagePresence": {
+      ".read": "auth != null",
+      "$sessionId": {
+        ".write": "auth != null"
+      }
+    },
+    "loginPresence": {
+      ".read": "auth != null",
+      "$sessionId": {
+        ".write": "auth != null"
+      }
     }
   }
 }

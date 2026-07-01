@@ -6,6 +6,10 @@ import { presenceManager } from './presence.js';
 import { timeCapsuleManager } from './timecapsuleManager.js';
 import { userCache } from './services/userCache.js';
 import { db, collection, getDocs, doc, writeBatch, query, where, onSnapshot } from './firebase-config.js';
+// removed unused import
+import { usageTracker } from './services/usageTracker.js';
+import { loginTracker } from './services/loginTracker.js';
+import { launchManager } from './services/launchManager.js';
 
 window.syncAllLeaderboardPoints = async () => {
   console.log("Starting Emergency Sync...");
@@ -1246,137 +1250,21 @@ function showInstallBanner() {
   });
 }
 
-// ===== APP LAUNCH COUNTDOWN =====
-function checkAppLaunch() {
-  return new Promise(async (resolve) => {
-    const launchTime = new Date('2026-08-02T09:00:00+05:30').getTime();
-    
-    // Fetch real time from server to prevent users from bypassing by changing their device clock
-    let timeOffset = 0;
-    try {
-      const res = await fetch(window.location.href, { method: 'HEAD', cache: 'no-cache' });
-      const dateHeader = res.headers.get('Date');
-      if (dateHeader) {
-        const serverTime = new Date(dateHeader).getTime();
-        timeOffset = serverTime - Date.now();
-      }
-    } catch (e) {
-      console.warn('Could not sync with server time, using local clock.');
-    }
-    
-    const getRealTime = () => Date.now() + timeOffset;
-    
-    if (getRealTime() >= launchTime) {
-      resolve();
-      return;
-    }
-    
-    // Hide native splash screen quickly so it doesn't peek behind if transparent
-    const splash = document.getElementById('splash-screen');
-    if (splash) splash.style.display = 'none';
-    
-    const overlay = document.createElement('div');
-    overlay.id = 'app-launch-countdown';
-    overlay.className = 'fixed inset-0 z-[999999] bg-[#0f172a] flex flex-col items-center justify-center p-6 text-center text-white font-sans';
-    
-    overlay.innerHTML = `
-      <div class="absolute inset-0 overflow-hidden pointer-events-none">
-        <div class="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-500/20 rounded-full blur-[100px]"></div>
-        <div class="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-purple-500/20 rounded-full blur-[120px]"></div>
-      </div>
-      
-      <div class="relative z-10 flex flex-col items-center w-full max-w-lg mx-auto">
-        <div class="w-32 h-32 mb-8 relative">
-          <div class="absolute inset-0 bg-white/10 rounded-full animate-ping opacity-50"></div>
-          <img src="/assets/class-memories-logo.png" alt="ClassMemories" class="w-full h-full object-contain drop-shadow-[0_0_20px_rgba(255,255,255,0.3)] relative z-10" />
-        </div>
-        
-        <h1 class="text-4xl md:text-5xl font-playfair font-bold tracking-wider mb-2 drop-shadow-lg text-white">ClassMemories</h1>
-        <p class="text-xl md:text-2xl text-blue-200 font-medium mb-12 uppercase tracking-[0.3em] drop-shadow">Launching Soon</p>
-        
-        <div class="flex items-center justify-center gap-3 md:gap-6 mb-12 w-full">
-          <div class="flex flex-col items-center flex-1">
-            <div class="w-full aspect-[3/4] max-w-[80px] bg-white/5 backdrop-blur-md rounded-xl border border-white/10 flex items-center justify-center mb-2 shadow-2xl">
-              <span id="cd-days" class="text-3xl md:text-4xl font-bold font-mono text-white">00</span>
-            </div>
-            <span class="text-xs md:text-sm text-gray-400 uppercase tracking-widest font-semibold">Days</span>
-          </div>
-          <div class="text-2xl md:text-3xl font-bold text-white/30 -mt-6">:</div>
-          
-          <div class="flex flex-col items-center flex-1">
-            <div class="w-full aspect-[3/4] max-w-[80px] bg-white/5 backdrop-blur-md rounded-xl border border-white/10 flex items-center justify-center mb-2 shadow-2xl">
-              <span id="cd-hours" class="text-3xl md:text-4xl font-bold font-mono text-white">00</span>
-            </div>
-            <span class="text-xs md:text-sm text-gray-400 uppercase tracking-widest font-semibold">Hours</span>
-          </div>
-          <div class="text-2xl md:text-3xl font-bold text-white/30 -mt-6">:</div>
-          
-          <div class="flex flex-col items-center flex-1">
-            <div class="w-full aspect-[3/4] max-w-[80px] bg-white/5 backdrop-blur-md rounded-xl border border-white/10 flex items-center justify-center mb-2 shadow-2xl">
-              <span id="cd-mins" class="text-3xl md:text-4xl font-bold font-mono text-white">00</span>
-            </div>
-            <span class="text-xs md:text-sm text-gray-400 uppercase tracking-widest font-semibold">Minutes</span>
-          </div>
-          <div class="text-2xl md:text-3xl font-bold text-white/30 -mt-6">:</div>
-          
-          <div class="flex flex-col items-center flex-1">
-            <div class="w-full aspect-[3/4] max-w-[80px] bg-white/5 backdrop-blur-md rounded-xl border border-white/10 flex items-center justify-center mb-2 shadow-2xl">
-              <span id="cd-secs" class="text-3xl md:text-4xl font-bold font-mono text-[#D4AF37]">00</span>
-            </div>
-            <span class="text-xs md:text-sm text-[#D4AF37]/80 uppercase tracking-widest font-semibold">Seconds</span>
-          </div>
-        </div>
-        
-        <div class="px-6 py-3 rounded-full bg-white/5 border border-white/10 backdrop-blur-sm">
-          <p class="text-sm md:text-base text-gray-300 font-medium tracking-wide">Launching on <span class="text-white font-bold">02 August 2026</span> at <span class="text-white font-bold">09:00 AM</span></p>
-        </div>
-      </div>
-    `;
-    
-    document.body.appendChild(overlay);
-    
-    const dEl = document.getElementById('cd-days');
-    const hEl = document.getElementById('cd-hours');
-    const mEl = document.getElementById('cd-mins');
-    const sEl = document.getElementById('cd-secs');
-    
-    const updateTime = () => {
-      const now = getRealTime();
-      const diff = launchTime - now;
-      
-      if (diff <= 0) {
-        clearInterval(timer);
-        overlay.style.opacity = '0';
-        overlay.style.transition = 'opacity 1s ease-out';
-        setTimeout(() => {
-          overlay.remove();
-          if (splash) splash.style.display = '';
-          resolve();
-        }, 1000);
-        return;
-      }
-      
-      const d = Math.floor(diff / (1000 * 60 * 60 * 24));
-      const h = Math.floor((diff / (1000 * 60 * 60)) % 24);
-      const m = Math.floor((diff / 1000 / 60) % 60);
-      const s = Math.floor((diff / 1000) % 60);
-      
-      dEl.textContent = d.toString().padStart(2, '0');
-      hEl.textContent = h.toString().padStart(2, '0');
-      mEl.textContent = m.toString().padStart(2, '0');
-      sEl.textContent = s.toString().padStart(2, '0');
-    };
-    
-    updateTime(); // Initial call
-    const timer = setInterval(updateTime, 1000);
-  });
-}
-
 // ===== INIT =====
 async function init() {
-  await checkAppLaunch();
   console.log('[ClassMemories] Starting...');
+  
+  // 1. Silent Auth Initialization (to detect Owner)
+  try {
+    await authManager.init();
+    userCache.init();
+    console.log('[ClassMemories] Auth initialized');
+  } catch (e) {
+    console.error('[ClassMemories] Auth init failed:', e);
+  }
 
+  // 2. Check Premium Launch Blocker
+  await launchManager.startBlocker();
   // Play cinematic intro on first visit (lazy loaded for resilience)
   let introPlayed = false;
   try {
@@ -1418,14 +1306,20 @@ async function init() {
       if (authManager.userData && !authManager.userData.passwordChanged) {
         await showForcedPasswordModal();
         initApp();
+        usageTracker.startSession();
+        loginTracker.startSession();
         showToast('Welcome back! 🎓', 'success');
         MusicPlayer.start();
       } else {
         initApp();
+        usageTracker.startSession();
+        loginTracker.startSession();
       }
     } else {
       console.log('[ClassMemories] No user, showing login...');
       appShellBuilt = false;
+      usageTracker.endSession();
+      loginTracker.endSession();
       $('#app')?.classList.add('hidden');
       $('#bottom-nav')?.classList.add('hidden');
       if (notificationManager) {
@@ -1438,13 +1332,10 @@ async function init() {
     }
   });
 
-  try {
-    await authManager.init();
-    userCache.init();
-    console.log('[ClassMemories] Auth initialized');
-  } catch (e) {
-    console.error('[ClassMemories] Auth init failed:', e);
-  }
+
+  // Trigger initial UI setup since we attached onChange *after* init()
+  authManager._notify();
+
 
   hideSplash();
 

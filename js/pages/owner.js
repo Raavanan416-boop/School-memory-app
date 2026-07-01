@@ -149,17 +149,93 @@ export async function renderOwnerPanel(container) {
           </div>
         </div>
 
-        <div id="tab-history" class="owner-tab-content hidden space-y-4">
-          <div class="flex justify-between items-center mb-2">
-            <h3 class="text-white font-bold">Login History</h3>
-            <button id="btn-refresh-history" class="text-xs text-blue-400 hover:text-blue-300">Refresh</button>
+        <div id="tab-history" class="owner-tab-content hidden flex-col h-full space-y-4">
+          <!-- Main User Directory View -->
+          <div id="adv-history-main" class="flex-col flex h-full">
+            <div class="flex justify-between items-center mb-3">
+              <h3 class="text-white font-bold">Advanced Login History</h3>
+              <div class="flex gap-2">
+                <button id="btn-delete-all-history" class="text-xs text-red-500 hover:text-red-400 bg-red-500/10 px-2 py-1 rounded">Delete Entire History</button>
+                <button id="btn-refresh-history" class="text-xs text-blue-400 hover:text-blue-300 bg-blue-500/10 px-2 py-1 rounded">Refresh</button>
+              </div>
+            </div>
+
+            <!-- Global Stats -->
+            <div class="grid grid-cols-2 gap-2 mb-4">
+              <div class="bg-gray-800/80 p-2 rounded-lg border border-gray-700/50 text-center"><p class="text-[10px] text-gray-400">Total Sessions</p><p class="text-white font-bold" id="hist-stat-total">-</p></div>
+              <div class="bg-gray-800/80 p-2 rounded-lg border border-gray-700/50 text-center"><p class="text-[10px] text-gray-400">Today's Logins</p><p class="text-white font-bold" id="hist-stat-today">-</p></div>
+              <div class="bg-gray-800/80 p-2 rounded-lg border border-gray-700/50 text-center"><p class="text-[10px] text-gray-400">Currently Online</p><p class="text-green-400 font-bold" id="hist-stat-online">-</p></div>
+              <div class="bg-gray-800/80 p-2 rounded-lg border border-gray-700/50 text-center"><p class="text-[10px] text-gray-400">Total App Usage Time</p><p class="text-blue-400 font-bold text-xs mt-1" id="hist-stat-usage">-</p></div>
+              <div class="bg-gray-800/80 p-2 rounded-lg border border-gray-700/50 text-center col-span-2"><p class="text-[10px] text-gray-400">Avg Session</p><p class="text-white text-xs mt-1" id="hist-stat-avg">-</p></div>
+              <div class="bg-gray-800/80 p-2 rounded-lg border border-gray-700/50 text-center"><p class="text-[10px] text-gray-400">Longest</p><p class="text-white text-[10px] mt-1" id="hist-stat-max">-</p></div>
+              <div class="bg-gray-800/80 p-2 rounded-lg border border-gray-700/50 text-center"><p class="text-[10px] text-gray-400">Shortest</p><p class="text-white text-[10px] mt-1" id="hist-stat-min">-</p></div>
+            </div>
+
+            <!-- User List -->
+            <div id="owner-history-list" class="space-y-2 overflow-y-auto hide-scrollbar flex-1 pb-10">
+              <p class="text-center text-gray-500 py-4 font-mono text-sm">Loading users...</p>
+            </div>
           </div>
-          <div id="owner-history-list" class="space-y-3 max-h-[60vh] overflow-y-auto hide-scrollbar">
-            <p class="text-center text-gray-500 py-4 font-mono text-sm">Loading login history...</p>
+
+          <!-- Individual User Sub-View -->
+          <div id="adv-history-sub" class="hidden flex-col h-full">
+            <button id="btn-back-history" class="text-xs text-blue-400 hover:text-blue-300 mb-3 flex items-center gap-1">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg> Back to Users
+            </button>
+            <div class="bg-gray-800/80 rounded-xl p-3 mb-3 border border-gray-700 flex flex-col gap-2 relative">
+               <button id="btn-delete-user-sessions" class="absolute top-2 right-2 text-red-400 hover:text-red-300 bg-red-400/10 p-1.5 rounded-lg text-[10px] font-bold">🗑 DELETE ALL SESSIONS</button>
+               <div class="flex items-center gap-3">
+                 <img id="sub-user-photo" src="" class="w-12 h-12 rounded-full object-cover bg-gray-700 hidden">
+                 <div id="sub-user-initials" class="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-lg hidden"></div>
+                 <div>
+                   <h4 id="sub-user-name" class="text-white font-bold"></h4>
+                   <p id="sub-user-email" class="text-xs text-gray-400"></p>
+                 </div>
+               </div>
+               <div class="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-gray-700/50">
+                 <div><span class="text-[10px] text-gray-500 block">Total Sessions</span><span class="text-white text-sm" id="sub-user-total">0</span></div>
+                 <div><span class="text-[10px] text-gray-500 block">Total Usage Time</span><span class="text-white text-sm" id="sub-user-time">0s</span></div>
+                 <div><span class="text-[10px] text-gray-500 block">Last Login</span><span class="text-white text-xs" id="sub-user-last">-</span></div>
+                 <div><span class="text-[10px] text-gray-500 block">Current Status</span><span class="text-white text-xs font-bold" id="sub-user-status">-</span></div>
+               </div>
+            </div>
+            <h4 class="text-gray-300 font-bold text-xs mb-2 uppercase tracking-wider">Session History</h4>
+            <div id="sub-user-sessions" class="space-y-3 overflow-y-auto hide-scrollbar flex-1 pb-10">
+            </div>
           </div>
         </div>
 
         <div id="tab-system" class="owner-tab-content hidden space-y-4">
+
+          <div class="bg-[#1e293b] rounded-2xl p-4 border border-[#d4af37]/30 shadow-[0_0_15px_rgba(212,175,55,0.1)]">
+            <h3 class="text-white font-bold text-sm mb-4 flex items-center gap-2"><span class="text-xl">🚀</span> APP LAUNCH CONTROL</h3>
+            
+            <div class="flex items-center justify-between mb-4 pb-4 border-b border-gray-700/50">
+              <span class="text-sm font-semibold text-gray-300">Launch System</span>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="toggle-launch" class="sr-only peer">
+                <div class="w-11 h-6 bg-gray-700 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#d4af37]"></div>
+              </label>
+            </div>
+            
+            <div class="space-y-3 mb-4">
+              <div>
+                <label class="block text-xs text-gray-400 mb-1">Launch Date</label>
+                <input type="date" id="launch-date" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#d4af37]">
+              </div>
+              <div>
+                <label class="block text-xs text-gray-400 mb-1">Launch Time</label>
+                <input type="time" id="launch-time" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#d4af37]">
+              </div>
+            </div>
+            
+            <button id="btn-save-launch" class="w-full py-2.5 bg-[#d4af37] hover:bg-[#b5952f] text-black font-bold rounded-xl transition-all text-sm mb-3">SAVE LAUNCH SETTINGS</button>
+            <button id="btn-preview-launch" class="w-full py-2 bg-gray-800 border border-gray-600 hover:bg-gray-700 text-white font-semibold rounded-xl transition-all text-sm flex items-center justify-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+              Preview Launch Screen
+            </button>
+          </div>
+
           <div class="bg-[#1e293b] rounded-2xl p-4 border border-gray-700/50 shadow-md flex items-center justify-between">
             <h3 class="text-white font-bold text-sm">Birthday Feature</h3>
             <label class="relative inline-flex items-center cursor-pointer">
@@ -248,6 +324,7 @@ export async function renderOwnerPanel(container) {
 
   // Setup birthday toggle
   setupBirthdayToggle(container);
+  setupLaunchControl(container);
 
   // Load data in background
   setTimeout(() => loadPosts(container), 500);
@@ -1326,42 +1403,343 @@ async function loadFeedback(container) {
   }
 }
 
+
+// ================= Advanced Login History ================= //
+let liveHistoryTimers = [];
+
+function clearHistoryTimers() {
+  liveHistoryTimers.forEach(t => clearInterval(t));
+  liveHistoryTimers = [];
+}
+
 async function loadHistory(container) {
   const listEl = container.querySelector('#owner-history-list');
+  const mainView = container.querySelector('#adv-history-main');
+  const subView = container.querySelector('#adv-history-sub');
+  
   if (!listEl) return;
-  listEl.innerHTML = '<p class="text-center text-gray-500 py-4 font-mono text-sm">Loading login history...</p>';
+  listEl.innerHTML = '<p class="text-center text-gray-500 py-4 font-mono text-sm animate-pulse">Loading users...</p>';
+  
+  mainView.classList.remove('hidden');
+  mainView.classList.add('flex');
+  subView.classList.add('hidden');
+  subView.classList.remove('flex');
+  
+  clearHistoryTimers();
+  
   try {
-    const q = query(collection(db, 'loginHistory'), orderBy('loginTime', 'desc'), limit(50));
-    const snap = await getDocs(q);
-    if (snap.empty) {
+    const { collection, getDocs, deleteDoc, doc, query, orderBy, limit } = await import('../firebase-config.js');
+    
+    // Fetch all users first
+    const usersSnap = await getDocs(collection(db, 'users'));
+    
+    // Fetch sessions for all users in parallel
+    const sessionPromises = usersSnap.docs.map(async (userDoc) => {
+      try {
+        const sSnap = await getDocs(collection(db, 'loginHistory', userDoc.id, 'sessions'));
+        return sSnap.docs;
+      } catch(e) {
+        return [];
+      }
+    });
+    
+    const sessionDocsArrays = await Promise.all(sessionPromises);
+    let allSessions = [];
+    sessionDocsArrays.forEach(docs => docs.forEach(d => allSessions.push(d)));
+    
+    // Sort in memory by loginTime desc
+    allSessions.sort((a,b) => {
+      const dataA = a.data();
+      const dataB = b.data();
+      const timeA = dataA.loginTimeClient || (dataA.loginTime ? dataA.loginTime.toMillis() : 0);
+      const timeB = dataB.loginTimeClient || (dataB.loginTime ? dataB.loginTime.toMillis() : 0);
+      return timeB - timeA;
+    });
+    
+    const snapDocs = allSessions.slice(0, 500);
+    
+    let totalSessions = 0;
+    let todayLogins = 0;
+    let onlineUsers = 0;
+    let totalUsageMs = 0;
+    let longestMs = 0;
+    let shortestMs = Infinity;
+    
+    const todayStr = new Date().toLocaleDateString('en-GB');
+    const usersMap = {}; // uid -> { stats, sessions: [] }
+    
+    snapDocs.forEach(docSnap => {
+      const s = docSnap.data();
+      if (!s.uid) return;
+      
+      totalSessions++;
+      
+      const loginDate = s.loginTimeClient ? new Date(s.loginTimeClient) : (s.loginTime ? s.loginTime.toDate() : new Date());
+      if (loginDate.toLocaleDateString('en-GB') === todayStr) todayLogins++;
+      
+      let isOnline = false;
+      let durationMs = 0;
+      
+      if (s.status === 'Online') {
+        const timeSinceActive = Date.now() - (s.lastActive?.toMillis() || Date.now());
+        if (timeSinceActive < 90000) {
+          isOnline = true;
+          onlineUsers++;
+        }
+      }
+      
+      if (isOnline) {
+        durationMs = Date.now() - (s.loginTimeClient || loginDate.getTime());
+      } else if (s.logoutTime) {
+        durationMs = s.logoutTime.toMillis() - (s.loginTimeClient || loginDate.getTime());
+      } else if (s.durationSeconds) {
+        durationMs = s.durationSeconds * 1000;
+      }
+      
+      if (durationMs < 0) durationMs = 0;
+      totalUsageMs += durationMs;
+      if (durationMs > longestMs) longestMs = durationMs;
+      if (durationMs > 0 && durationMs < shortestMs) shortestMs = durationMs;
+      
+      if (!usersMap[s.uid]) {
+        usersMap[s.uid] = {
+          uid: s.uid,
+          name: s.name,
+          email: s.email,
+          photo: s.photo,
+          totalSessions: 0,
+          totalUsageMs: 0,
+          isOnline: false,
+          lastLogin: loginDate,
+          sessions: []
+        };
+      }
+      
+      const u = usersMap[s.uid];
+      u.totalSessions++;
+      u.totalUsageMs += durationMs;
+      if (isOnline) u.isOnline = true;
+      if (loginDate > u.lastLogin) u.lastLogin = loginDate;
+      u.sessions.push({ id: docSnap.id, ...s, calculatedDurationMs: durationMs, isOnline });
+    });
+    
+    // Update Global Stats
+    container.querySelector('#hist-stat-total').innerText = totalSessions;
+    container.querySelector('#hist-stat-today').innerText = todayLogins;
+    container.querySelector('#hist-stat-online').innerText = onlineUsers;
+    container.querySelector('#hist-stat-usage').innerText = formatMs(totalUsageMs);
+    container.querySelector('#hist-stat-avg').innerText = totalSessions > 0 ? formatMs(totalUsageMs / totalSessions) : '0s';
+    container.querySelector('#hist-stat-max').innerText = longestMs > 0 ? formatMs(longestMs) : '0s';
+    container.querySelector('#hist-stat-min').innerText = shortestMs !== Infinity ? formatMs(shortestMs) : '0s';
+    
+    const userArray = Object.values(usersMap).sort((a,b) => b.lastLogin - a.lastLogin);
+    
+    if (userArray.length === 0) {
       listEl.innerHTML = '<p class="text-center text-gray-500 py-4 font-mono text-sm">No login history found.</p>';
       return;
     }
+    
     let html = '';
-    snap.forEach(docSnap => {
-      const d = docSnap.data();
-      const date = d.loginTime ? d.loginTime.toDate().toLocaleString() : 'Unknown Time';
+    userArray.forEach(u => {
+      const statusHtml = u.isOnline 
+        ? `<span class="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-[10px] font-bold tracking-wide animate-pulse">ONLINE</span>`
+        : `<span class="px-2 py-0.5 bg-gray-700 text-gray-400 rounded text-[10px] font-bold tracking-wide">OFFLINE</span>`;
+        
       html += `
-        <div class="bg-[#1e293b] p-3 rounded-xl border border-gray-700/50 shadow-sm flex items-center justify-between gap-3">
-          <div class="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-white font-bold text-sm">
-            ${(d.userName || '?')[0].toUpperCase()}
+        <div class="user-hist-card bg-gray-800/50 hover:bg-gray-800 p-3 rounded-xl border border-gray-700/50 cursor-pointer transition-all flex items-center justify-between gap-3" data-uid="${u.uid}">
+          <div class="relative">
+            ${u.photo ? `<img src="${u.photo}" class="w-10 h-10 rounded-full object-cover">` : `<div class="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold">${(u.name||'?')[0].toUpperCase()}</div>`}
+            ${u.isOnline ? `<div class="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-gray-800 rounded-full"></div>` : ''}
           </div>
           <div class="flex-1 min-w-0">
-            <p class="font-bold text-white text-sm truncate">${sanitizeHTML(d.userName || 'Unknown')}</p>
-            <p class="text-xs text-gray-400">${date}</p>
+            <p class="font-bold text-white text-sm truncate">${sanitizeHTML(u.name || 'Unknown')}</p>
+            <p class="text-xs text-gray-400 truncate">${u.totalSessions} Sessions • ${formatMs(u.totalUsageMs)}</p>
           </div>
-          <div class="text-[10px] text-gray-500 text-right uppercase">
-            ${d.device || 'Unknown'}<br>${d.browser || 'Unknown'}
+          <div class="flex flex-col items-end gap-1">
+            ${statusHtml}
+            <span class="text-[9px] text-gray-500">${u.lastLogin.toLocaleDateString()}</span>
           </div>
         </div>
       `;
     });
+    
     listEl.innerHTML = html;
+    
+    // Bind click events to open sub-view
+    listEl.querySelectorAll('.user-hist-card').forEach(card => {
+      card.addEventListener('click', () => openUserHistory(card.dataset.uid, usersMap[card.dataset.uid], container));
+    });
+
+    // Master Delete Button
+    const btnMaster = container.querySelector('#btn-delete-all-history');
+    if (btnMaster) {
+      // replace clone to drop old listeners
+      const newBtn = btnMaster.cloneNode(true);
+      btnMaster.parentNode.replaceChild(newBtn, btnMaster);
+      newBtn.addEventListener('click', async () => {
+        if (!confirm('WARNING: This will permanently delete ALL login history for ALL users. Continue?')) return;
+        try {
+          const { writeBatch } = await import('../firebase-config.js');
+          const batch = writeBatch(db);
+          snapDocs.forEach(d => batch.delete(d.ref));
+          await batch.commit();
+          showToast('Entire login history deleted', 'success');
+          loadHistory(container);
+        } catch(e) {
+          console.error(e);
+          showToast('Failed to delete history', 'error');
+        }
+      });
+    }
+
   } catch (e) {
-    listEl.innerHTML = '<p class="text-center text-red-500 py-4 font-mono text-sm">Error loading login history.</p>';
+    listEl.innerHTML = '<p class="text-center text-red-500 py-4 font-mono text-sm">Error loading history.</p>';
     console.error(e);
   }
 }
+
+function openUserHistory(uid, userData, container) {
+  const mainView = container.querySelector('#adv-history-main');
+  const subView = container.querySelector('#adv-history-sub');
+  
+  mainView.classList.add('hidden');
+  mainView.classList.remove('flex');
+  subView.classList.remove('hidden');
+  subView.classList.add('flex');
+  
+  clearHistoryTimers();
+  
+  // Populate User Header
+  const photo = container.querySelector('#sub-user-photo');
+  const initials = container.querySelector('#sub-user-initials');
+  if (userData.photo) {
+    photo.src = userData.photo;
+    photo.classList.remove('hidden');
+    initials.classList.add('hidden');
+  } else {
+    initials.innerText = (userData.name||'?')[0].toUpperCase();
+    initials.classList.remove('hidden');
+    photo.classList.add('hidden');
+  }
+  
+  container.querySelector('#sub-user-name').innerText = userData.name || 'Unknown User';
+  container.querySelector('#sub-user-email').innerText = userData.email || 'No email';
+  container.querySelector('#sub-user-total').innerText = userData.totalSessions;
+  container.querySelector('#sub-user-time').innerText = formatMs(userData.totalUsageMs);
+  container.querySelector('#sub-user-last').innerText = userData.lastLogin.toLocaleString();
+  container.querySelector('#sub-user-status').innerText = userData.isOnline ? '🟢 Online' : '⚪ Offline';
+  
+  // Populate Sessions
+  const sessionsList = container.querySelector('#sub-user-sessions');
+  let sHtml = '';
+  userData.sessions.forEach((s, idx) => {
+    const isLive = s.isOnline;
+    const loginStr = (s.loginTimeClient ? new Date(s.loginTimeClient) : (s.loginTime?.toDate() || new Date())).toLocaleString();
+    const logoutStr = isLive ? 'Currently Active' : (s.logoutTime ? s.logoutTime.toDate().toLocaleString() : 'Unknown');
+    const statusLabel = isLive 
+      ? `<span class="text-green-400 font-bold tracking-wide animate-pulse">🟢 Currently Online</span>`
+      : `<span class="text-gray-400 font-semibold">Completed</span>`;
+      
+    sHtml += `
+      <div class="bg-gray-800 p-3 rounded-lg border border-gray-700 relative">
+        <button class="btn-del-session absolute top-2 right-2 text-gray-500 hover:text-red-400 p-1" data-id="${s.id}">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+        </button>
+        <div class="flex justify-between items-center mb-2 border-b border-gray-700 pb-2 mr-6">
+          <span class="text-white font-bold text-sm">Session #${userData.totalSessions - idx}</span>
+          ${statusLabel}
+        </div>
+        <div class="grid grid-cols-2 gap-y-2 text-xs">
+          <div><span class="text-gray-500 block">Login</span><span class="text-gray-300">${loginStr}</span></div>
+          <div><span class="text-gray-500 block">Logout</span><span class="text-gray-300">${logoutStr}</span></div>
+          <div class="col-span-2"><span class="text-gray-500 block">Used For</span><span class="text-blue-400 font-mono text-sm ${isLive ? 'live-timer' : ''}" data-start="${s.loginTimeClient || s.loginTime?.toMillis()}">${isLive ? 'Calculating...' : formatMsFull(s.calculatedDurationMs)}</span></div>
+          <div><span class="text-gray-500 block">Device</span><span class="text-gray-300">${s.device || 'Unknown'} - ${s.os || 'Unknown'}</span></div>
+          <div><span class="text-gray-500 block">Browser</span><span class="text-gray-300">${s.browser || 'Unknown'}</span></div>
+        </div>
+      </div>
+    `;
+  });
+  
+  sessionsList.innerHTML = sHtml;
+  
+  // Start live timers
+  sessionsList.querySelectorAll('.live-timer').forEach(el => {
+    const startMs = parseInt(el.dataset.start);
+    if (!startMs) return;
+    const update = () => el.innerText = formatMsFull(Date.now() - startMs);
+    update();
+    liveHistoryTimers.push(setInterval(update, 1000));
+  });
+  
+  // Back button
+  const backBtn = container.querySelector('#btn-back-history');
+  const newBack = backBtn.cloneNode(true);
+  backBtn.parentNode.replaceChild(newBack, backBtn);
+  newBack.addEventListener('click', () => loadHistory(container));
+  
+  // Delete all sessions for user
+  const delAllBtn = container.querySelector('#btn-delete-user-sessions');
+  const newDelAll = delAllBtn.cloneNode(true);
+  delAllBtn.parentNode.replaceChild(newDelAll, delAllBtn);
+  newDelAll.addEventListener('click', async () => {
+    if (!confirm(`Are you sure you want to delete ALL ${userData.totalSessions} sessions for ${userData.name}?`)) return;
+    try {
+      const { writeBatch, doc } = await import('../firebase-config.js');
+      const batch = writeBatch(db);
+      userData.sessions.forEach(s => {
+        batch.delete(doc(db, 'loginHistory', uid, 'sessions', s.id));
+      });
+      await batch.commit();
+      showToast('User sessions deleted', 'success');
+      loadHistory(container); // Go back to main
+    } catch(e) {
+      console.error(e);
+      showToast('Failed: ' + e.message, 'error'); console.error('DELETE ERROR:', e);
+    }
+  });
+  
+  // Single session delete
+  sessionsList.querySelectorAll('.btn-del-session').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      if (!confirm('Delete this session record?')) return;
+      const sid = e.currentTarget.dataset.id;
+      try {
+        const { deleteDoc, doc } = await import('../firebase-config.js');
+        await deleteDoc(doc(db, 'loginHistory', uid, 'sessions', sid));
+        btn.closest('.bg-gray-800').remove();
+        showToast('Session deleted', 'success');
+      } catch(err) {
+        console.error(err);
+        showToast('Failed: ' + err.message, 'error'); console.error('DELETE ERROR:', err);
+      }
+    });
+  });
+}
+
+function formatMs(ms) {
+  if (!ms || ms < 0) return '0s';
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s%60}s`;
+  return `${s}s`;
+}
+
+function formatMsFull(ms) {
+  if (!ms || ms < 0) return '0 Seconds';
+  const totalSecs = Math.floor(ms / 1000);
+  const h = Math.floor(totalSecs / 3600);
+  const m = Math.floor((totalSecs % 3600) / 60);
+  const s = totalSecs % 60;
+  let parts = [];
+  if (h > 0) parts.push(`${h} Hour${h !== 1 ? 's' : ''}`);
+  if (m > 0) parts.push(`${m} Minute${m !== 1 ? 's' : ''}`);
+  if (s > 0 || parts.length === 0) parts.push(`${s} Second${s !== 1 ? 's' : ''}`);
+  return parts.join(' ');
+}
+// ========================================================== //
+
 
 async function setupBirthdayToggle(container) {
   const toggle = container.querySelector('#toggle-birthday');
@@ -1388,6 +1766,83 @@ async function setupBirthdayToggle(container) {
       console.error(err);
       showToast('Failed to update setting', 'error');
       e.target.checked = !e.target.checked;
+    }
+  });
+}
+
+async function setupLaunchControl(container) {
+  const toggle = container.querySelector('#toggle-launch');
+  const dateInput = container.querySelector('#launch-date');
+  const timeInput = container.querySelector('#launch-time');
+  const saveBtn = container.querySelector('#btn-save-launch');
+  const previewBtn = container.querySelector('#btn-preview-launch');
+  if (!toggle || !dateInput || !timeInput || !saveBtn || !previewBtn) return;
+  
+  const settingsRef = doc(db, 'systemSettings', 'appLaunch');
+  let currentSettings = { enabled: false, launchTime: Date.now() };
+
+  try {
+    const snap = await getDoc(settingsRef);
+    if (snap.exists()) {
+      currentSettings = snap.data();
+      toggle.checked = currentSettings.enabled;
+      if (currentSettings.launchTime) {
+        const d = new Date(currentSettings.launchTime.toMillis ? currentSettings.launchTime.toMillis() : currentSettings.launchTime);
+        dateInput.value = d.toISOString().split('T')[0];
+        timeInput.value = d.toTimeString().substring(0,5);
+      }
+    }
+  } catch (e) { console.error('Error fetching launch settings:', e); }
+
+  toggle.addEventListener('change', async (e) => {
+    try {
+      const { setDoc, serverTimestamp } = await import('../firebase-config.js');
+      await setDoc(settingsRef, { 
+        enabled: e.target.checked, 
+        updatedBy: authManager.currentUser.uid, 
+        updatedAt: serverTimestamp() 
+      }, { merge: true });
+      showToast('Launch System ' + (e.target.checked ? 'Enabled' : 'Disabled'), 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to update launch setting', 'error');
+      e.target.checked = !e.target.checked;
+    }
+  });
+
+  saveBtn.addEventListener('click', async () => {
+    if (!dateInput.value || !timeInput.value) {
+      showToast('Please select date and time', 'error');
+      return;
+    }
+    
+    const timeVal = new Date(dateInput.value + 'T' + timeInput.value).getTime();
+    if (isNaN(timeVal)) {
+      showToast('Invalid date/time', 'error');
+      return;
+    }
+
+    try {
+      const { setDoc, serverTimestamp } = await import('../firebase-config.js');
+      await setDoc(settingsRef, {
+        launchTime: timeVal,
+        updatedBy: authManager.currentUser.uid,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      showToast('Launch Time Saved!', 'success');
+    } catch(e) {
+      console.error(e);
+      showToast('Failed to save launch time', 'error');
+    }
+  });
+
+  previewBtn.addEventListener('click', async () => {
+    try {
+      const { launchManager } = await import('../services/launchManager.js');
+      launchManager.previewScreen();
+    } catch(e) {
+      console.error(e);
+      showToast('Could not load preview', 'error');
     }
   });
 }

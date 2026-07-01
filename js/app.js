@@ -1249,7 +1249,7 @@ function showInstallBanner() {
 // ===== APP LAUNCH COUNTDOWN =====
 function checkAppLaunch() {
   return new Promise(async (resolve) => {
-    const launchTime = new Date('2026-07-06T09:00:00+05:30').getTime();
+    const launchTime = new Date('2026-08-02T09:00:00+05:30').getTime();
     
     // Fetch real time from server to prevent users from bypassing by changing their device clock
     let timeOffset = 0;
@@ -1328,7 +1328,7 @@ function checkAppLaunch() {
         </div>
         
         <div class="px-6 py-3 rounded-full bg-white/5 border border-white/10 backdrop-blur-sm">
-          <p class="text-sm md:text-base text-gray-300 font-medium tracking-wide">Launching on <span class="text-white font-bold">06 July 2026</span> at <span class="text-white font-bold">09:00 AM</span></p>
+          <p class="text-sm md:text-base text-gray-300 font-medium tracking-wide">Launching on <span class="text-white font-bold">02 August 2026</span> at <span class="text-white font-bold">09:00 AM</span></p>
         </div>
       </div>
     `;

@@ -1617,7 +1617,7 @@ function checkBirthdayCelebration() {
     console.log("Stage 1 Started");
     try {
       s1Title.classList.add('visible');
-      await typeText(s1Title, `👋 Hello,\n${name}`, 95);
+      await typeText(s1Title, `👋 Hello...Ready To 🎂 Birthday 🥳 Celebration ? ,\n${name}`, 95);
       await delay(1200); 
       console.log("Stage 1 Completed");
     } catch (e) {
@@ -1889,7 +1889,7 @@ function checkBirthdayCelebration() {
       s2Header.style.transition = 'opacity 0.6s';
       await delay(600);
       
-      s2TitleMain.innerHTML = '🎉 Have a Wonderful Birthday! ❤️';
+      s2TitleMain.innerHTML = '🎉Celebrate Every Beautiful Moment❤️';
       s2Name.innerHTML = name;
       s2Quote.innerHTML = '';
       

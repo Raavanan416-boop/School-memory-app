@@ -518,6 +518,7 @@ export async function renderProfile(container, data = null) {
       setTimeout(() => {
         switch (action) {
           case 'edit-profile': showEditProfileModal(); break;
+          case 'birthday-history': showBirthdayHistoryModal(uid); break;
           case 'change-password': showChangePasswordModal(); break;
           case 'saved-memories': showSavedPosts(); break;
           case 'leaderboard': router.navigate('leaderboard'); break;
@@ -2083,5 +2084,101 @@ function showThemePickerModal() {
         authManager.updateProfile({ theme: themeId });
       } catch (e) { /* non-critical */ }
     });
+  });
+}
+
+// ===== BIRTHDAY WISH HISTORY =====
+function showBirthdayHistoryModal(userId) {
+  const modal = router.openModal('', { title: '🎂 Birthday Wish History' });
+  
+  modal.body.innerHTML = `
+    <div class="p-4 bg-gray-50 min-h-[50vh]">
+      <div class="text-center mb-6">
+        <div class="text-4xl mb-2">🕰️</div>
+        <h3 class="text-lg font-bold text-navy-800">Past Birthdays</h3>
+        <p class="text-sm text-gray-500">Archived birthday conversations</p>
+      </div>
+      
+      <div id="history-list-container" class="space-y-4">
+        <div class="flex justify-center py-8">
+          <div class="w-6 h-6 border-2 border-navy-500 border-t-transparent rounded-full animate-spin"></div>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  const listContainer = modal.body.querySelector('#history-list-container');
+  const uid = userId || authManager.currentUser?.uid;
+  
+  // Fetch history records
+  const q = query(collection(db, 'birthdayWishHistory'), where('userId', '==', uid));
+  getDocs(q).then(snap => {
+    if (snap.empty) {
+      listContainer.innerHTML = `
+        <div class="text-center py-8">
+          <div class="text-3xl mb-2">📭</div>
+          <p class="text-sm font-medium text-navy-700">No Birthday Wish History Yet.</p>
+          <p class="text-xs text-gray-400 mt-1">Archived birthdays will appear here.</p>
+        </div>
+      `;
+      return;
+    }
+    
+    const records = [];
+    snap.forEach(d => records.push({ id: d.id, ...d.data() }));
+    
+    // Sort descending by year
+    records.sort((a, b) => (b.year || 0) - (a.year || 0));
+    
+    listContainer.innerHTML = records.map((rec, i) => `
+      <div class="card p-5 bg-white border border-pink-100 hover:border-pink-200 transition-all shadow-sm" style="animation: fadeUp 0.3s ease-out ${i * 0.1}s both;">
+        <div class="flex items-center justify-between mb-3">
+          <h4 class="font-bold text-navy-800 text-lg">🎂 ${rec.year} Birthday</h4>
+          <span class="text-[10px] text-gray-400 font-semibold uppercase bg-gray-100 px-2 py-0.5 rounded-full">Archive</span>
+        </div>
+        
+        <div class="flex items-center gap-4 mb-4 text-sm font-medium text-navy-700">
+          <div class="flex items-center gap-1">
+            <span class="text-pink-500">💌</span>
+            <span>${rec.wishesCount || 0} Wishes</span>
+          </div>
+          <div class="flex items-center gap-1">
+            <span class="text-blue-500">💬</span>
+            <span>${rec.repliesCount || 0} Replies</span>
+          </div>
+          <div class="flex items-center gap-1">
+            <span class="text-red-500">❤️</span>
+            <span>${rec.reactionsCount || 0} Reactions</span>
+          </div>
+        </div>
+        
+        <button class="w-full py-2 bg-pink-50 text-pink-600 rounded-xl text-sm font-bold hover:bg-pink-100 transition-colors view-history-btn" data-year="${rec.year}">
+          View Conversation
+        </button>
+      </div>
+    `).join('');
+    
+    listContainer.querySelectorAll('.view-history-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const year = btn.dataset.year;
+        modal.close();
+        try {
+          const birthdayModule = await import('./birthday.js');
+          const userName = document.querySelector('[data-user-name]')?.textContent || 'User';
+          if (birthdayModule.showViewWishesModal) {
+            birthdayModule.showViewWishesModal(uid, userName, true, year);
+          } else {
+            showToast('Unable to open history viewer', 'error');
+          }
+        } catch (e) {
+          console.error(e);
+          showToast('Failed to load viewer', 'error');
+        }
+      });
+    });
+    
+  }).catch(err => {
+    console.error('Fetch history error:', err);
+    listContainer.innerHTML = `<div class="text-center py-6 text-red-400 text-sm">Failed to load history</div>`;
   });
 }

@@ -57,6 +57,7 @@ export async function renderOwnerPanel(container) {
           <button class="owner-tab-btn" data-tab="system">⚙️ System</button>
           <button class="owner-tab-btn" data-tab="feedback">📝 Feedback</button>
           <button class="owner-tab-btn" data-tab="history">🕒 Logins</button>
+          <button class="owner-tab-btn" data-tab="bday_history">🎂 Bday Hist</button>
           <button class="owner-tab-btn" data-tab="reset">☢️ Reset</button>
         </div>
 
@@ -68,6 +69,19 @@ export async function renderOwnerPanel(container) {
           </div>
           <div id="owner-user-list" class="space-y-2">
             <p class="text-center text-sm text-gray-500 py-8 font-mono animate-pulse">Fetching directory...</p>
+          </div>
+        </div>
+
+        <div id="tab-bday_history" class="owner-tab-content hidden space-y-4">
+          <div class="flex justify-between items-center mb-2">
+            <h3 class="text-white font-bold">Birthday Wish History</h3>
+            <button id="btn-refresh-bday-history" class="text-xs text-blue-400 hover:text-blue-300">Refresh</button>
+          </div>
+          <div class="relative mb-3">
+            <input type="text" id="owner-search-bday-history" class="w-full px-4 py-2 bg-[#1e293b] border border-gray-700/50 rounded-xl text-sm text-white focus:outline-none focus:border-blue-500 transition-colors shadow-inner" placeholder="Search by Year or User ID..."/>
+          </div>
+          <div id="owner-bday-history-list" class="space-y-3 max-h-[60vh] overflow-y-auto hide-scrollbar">
+            <p class="text-center text-gray-500 py-4 font-mono text-sm">Loading history...</p>
           </div>
         </div>
 
@@ -317,6 +331,7 @@ export async function renderOwnerPanel(container) {
   container.querySelector('#btn-refresh-posts').addEventListener('click', () => loadPosts(container));
   container.querySelector('#btn-refresh-feedback').addEventListener('click', () => loadFeedback(container));
   container.querySelector('#btn-refresh-history').addEventListener('click', () => loadHistory(container));
+  container.querySelector('#btn-refresh-bday-history')?.addEventListener('click', () => loadBdayHistory(container));
   container.querySelector('#btn-send-announcement').addEventListener('click', () => executeSendAnnouncement(container));
   container.querySelector('#btn-reset-notifs').addEventListener('click', () => executeResetNotifications());
   container.querySelector('#btn-force-refresh').addEventListener('click', () => executeForceRefresh());
@@ -330,6 +345,7 @@ export async function renderOwnerPanel(container) {
   setTimeout(() => loadPosts(container), 500);
   setTimeout(() => loadFeedback(container), 1000);
   setTimeout(() => loadHistory(container), 1500);
+  setTimeout(() => loadBdayHistory(container), 2000);
 
   } catch (err) {
     console.error('Owner Panel Error:', err);
@@ -1845,4 +1861,82 @@ async function setupLaunchControl(container) {
       showToast('Could not load preview', 'error');
     }
   });
+}
+
+async function loadBdayHistory(container) {
+  const list = container.querySelector('#owner-bday-history-list');
+  if (!list) return;
+  list.innerHTML = `<p class="text-center text-gray-500 py-4 font-mono text-sm">Loading history...</p>`;
+  
+  try {
+    const snap = await getDocs(query(collection(db, 'birthdayWishHistory'), orderBy('archivedAt', 'desc')));
+    if (snap.empty) {
+      list.innerHTML = `<p class="text-center text-gray-500 py-4 font-mono text-sm">No birthday history found.</p>`;
+      return;
+    }
+
+    let records = [];
+    snap.forEach(d => records.push({ id: d.id, ...d.data() }));
+
+    const renderRecords = (data) => {
+      if (data.length === 0) {
+        list.innerHTML = `<p class="text-center text-gray-500 py-4 font-mono text-sm">No matches found.</p>`;
+        return;
+      }
+      
+      list.innerHTML = data.map(rec => {
+        return `
+          <div class="bg-[#1e293b] p-4 rounded-xl border border-gray-700/50 relative">
+            <div class="flex justify-between items-start mb-2">
+              <div>
+                <p class="text-white font-bold">${sanitizeHTML(rec.userId)} <span class="text-xs text-gray-400 font-mono">(${rec.year})</span></p>
+                <p class="text-[10px] text-gray-400">Archived: ${rec.archivedAt?.toDate ? new Date(rec.archivedAt.toDate()).toLocaleString() : 'N/A'}</p>
+              </div>
+              <button class="delete-history-btn text-red-500 hover:text-red-400 p-2" data-id="${rec.id}">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+              </button>
+            </div>
+            <div class="flex gap-4 text-xs text-gray-300 mt-3">
+              <span>Wishes: <span class="text-pink-400">${rec.wishesCount || 0}</span></span>
+              <span>Replies: <span class="text-blue-400">${rec.repliesCount || 0}</span></span>
+              <span>Reactions: <span class="text-green-400">${rec.reactionsCount || 0}</span></span>
+            </div>
+          </div>
+        `;
+      }).join('');
+      
+      // Bind delete
+      list.querySelectorAll('.delete-history-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Permanently delete this archived birthday record? This cannot be undone.')) return;
+          try {
+            await deleteDoc(doc(db, 'birthdayWishHistory', btn.dataset.id));
+            btn.closest('.bg-\\[\\#1e293b\\]').remove();
+            showToast('Archived history deleted', 'success');
+          } catch (e) {
+            console.error(e);
+            showToast('Failed to delete', 'error');
+          }
+        });
+      });
+    };
+
+    renderRecords(records);
+
+    const searchInput = container.querySelector('#owner-search-bday-history');
+    if (searchInput) {
+      searchInput.addEventListener('input', (e) => {
+        const queryTerm = e.target.value.toLowerCase();
+        const filtered = records.filter(r => 
+          (r.userId && r.userId.toLowerCase().includes(queryTerm)) ||
+          (r.year && r.year.toString().includes(queryTerm))
+        );
+        renderRecords(filtered);
+      });
+    }
+
+  } catch (err) {
+    console.error('Error loading bday history:', err);
+    list.innerHTML = `<p class="text-center text-red-500 py-4 font-mono text-sm">Failed to load history</p>`;
+  }
 }

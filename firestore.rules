@@ -172,34 +172,53 @@ service cloud.firestore {
         && request.resource.data.authorId == request.auth.uid;
     }
 
-    // New Birthday Wish Reply System
-    match /birthdayWishes/{birthdayUserId}/wishes/{wishId} {
+    // New Birthday Conversation System (Active Birthday Only)
+    match /birthdayConversations/{birthdayUserId}/wishes/{wishId} {
       allow read: if isAuthenticated() && (birthdayUserId == request.auth.uid || resource.data.senderId == request.auth.uid || isAdmin());
       allow create: if isAuthenticated() && request.resource.data.senderId == request.auth.uid && wishId == request.auth.uid;
-      // Birthday person can update 'seen' and 'reactions'
       allow update: if isAuthenticated() && (
         (birthdayUserId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['seen', 'reactions']))
         || isAdmin()
       );
-      // Deleting birthday wishes is only allowed for Admins (permanent records)
-      allow delete: if isAdmin();
+      allow delete: if isAuthenticated() && (birthdayUserId == request.auth.uid || isAdmin());
 
       match /replies/{replyId} {
         allow read: if isAuthenticated() && (
           birthdayUserId == request.auth.uid || 
-          get(/databases/$(database)/documents/birthdayWishes/$(birthdayUserId)/wishes/$(wishId)).data.senderId == request.auth.uid || 
+          get(/databases/$(database)/documents/birthdayConversations/$(birthdayUserId)/wishes/$(wishId)).data.senderId == request.auth.uid || 
           isAdmin()
         );
         allow create: if isAuthenticated() && (
           birthdayUserId == request.auth.uid || 
-          get(/databases/$(database)/documents/birthdayWishes/$(birthdayUserId)/wishes/$(wishId)).data.senderId == request.auth.uid
+          get(/databases/$(database)/documents/birthdayConversations/$(birthdayUserId)/wishes/$(wishId)).data.senderId == request.auth.uid
         );
         allow update: if isAuthenticated() && (
           birthdayUserId == request.auth.uid || 
-          get(/databases/$(database)/documents/birthdayWishes/$(birthdayUserId)/wishes/$(wishId)).data.senderId == request.auth.uid
+          get(/databases/$(database)/documents/birthdayConversations/$(birthdayUserId)/wishes/$(wishId)).data.senderId == request.auth.uid
         ) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
-        // Replies are permanent
+        allow delete: if isAuthenticated() && (birthdayUserId == request.auth.uid || isAdmin());
+      }
+    }
+
+    // Birthday Wish History (Archived Birthdays)
+    match /birthdayWishHistory/{historyId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isAdmin();
+      
+      match /wishes/{wishId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated();
+        allow update: if isAuthenticated();
         allow delete: if isAdmin();
+        
+        match /replies/{replyId} {
+          allow read: if isAuthenticated();
+          allow create: if isAuthenticated();
+          allow update: if isAuthenticated();
+          allow delete: if isAdmin();
+        }
       }
     }
 

@@ -305,7 +305,74 @@ export function destroyBirthday() {
   cleanupListeners();
 }
 
+async function archiveExpiredBirthdays() {
+  if (!authManager.currentUser) return;
+  const uid = authManager.currentUser.uid;
+  const currentYear = new Date().getFullYear();
+  
+  try {
+    // Check if we have active wishes
+    const wishesSnap = await getDocs(collection(db, 'birthdayConversations', uid, 'wishes'));
+    if (wishesSnap.empty) return;
+    
+    // Check the year of the first wish to see if it's from a past birthday
+    const firstWish = wishesSnap.docs[0].data();
+    const wishYear = firstWish.year || (currentYear - 1);
+    
+    // Check if birthday is today
+    const birthdayToday = authManager.userData?.dateOfBirth ? isBirthdayToday(authManager.userData.dateOfBirth) : false;
+    
+    // Archive if it's not their birthday today OR if the wishes are explicitly from a past year
+    if (!birthdayToday || wishYear < currentYear) {
+      console.log('Archiving expired birthday conversation for year:', wishYear);
+      
+      let totalWishes = 0;
+      let totalReplies = 0;
+      let totalReactions = 0;
+      
+      const historyDocRef = doc(db, 'birthdayWishHistory', `${uid}_${wishYear}`);
+      await setDoc(historyDocRef, {
+        userId: uid,
+        year: wishYear,
+        archivedAt: serverTimestamp(),
+      });
+      
+      for (const wishDoc of wishesSnap.docs) {
+        totalWishes++;
+        const wData = wishDoc.data();
+        if (wData.reactions) totalReactions += wData.reactions.length;
+        
+        // Move wish to history
+        await setDoc(doc(db, 'birthdayWishHistory', `${uid}_${wishYear}`, 'wishes', wishDoc.id), wData);
+        
+        // Move replies
+        const repliesSnap = await getDocs(collection(db, 'birthdayConversations', uid, 'wishes', wishDoc.id, 'replies'));
+        for (const repDoc of repliesSnap.docs) {
+          totalReplies++;
+          await setDoc(doc(db, 'birthdayWishHistory', `${uid}_${wishYear}`, 'wishes', wishDoc.id, 'replies', repDoc.id), repDoc.data());
+          await deleteDoc(repDoc.ref);
+        }
+        
+        await deleteDoc(wishDoc.ref);
+      }
+      
+      // Update summary stats
+      await setDoc(historyDocRef, {
+        wishesCount: totalWishes,
+        repliesCount: totalReplies,
+        reactionsCount: totalReactions
+      }, { merge: true });
+      
+      console.log('Archive complete');
+    }
+  } catch (err) {
+    console.error('Error archiving birthdays:', err);
+  }
+}
+
 export async function renderBirthday(container, data = {}) {
+  // Run archiving in the background
+  archiveExpiredBirthdays();
   router.registerDestroy('birthday', destroyBirthday);
   
   // Mark general birthday notifications as read when page opens
@@ -358,7 +425,7 @@ export async function renderBirthday(container, data = {}) {
     await Promise.all(allDisplayedUsers.map(async (u) => {
       if (u.id === currentUserId) return;
       try {
-        const snap = await getDoc(doc(db, 'birthdayWishes', u.id, 'wishes', currentUserId));
+        const snap = await getDoc(doc(db, 'birthdayConversations', u.id, 'wishes', currentUserId));
         if (snap.exists()) wishedUserIds.add(u.id);
       } catch (e) { console.error(e); }
     }));
@@ -436,7 +503,7 @@ export async function renderBirthday(container, data = {}) {
           <span class="text-[10px] px-2 py-0.5 rounded-full bg-warm-100 text-warm-600 font-semibold">Next 10 days</span>
         </div>
         <div class="space-y-2" id="upcoming-list">
-          ${upcomingTen.length > 0 ? upcomingTen.map(u => renderBirthdayCard(u)).join('') : `
+          ${upcomingTen.length > 0 ? upcomingTen.map(u => renderBirthdayCard(u, false, wishedUserIds)).join('') : `
             <div class="card p-5 text-center">
               <div class="text-2xl mb-2">🗓️</div>
               <p class="text-sm font-medium text-navy-700">No birthdays in the next 10 days</p>
@@ -499,7 +566,7 @@ export async function renderBirthday(container, data = {}) {
 
       try {
         const dupeQ = query(
-          collection(db, 'birthdayWishes', userId, 'wishes'),
+          collection(db, 'birthdayConversations', userId, 'wishes'),
           where('senderId', '==', authManager.currentUser.uid),
           where('year', '==', currentYear)
         );
@@ -532,7 +599,7 @@ export async function renderBirthday(container, data = {}) {
       const userId = targetBtn.dataset.uid;
       const userName = targetBtn.dataset.name;
       try {
-        const snap = await getDoc(doc(db, 'birthdayWishes', userId, 'wishes', authManager.currentUser.uid));
+        const snap = await getDoc(doc(db, 'birthdayConversations', userId, 'wishes', authManager.currentUser.uid));
         if (snap.exists()) {
           showConversationModal(userId, { id: userId, fullName: userName }, snap.id, snap.data());
         } else {
@@ -605,7 +672,7 @@ export async function renderBirthday(container, data = {}) {
         <div class="bday-modal-body">
           ${filtered.length > 0 ? `
             <div class="bday-modal-list">
-              ${filtered.map(u => renderBirthdayCard(u, true)).join('')}
+              ${filtered.map(u => renderBirthdayCard(u, true, wishedUserIds)).join('')}
             </div>
           ` : `
             <div class="bday-modal-empty">
@@ -670,7 +737,7 @@ export async function renderBirthday(container, data = {}) {
       try {
         const userSnap = await getDoc(doc(db, 'users', data.birthdayUserId));
         if (userSnap.exists()) {
-          const wishSnap = await getDoc(doc(db, 'birthdayWishes', data.birthdayUserId, 'wishes', data.wishId));
+          const wishSnap = await getDoc(doc(db, 'birthdayConversations', data.birthdayUserId, 'wishes', data.wishId));
           const wishData = wishSnap.exists() ? wishSnap.data() : null;
           if (wishData) {
             showConversationModal(data.birthdayUserId, { id: userSnap.id, ...userSnap.data() }, data.wishId, wishData);
@@ -720,7 +787,7 @@ function renderBirthdayCard(u, showFullDate = false, wishedUserIds = new Set()) 
         <span class="text-xs px-2.5 py-1 rounded-full ${badgeClass} whitespace-nowrap">
           ${badgeText}
         </span>
-        ${u.id !== authManager.currentUser?.uid ? (
+        ${u.id !== authManager.currentUser?.uid && u.dateOfBirth && isBirthdayToday(u.dateOfBirth) ? (
           wishedUserIds.has(u.id) ? `
             <button class="text-[10px] font-semibold text-pink-600 bg-pink-100 px-2 py-1 rounded-full hover:bg-pink-200 view-conversation-btn" data-uid="${u.id}" data-name="${sanitizeHTML(u.fullName || '')}">
               💌 View Conversation
@@ -768,7 +835,7 @@ function showWishModal(userId, userName) {
 
       // Save wish to birthdayWishes collection structure
       const wishId = authManager.currentUser.uid;
-      await setDoc(doc(db, 'birthdayWishes', userId, 'wishes', wishId), {
+      await setDoc(doc(db, 'birthdayConversations', userId, 'wishes', wishId), {
         senderId: authManager.currentUser.uid,
         senderName: authManager.userData?.fullName || 'Unknown',
         senderPhoto: authManager.userData?.photoURL || authManager.userData?.profilePic || '',
@@ -799,14 +866,14 @@ function showWishModal(userId, userName) {
 
 // ===== VIEW WISHES MODAL (birthday person) =====
 
-function showViewWishesModal(userId, userName) {
-  const modal = router.openModal('', { title: '❤️ Birthday Wishes' });
+export function showViewWishesModal(userId, userName, isHistory = false, historyYear = null) {
+  const modal = router.openModal('', { title: isHistory ? `❤️ ${historyYear} Birthday Wishes` : '❤️ Birthday Wishes' });
   modal.body.innerHTML = `
     <div class="p-4">
       <div class="text-center mb-4">
         <div class="text-3xl mb-1">🎂</div>
-        <h3 class="text-base font-bold text-navy-800">${sanitizeHTML(userName)}'s Wishes</h3>
-        <p class="text-xs text-gray-400">All the love from your classmates</p>
+        <h3 class="text-base font-bold text-navy-800">${sanitizeHTML(userName)}'s Wishes ${isHistory ? `(${historyYear})` : ''}</h3>
+        <p class="text-xs text-gray-400">${isHistory ? 'Archived birthday conversation' : 'All the love from your classmates'}</p>
       </div>
       <div id="wishes-list-container" class="space-y-3">
         <div class="flex justify-center py-6">
@@ -822,18 +889,22 @@ function showViewWishesModal(userId, userName) {
   let unsubWishes = null;
 
   try {
-    const q = query(
-      collection(db, 'birthdayWishes', userId, 'wishes'),
-      where('year', '==', currentYear)
-    );
+    let q;
+    if (isHistory) {
+      q = query(collection(db, 'birthdayWishHistory', `${userId}_${historyYear}`, 'wishes'));
+    } else {
+      q = query(
+        collection(db, 'birthdayConversations', userId, 'wishes'),
+        where('year', '==', currentYear)
+      );
+    }
     
     unsubWishes = onSnapshot(q, (snap) => {
       if (snap.empty) {
         listContainer.innerHTML = `
           <div class="text-center py-8">
             <div class="text-4xl mb-3">💌</div>
-            <p class="text-sm font-medium text-navy-700">No wishes yet</p>
-            <p class="text-xs text-gray-400 mt-1">Your classmates will send wishes soon!</p>
+            <p class="text-sm font-medium text-navy-700">No wishes found</p>
           </div>
         `;
         return;
@@ -859,9 +930,9 @@ function showViewWishesModal(userId, userName) {
           const time = w.createdAt?.toDate ? timeAgo(w.createdAt.toDate()) : 'just now';
           const isSeen = w.seen;
           
-          // Only mark as seen if I am the birthday person viewing it and it hasn't been seen
-          if (!isSeen && userId === authManager.currentUser?.uid) {
-            updateDoc(doc(db, 'birthdayWishes', userId, 'wishes', w.id), { seen: true }).catch(console.error);
+          // Only mark as seen if active
+          if (!isHistory && !isSeen && userId === authManager.currentUser?.uid) {
+            updateDoc(doc(db, 'birthdayConversations', userId, 'wishes', w.id), { seen: true }).catch(console.error);
           }
           
           return `
@@ -877,7 +948,7 @@ function showViewWishesModal(userId, userName) {
                       ${time}
                     </p>
                     <button class="px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors flex items-center gap-1 reply-btn" data-wish-id="${w.id}" data-sender-name="${sanitizeHTML(w.senderName || '')}">
-                      💙 Reply / Thanks
+                      ${isHistory ? '💙 View Replies' : '💙 Reply / Thanks'}
                     </button>
                   </div>
                 </div>
@@ -893,7 +964,7 @@ function showViewWishesModal(userId, userName) {
           const wishId = btn.dataset.wishId;
           const wish = wishes.find(ww => ww.id === wishId);
           if (wish) {
-            showConversationModal(userId, userName, wishId, wish);
+            showConversationModal(userId, { id: userId, fullName: userName }, wishId, wish, isHistory, historyYear);
           }
         });
       });
@@ -923,12 +994,12 @@ function showViewWishesModal(userId, userName) {
 
 // ===== CONVERSATION & REPLY MODAL (Thread View) =====
 
-function showConversationModal(birthdayUserId, birthdayUserObjOrName, wishId, wishData) {
+function showConversationModal(birthdayUserId, birthdayUserObjOrName, wishId, wishData, isHistory = false, historyYear = null) {
   const isMeBirthdayPerson = authManager.currentUser?.uid === birthdayUserId;
   const birthdayUserName = typeof birthdayUserObjOrName === 'string' ? birthdayUserObjOrName : birthdayUserObjOrName.fullName;
   const otherName = isMeBirthdayPerson ? wishData.senderName : birthdayUserName;
   
-  const modal = router.openModal('', { title: `🎂 Chat with ${sanitizeHTML(otherName)}` });
+  const modal = router.openModal('', { title: `🎂 Chat with ${sanitizeHTML(otherName)} ${isHistory ? `(${historyYear})` : ''}` });
   
   modal.body.innerHTML = `
     <div class="flex flex-col h-[70vh] bg-gray-50 relative">
@@ -963,6 +1034,7 @@ function showConversationModal(birthdayUserId, birthdayUserObjOrName, wishId, wi
       </div>
 
       <!-- Reply Input Area -->
+      ${!isHistory ? `
       <div class="absolute bottom-0 left-0 right-0 bg-white p-3 border-t border-gray-100 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
         <!-- Quick Replies -->
         <div class="flex gap-2 overflow-x-auto pb-2 scrollbar-hide snap-x">
@@ -981,18 +1053,25 @@ function showConversationModal(birthdayUserId, birthdayUserObjOrName, wishId, wi
           </button>
         </div>
       </div>
+      ` : ''}
     </div>
   `;
 
   // Real-time Wish Updates (for reactions & seen status)
-  const unsubWish = onSnapshot(doc(db, 'birthdayWishes', birthdayUserId, 'wishes', wishId), (snap) => {
+  const wishRef = isHistory 
+    ? doc(db, 'birthdayWishHistory', `${birthdayUserId}_${historyYear}`, 'wishes', wishId)
+    : doc(db, 'birthdayConversations', birthdayUserId, 'wishes', wishId);
+    
+  const unsubWish = onSnapshot(wishRef, (snap) => {
     if (!snap.exists()) return;
     const data = snap.data();
     
     // Mark related notifications as read when opening conversation
-    notificationManager.markRelatedAsRead({ type: 'birthday_wish', wishId: wishId });
-    notificationManager.markRelatedAsRead({ type: 'birthday_reply', wishId: wishId });
-    notificationManager.markRelatedAsRead({ type: 'birthday_reaction', wishId: wishId });
+    if (!isHistory) {
+      notificationManager.markRelatedAsRead({ type: 'birthday_wish', wishId: wishId });
+      notificationManager.markRelatedAsRead({ type: 'birthday_reply', wishId: wishId });
+      notificationManager.markRelatedAsRead({ type: 'birthday_reaction', wishId: wishId });
+    }
 
     // Update seen status
     const seenEl = modal.body.querySelector('#wish-seen-status');
@@ -1004,7 +1083,7 @@ function showConversationModal(birthdayUserId, birthdayUserObjOrName, wishId, wi
     // Update reactions
     const rxContainer = modal.body.querySelector('#reactions-container');
     if (rxContainer) {
-      if (isMeBirthdayPerson) {
+      if (isMeBirthdayPerson && !isHistory) {
         // Birthday person can add reactions
         const availableReactions = ['❤️', '🎉', '🥳', '😊', '🙏'];
         const currentRx = data.reactions || [];
@@ -1021,7 +1100,7 @@ function showConversationModal(birthdayUserId, birthdayUserObjOrName, wishId, wi
             else newRx.push(rx);
             
             try {
-              await updateDoc(doc(db, 'birthdayWishes', birthdayUserId, 'wishes', wishId), { reactions: newRx });
+              await updateDoc(wishRef, { reactions: newRx });
               if (newRx.includes(rx)) {
                 await createNotification('birthday_reaction', wishData.senderId, {
                   message: `${authManager.userData?.fullName} reacted ${rx} to your birthday wish.`,
@@ -1034,7 +1113,7 @@ function showConversationModal(birthdayUserId, birthdayUserObjOrName, wishId, wi
           });
         });
       } else {
-        // Sender only sees reactions
+        // Sender or history mode only sees reactions
         const currentRx = data.reactions || [];
         rxContainer.innerHTML = currentRx.map(r => `<span class="w-6 h-6 rounded-full bg-pink-50 flex items-center justify-center text-sm">${r}</span>`).join('');
       }
@@ -1043,7 +1122,11 @@ function showConversationModal(birthdayUserId, birthdayUserObjOrName, wishId, wi
 
   // Real-time Replies Listener
   const repliesContainer = modal.body.querySelector('#replies-container');
-  const unsubReplies = onSnapshot(query(collection(db, 'birthdayWishes', birthdayUserId, 'wishes', wishId, 'replies'), orderBy('createdAt', 'asc')), (snap) => {
+  const repliesRef = isHistory 
+    ? collection(db, 'birthdayWishHistory', `${birthdayUserId}_${historyYear}`, 'wishes', wishId, 'replies')
+    : collection(db, 'birthdayConversations', birthdayUserId, 'wishes', wishId, 'replies');
+    
+  const unsubReplies = onSnapshot(query(repliesRef, orderBy('createdAt', 'asc')), (snap) => {
     if (snap.empty) {
       repliesContainer.innerHTML = `<div class="text-center py-6 text-gray-400 text-xs">No replies yet.</div>`;
       return;
@@ -1056,8 +1139,8 @@ function showConversationModal(birthdayUserId, birthdayUserObjOrName, wishId, wi
       const timeStr = rep.createdAt?.toDate ? formatDate(rep.createdAt.toDate()) : 'now';
       
       // Auto mark as seen if it's not mine and hasn't been seen
-      if (!isMine && rep.status !== 'seen') {
-        updateDoc(doc(db, 'birthdayWishes', birthdayUserId, 'wishes', wishId, 'replies', rep.id), { status: 'seen' }).catch(console.error);
+      if (!isHistory && !isMine && rep.status !== 'seen') {
+        updateDoc(doc(db, 'birthdayConversations', birthdayUserId, 'wishes', wishId, 'replies', rep.id), { status: 'seen' }).catch(console.error);
       }
 
       let statusHtml = '';
@@ -1096,7 +1179,7 @@ function showConversationModal(birthdayUserId, birthdayUserObjOrName, wishId, wi
       input.value = '';
       
       try {
-        await addDoc(collection(db, 'birthdayWishes', birthdayUserId, 'wishes', wishId, 'replies'), {
+        await addDoc(collection(db, 'birthdayConversations', birthdayUserId, 'wishes', wishId, 'replies'), {
           senderId: authManager.currentUser.uid,
           senderName: authManager.userData?.fullName || 'Unknown',
           message: text.trim(),

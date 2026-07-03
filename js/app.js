@@ -1,4 +1,4 @@
-// Main App Entry — Resilient app shell with lazy page loading + auto-login
+﻿// Main App Entry — Resilient app shell with lazy page loading + auto-login
 import { authManager } from './auth.js';
 import { router } from './router.js';
 import { showToast, sanitizeHTML } from './utils.js';
@@ -838,74 +838,1114 @@ function showForcedPasswordModal() {
   });
 }
 
-// ===== BIRTHDAY FULLSCREEN CELEBRATION =====
+// ===== NEW PREMIUM CINEMATIC BIRTHDAY EXPERIENCE =====
+// In-memory flag: resets on every fresh page load (refresh / reopen / restart)
+// but survives SPA route changes within the same session.
+let _birthdayCelebrationShown = false;
+let _birthdayAudioEngine = null;
+
 function checkBirthdayCelebration() {
+  if (_birthdayCelebrationShown) return;
   if (!authManager.userData?.dateOfBirth) return;
+
   const today = new Date();
   const dob = new Date(authManager.userData.dateOfBirth);
   if (dob.getMonth() !== today.getMonth() || dob.getDate() !== today.getDate()) return;
 
-  // Check if already shown today
-  const shownKey = 'bday_shown_' + today.toDateString();
-  if (sessionStorage.getItem(shownKey)) return;
-  sessionStorage.setItem(shownKey, '1');
-
+  _birthdayCelebrationShown = true;
   const name = authManager.userData.fullName || 'Friend';
-  const quotes = [
-    "One classroom. One family. Forever.",
-    "Those school memories still smile because of you.",
-    "May our friendship never graduate.",
-    "Some bonds are beyond school bells.",
-    "The best memories were made with you."
-  ];
-  const quote = quotes[Math.floor(Math.random() * quotes.length)];
 
-  const overlay = document.createElement('div');
-  overlay.className = 'birthday-overlay';
-  overlay.innerHTML = `
-    <div class="birthday-confetti-box" id="bday-confetti"></div>
-    <div class="birthday-emoji-float" style="top:10%;left:10%;animation-delay:0s">🎈</div>
-    <div class="birthday-emoji-float" style="top:15%;right:15%;animation-delay:0.5s">🎉</div>
-    <div class="birthday-emoji-float" style="bottom:20%;left:20%;animation-delay:1s">🎂</div>
-    <div class="birthday-emoji-float" style="bottom:25%;right:10%;animation-delay:1.5s">🎁</div>
-    <div class="birthday-emoji-float" style="top:40%;left:5%;animation-delay:0.8s">⭐</div>
-    <div class="birthday-emoji-float" style="top:35%;right:8%;animation-delay:1.2s">💖</div>
-    <div class="birthday-text-main">
-      <div class="text-5xl mb-4">🎉</div>
-      <h1 class="text-3xl font-display font-bold text-navy-800 mb-2">Happy Birthday</h1>
-      <h2 class="text-2xl font-handwriting text-warm-600">${name} ❤️</h2>
-    </div>
-    <div class="birthday-quote mt-6 max-w-xs">
-      <p class="font-handwriting text-xl text-navy-600 italic">"${quote}"</p>
-    </div>
-    <button class="birthday-dismiss-btn" id="bday-dismiss">Enter Memory Lane 🎓</button>
-  `;
-  document.body.appendChild(overlay);
+  // ── Web Audio API Synthesizer ──
+  class BirthdayAudioEngine {
+    constructor() {
+      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      this.masterGain = this.ctx.createGain();
+      this.masterGain.connect(this.ctx.destination);
+      this.masterGain.gain.setValueAtTime(0.12, this.ctx.currentTime); // Soft background start
+      this.playing = false;
+      this.tempo = 145; // BPM
+      this.noteIndex = 0;
+      this.nextNoteTime = 0;
 
-  // Spawn confetti
-  const confettiBox = overlay.querySelector('#bday-confetti');
-  const colors = ['#ffd700', '#ff6b6b', '#48dbfb', '#ff9ff3', '#54a0ff', '#5f27cd', '#ff8c00', '#00d2d3'];
-  for (let i = 0; i < 60; i++) {
-    const piece = document.createElement('div');
-    piece.className = 'birthday-confetti-piece';
-    piece.style.cssText = `left:${Math.random() * 100}%;background:${colors[Math.floor(Math.random() * colors.length)]};animation-duration:${2 + Math.random() * 3}s;animation-delay:${Math.random() * 2}s;width:${6 + Math.random() * 8}px;height:${6 + Math.random() * 8}px;border-radius:${Math.random() > 0.5 ? '50%' : '2px'};`;
-    confettiBox.appendChild(piece);
+      // Happy Birthday Melody
+      this.melody = [
+        { note: 'C4', dur: 0.75 }, { note: 'C4', dur: 0.25 }, { note: 'D4', dur: 1 }, { note: 'C4', dur: 1 }, { note: 'F4', dur: 1 }, { note: 'E4', dur: 2 },
+        { note: 'C4', dur: 0.75 }, { note: 'C4', dur: 0.25 }, { note: 'D4', dur: 1 }, { note: 'C4', dur: 1 }, { note: 'G4', dur: 1 }, { note: 'F4', dur: 2 },
+        { note: 'C4', dur: 0.75 }, { note: 'C4', dur: 0.25 }, { note: 'C5', dur: 1 }, { note: 'A4', dur: 1 }, { note: 'F4', dur: 1 }, { note: 'E4', dur: 1 }, { note: 'D4', dur: 2 },
+        { note: 'Bb4', dur: 0.75 }, { note: 'Bb4', dur: 0.25 }, { note: 'A4', dur: 1 }, { note: 'F4', dur: 1 }, { note: 'G4', dur: 1 }, { note: 'F4', dur: 2 }
+      ];
+
+      this.freqs = {
+        'C4': 261.63, 'D4': 293.66, 'E4': 329.63, 'F4': 349.23, 'G4': 392.00, 'A4': 440.00, 'Bb4': 466.16, 'C5': 523.25
+      };
+    }
+
+    start() {
+      if (this.playing) return;
+      this.playing = true;
+      this.nextNoteTime = this.ctx.currentTime + 0.1;
+      this.scheduler();
+    }
+
+    scheduler() {
+      if (!this.playing) return;
+      while (this.nextNoteTime < this.ctx.currentTime + 0.1) {
+        this.playMelodyNote(this.melody[this.noteIndex], this.nextNoteTime);
+        const secondsPerBeat = 60.0 / this.tempo;
+        this.nextNoteTime += this.melody[this.noteIndex].dur * secondsPerBeat;
+        this.noteIndex = (this.noteIndex + 1) % this.melody.length;
+      }
+      this.timerId = setTimeout(() => this.scheduler(), 25);
+    }
+
+    playMelodyNote(noteData, time) {
+      const osc = this.ctx.createOscillator();
+      const osc2 = this.ctx.createOscillator();
+      const noteGain = this.ctx.createGain();
+
+      osc.type = 'triangle';
+      osc2.type = 'sine';
+
+      const freq = this.freqs[noteData.note];
+      osc.frequency.setValueAtTime(freq, time);
+      osc2.frequency.setValueAtTime(freq * 2, time); // Octave chime
+
+      noteGain.gain.setValueAtTime(0, time);
+      noteGain.gain.linearRampToValueAtTime(0.3, time + 0.03);
+      const duration = noteData.dur * (60.0 / this.tempo);
+      noteGain.gain.exponentialRampToValueAtTime(0.001, time + duration - 0.02);
+
+      osc.connect(noteGain);
+      osc2.connect(noteGain);
+      noteGain.connect(this.masterGain);
+
+      osc.start(time);
+      osc2.start(time);
+      osc.stop(time + duration);
+      osc2.stop(time + duration);
+    }
+
+    setVolume(vol, fadeTime = 0) {
+      if (fadeTime > 0) {
+        this.masterGain.gain.setValueAtTime(this.masterGain.gain.value, this.ctx.currentTime);
+        this.masterGain.gain.linearRampToValueAtTime(vol, this.ctx.currentTime + fadeTime);
+      } else {
+        this.masterGain.gain.setValueAtTime(vol, this.ctx.currentTime);
+      }
+    }
+
+    playCutSound() {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(800, this.ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(150, this.ctx.currentTime + 0.5);
+
+      gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.5);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start();
+      osc.stop(this.ctx.currentTime + 0.5);
+    }
+
+    playExplosionSound() {
+      const bufferSize = this.ctx.sampleRate * 1.5;
+      const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = buffer;
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(400, this.ctx.currentTime);
+      filter.frequency.exponentialRampToValueAtTime(10, this.ctx.currentTime + 1.2);
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.8, this.ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 1.2);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      noise.start();
+      noise.stop(this.ctx.currentTime + 1.2);
+    }
+
+    stop() {
+      this.playing = false;
+      clearTimeout(this.timerId);
+      this.setVolume(0, 1.0);
+      setTimeout(() => {
+        this.ctx.close();
+      }, 1100);
+    }
   }
 
-  overlay.querySelector('#bday-dismiss')?.addEventListener('click', () => {
-    overlay.style.opacity = '0';
-    overlay.style.transition = 'opacity 0.5s';
-    setTimeout(() => overlay.remove(), 500);
+  // Initialize Audio
+  _birthdayAudioEngine = new BirthdayAudioEngine();
+
+  // ── Build HTML Structure ──
+  const overlay = document.createElement('div');
+  overlay.className = 'cinematic-birthday-overlay';
+
+  const vignette = document.createElement('div');
+  vignette.className = 'cb-vignette';
+  overlay.appendChild(vignette);
+
+  const grain = document.createElement('div');
+  grain.className = 'cb-grain';
+  overlay.appendChild(grain);
+
+  const flash = document.createElement('div');
+  flash.className = 'cb-flash';
+  overlay.appendChild(flash);
+
+  const viewport = document.createElement('div');
+  viewport.className = 'cb-viewport';
+  overlay.appendChild(viewport);
+
+  // Decorative Flags with attached bulbs (Layer 9)
+  const flagsContainer = document.createElement('div');
+  flagsContainer.className = 'cb-flags';
+  for (let i = 0; i < 16; i++) {
+    const f = document.createElement('div');
+    f.className = 'cb-flag';
+    
+    // Bulb attachment
+    const bulb = document.createElement('div');
+    bulb.className = 'cb-bulb';
+    f.appendChild(bulb);
+
+    flagsContainer.appendChild(f);
+  }
+  viewport.appendChild(flagsContainer);
+
+  // Canvas
+  const canvas = document.createElement('canvas');
+  canvas.className = 'cb-canvas';
+  viewport.appendChild(canvas);
+
+  // ── SCREEN 1 — PERSONAL GREETING ──
+  const screen1 = document.createElement('div');
+  screen1.className = 'cb-screen-1';
+  viewport.appendChild(screen1);
+
+  const s1TitleContainer = document.createElement('div');
+  s1TitleContainer.className = 'cb-s1-title-container';
+  screen1.appendChild(s1TitleContainer);
+
+  const s1Title = document.createElement('h1');
+  s1Title.className = 'cb-s1-title';
+  s1TitleContainer.appendChild(s1Title);
+
+  const s1Ribbon = document.createElement('div');
+  s1Ribbon.className = 'cb-s1-ribbon';
+  s1Ribbon.textContent = 'Today is Your Birthday 🎂🎉';
+  screen1.appendChild(s1Ribbon);
+
+  const s1Btn = document.createElement('button');
+  s1Btn.className = 'cb-s1-btn';
+  s1Btn.textContent = '🎁 Continue Celebration';
+  screen1.appendChild(s1Btn);
+
+  // ── SCREEN 2 — GRAND CELEBRATION ──
+  const screen2 = document.createElement('div');
+  screen2.className = 'cb-screen-2';
+  viewport.appendChild(screen2);
+
+  const s2Header = document.createElement('div');
+  s2Header.className = 'cb-s2-header';
+  screen2.appendChild(s2Header);
+
+  const s2TitleMain = document.createElement('h1');
+  s2TitleMain.className = 'cb-s2-title-main';
+  s2TitleMain.innerHTML = '🎉 HAPPY BIRTHDAY';
+  s2Header.appendChild(s2TitleMain);
+
+  const s2Name = document.createElement('h1');
+  s2Name.className = 'cb-s2-name';
+  s2Name.textContent = name;
+  s2Header.appendChild(s2Name);
+
+  const s2Quote = document.createElement('p');
+  s2Quote.className = 'cb-s2-quote';
+  s2Quote.innerHTML = 'Wishing you endless happiness,<br>success,<br>love,<br>and unforgettable memories.';
+  s2Header.appendChild(s2Quote);
+
+  // Enter Button
+  const enterBtn = document.createElement('button');
+  enterBtn.className = 'cb-enter-btn';
+  enterBtn.textContent = '✨ Enter Class Memories';
+  screen2.appendChild(enterBtn);
+
+  // 3D Cake Scene
+  const cakeScene = document.createElement('div');
+  cakeScene.className = 'cb-cake-container';
+  
+  cakeScene.innerHTML = `
+    <div class="cb-cake-shadow"></div>
+    <div class="cb-plate"><div class="cb-plate-reflection"></div></div>
+  `;
+
+  // Draw 3 tiers
+  const tiersConfig = [
+    { cls: 'cb-tier-3', w: 140, h: 60 },
+    { cls: 'cb-tier-2', w: 190, h: 68 },
+    { cls: 'cb-tier-1', w: 240, h: 75 }
+  ];
+
+  tiersConfig.forEach(cfg => {
+    const t = document.createElement('div');
+    t.className = `cb-cake-tier ${cfg.cls}`;
+    t.innerHTML = `
+      <div class="cb-cake-drips"></div>
+      <div class="cb-strawberries">
+        <div class="cb-strawberry"></div>
+        <div class="cb-strawberry"></div>
+        <div class="cb-strawberry"></div>
+      </div>
+      <div class="cb-gold-star" style="left: 15%; top: 40%;"></div>
+      <div class="cb-gold-star" style="right: 20%; top: 30%;"></div>
+      <div class="cb-tier-sponge-left"></div>
+    `;
+    cakeScene.appendChild(t);
   });
 
-  // Auto-dismiss after 10 seconds
-  setTimeout(() => {
-    if (document.body.contains(overlay)) {
-      overlay.style.opacity = '0';
-      overlay.style.transition = 'opacity 0.5s';
-      setTimeout(() => overlay.remove(), 500);
+  // Candles row
+  const candlesRow = document.createElement('div');
+  candlesRow.className = 'cb-cake-candles';
+  for (let i = 0; i < 5; i++) {
+    const c = document.createElement('div');
+    c.className = 'cb-cake-candle';
+    c.innerHTML = '<div class="cb-cake-candle-flame"></div>';
+    candlesRow.appendChild(c);
+  }
+  cakeScene.appendChild(candlesRow);
+
+  const glow = document.createElement('div');
+  glow.className = 'cb-candle-glow';
+  cakeScene.appendChild(glow);
+
+  // Slice
+  const sliceReveal = document.createElement('div');
+  sliceReveal.className = 'cb-slice-reveal';
+  sliceReveal.innerHTML = `
+    <div class="cb-slice-body">
+      <div class="cb-slice-frosting"></div>
+    </div>
+  `;
+  cakeScene.appendChild(sliceReveal);
+
+  // Interactive Knife
+  const knife = document.createElement('div');
+  knife.className = 'cb-cutting-knife';
+  knife.innerHTML = `
+    <div class="cb-cutting-knife-blade"></div>
+    <div class="cb-cutting-knife-handle"></div>
+  `;
+  cakeScene.appendChild(knife);
+
+  // Tap hint
+  const tapHint = document.createElement('div');
+  tapHint.className = 'cb-tap-hint';
+  tapHint.style.opacity = '0';
+  tapHint.style.transition = 'opacity 0.6s';
+  tapHint.textContent = '👇 Tap the Cake';
+  cakeScene.appendChild(tapHint);
+
+  // Animated Hand Pointer
+  const handPointer = document.createElement('div');
+  handPointer.className = 'cb-hand-pointer';
+  handPointer.textContent = '👇';
+  cakeScene.appendChild(handPointer);
+
+  screen2.appendChild(cakeScene);
+  document.body.appendChild(overlay);
+
+  // ── Canvas Particle Engine ──
+  const ctx = canvas.getContext('2d');
+  let animationFrameId = null;
+  let width = canvas.width = window.innerWidth;
+  let height = canvas.height = window.innerHeight;
+  
+  // Layer variables
+  let rayAngle = 0;
+  let bokehCircles = [];
+  let dustParticles = [];
+  let sparkleStars = [];
+  let particles = [];
+
+  window.addEventListener('resize', () => {
+    width = canvas.width = window.innerWidth;
+    height = canvas.height = window.innerHeight;
+  });
+
+  const R = Math.random;
+  const colors = ['#ffd700', '#ffffff', '#ff69b4', '#8a2be2', '#1e90ff'];
+
+  // Layer 2 & 5: Large Ambient Glowing Bokeh Circles
+  class BokehCircle {
+    constructor() {
+      this.reset();
+      this.y = R() * height;
     }
-  }, 10000);
+    reset() {
+      this.x = R() * width;
+      this.y = height + 100;
+      this.size = 80 + R() * 160;
+      this.color = ['#ffd700', '#f48fb1', '#8a2be2', '#1e90ff'][Math.floor(R() * 4)];
+      this.vx = (R() - 0.5) * 0.22;
+      this.vy = -0.15 - R() * 0.3;
+      this.alpha = 0.05 + R() * 0.08;
+    }
+    update() {
+      this.x += this.vx;
+      this.y += this.vy;
+      if (this.y < -this.size) this.reset();
+    }
+    draw() {
+      ctx.save();
+      ctx.globalAlpha = this.alpha;
+      const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size);
+      grad.addColorStop(0, this.color);
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  // Layer 4 & 6: Glowing Particles & Golden Dust
+  class DustParticle {
+    constructor() {
+      this.reset();
+      this.y = R() * height;
+    }
+    reset() {
+      this.x = R() * width;
+      this.y = height + 10;
+      this.size = R() < 0.4 ? (0.6 + R() * 0.6) : (1.4 + R() * 2.0); // tiny dust or tiny particles
+      this.color = R() < 0.7 ? '#ffd700' : ['#ffffff', '#f48fb1', '#1e90ff'][Math.floor(R() * 3)];
+      this.vx = (R() - 0.5) * 0.18;
+      this.vy = -0.18 - R() * 0.4;
+      this.alpha = 0.15 + R() * 0.6;
+      this.angleVal = R() * Math.PI * 2;
+      this.twinkleSpeed = 0.02 + R() * 0.04;
+    }
+    update() {
+      this.x += this.vx;
+      this.y += this.vy;
+      this.angleVal += this.twinkleSpeed;
+      if (this.y < -10) this.reset();
+    }
+    draw() {
+      ctx.save();
+      ctx.globalAlpha = this.alpha * (0.45 + Math.sin(this.angleVal) * 0.35); // twinkling
+      ctx.fillStyle = this.color;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  // Layer 10: Twinkling Sparkle Stars
+  class SparkleStar {
+    constructor() {
+      this.reset();
+    }
+    reset() {
+      this.x = R() * width;
+      this.y = R() * height * 0.85;
+      this.size = 3.5 + R() * 4.5;
+      this.color = R() < 0.8 ? '#ffd700' : '#ffffff';
+      this.alpha = 0;
+      this.maxAlpha = 0.25 + R() * 0.55;
+      this.phase = 'grow';
+      this.speed = 0.007 + R() * 0.012;
+    }
+    update() {
+      if (this.phase === 'grow') {
+        this.alpha += this.speed;
+        if (this.alpha >= this.maxAlpha) this.phase = 'shrink';
+      } else {
+        this.alpha -= this.speed;
+        if (this.alpha <= 0) this.reset();
+      }
+    }
+    draw() {
+      ctx.save();
+      ctx.globalAlpha = this.alpha;
+      ctx.fillStyle = this.color;
+      ctx.beginPath();
+      ctx.moveTo(this.x, this.y - this.size);
+      ctx.lineTo(this.x + this.size * 0.3, this.y);
+      ctx.lineTo(this.x, this.y + this.size);
+      ctx.lineTo(this.x - this.size * 0.3, this.y);
+      ctx.closePath();
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = this.color;
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  // Active Confetti & Explosions Particles
+  class DynamicParticle {
+    constructor(x, y, type, color, angle, speed, decay, size, emoji = '') {
+      this.x = x;
+      this.y = y;
+      this.type = type;
+      this.color = color;
+      this.vx = Math.cos(angle) * speed;
+      this.vy = Math.sin(angle) * speed;
+      this.gravity = (type === 'fountain' || type === 'spark' || type === 'crumb') ? 0.18 : 0;
+      this.alpha = 1;
+      this.decay = decay || 0.015;
+      this.size = size || 3;
+      this.emoji = emoji;
+      this.angleVal = R() * Math.PI * 2;
+      this.spinSpeed = (R() - 0.5) * 0.1;
+      this.trail = [];
+    }
+
+    update() {
+      if (this.type === 'fountain' || this.type === 'spark') {
+        this.trail.push({ x: this.x, y: this.y });
+        if (this.trail.length > 5) this.trail.shift();
+      }
+      this.vy += this.gravity;
+      this.x += this.vx;
+      this.y += this.vy;
+      this.alpha -= this.decay;
+      this.angleVal += this.spinSpeed;
+    }
+
+    draw() {
+      ctx.save();
+      ctx.globalAlpha = this.alpha;
+      
+      if (this.emoji) {
+        ctx.font = `${this.size * 2.2}px Arial`;
+        ctx.fillText(this.emoji, this.x, this.y);
+      } else if (this.type === 'fountain' || this.type === 'spark') {
+        if (this.trail.length > 1) {
+          ctx.beginPath();
+          ctx.moveTo(this.trail[0].x, this.trail[0].y);
+          for (let i = 1; i < this.trail.length; i++) {
+            ctx.lineTo(this.trail[i].x, this.trail[i].y);
+          }
+          ctx.strokeStyle = this.color;
+          ctx.lineWidth = this.size;
+          ctx.stroke();
+        }
+      } else if (this.type === 'balloon') {
+        ctx.beginPath();
+        ctx.ellipse(this.x, this.y, this.size, this.size * 1.3, 0, 0, Math.PI * 2);
+        ctx.fillStyle = this.color;
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y + this.size * 1.3);
+        ctx.lineTo(this.x + Math.sin(this.angleVal) * 5, this.y + this.size * 1.3 + 12);
+        ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      } else if (this.type === 'confetti') {
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.angleVal);
+        ctx.fillStyle = this.color;
+        ctx.fillRect(-this.size, -this.size / 2, this.size * 2, this.size);
+      } else if (this.type === 'smoke') {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(200,200,200,0.15)';
+        ctx.fill();
+      } else {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fillStyle = this.color;
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = this.color;
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
+  // Populate ambient arrays
+  for (let i = 0; i < 8; i++) bokehCircles.push(new BokehCircle());
+  for (let i = 0; i < 70; i++) dustParticles.push(new DustParticle());
+  for (let i = 0; i < 20; i++) sparkleStars.push(new SparkleStar());
+
+  function loop() {
+    ctx.clearRect(0, 0, width, height);
+
+    // ── Layer 3: Rotating spotlights ──
+    rayAngle += 0.0012;
+    
+    // Left beam
+    ctx.save();
+    ctx.translate(0, 0);
+    ctx.globalAlpha = 0.055;
+    let gradL = ctx.createRadialGradient(0, 0, 0, 0, 0, Math.max(width, height));
+    gradL.addColorStop(0, 'rgba(212,175,55,0.3)');
+    gradL.addColorStop(0.5, 'rgba(138,43,226,0.08)');
+    gradL.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = gradL;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    const angleL = Math.PI / 4 + Math.sin(rayAngle) * 0.12;
+    ctx.lineTo(Math.cos(angleL - 0.12) * Math.max(width, height), Math.sin(angleL - 0.12) * Math.max(width, height));
+    ctx.lineTo(Math.cos(angleL + 0.12) * Math.max(width, height), Math.sin(angleL + 0.12) * Math.max(width, height));
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // Right beam
+    ctx.save();
+    ctx.translate(width, 0);
+    ctx.globalAlpha = 0.055;
+    let gradR = ctx.createRadialGradient(0, 0, 0, 0, 0, Math.max(width, height));
+    gradR.addColorStop(0, 'rgba(30,144,255,0.3)');
+    gradR.addColorStop(0.5, 'rgba(244,143,177,0.08)');
+    gradR.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = gradR;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    const angleR = 3 * Math.PI / 4 - Math.sin(rayAngle * 1.1) * 0.12;
+    ctx.lineTo(Math.cos(angleR - 0.12) * Math.max(width, height), Math.sin(angleR - 0.12) * Math.max(width, height));
+    ctx.lineTo(Math.cos(angleR + 0.12) * Math.max(width, height), Math.sin(angleR + 0.12) * Math.max(width, height));
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // ── Update & Draw Layer 2 & 5 (Bokeh Ambient Circles) ──
+    bokehCircles.forEach(c => {
+      c.update();
+      c.draw();
+    });
+
+    // ── Update & Draw Layer 4 & 6 (Dust & Tiny Particles) ──
+    dustParticles.forEach(d => {
+      d.update();
+      d.draw();
+    });
+
+    // ── Update & Draw Layer 10 (Sparkles Stars) ──
+    sparkleStars.forEach(s => {
+      s.update();
+      s.draw();
+    });
+
+    // ── Update & Draw Active celebration particles ──
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.update();
+      if (p.alpha <= 0) {
+        particles.splice(i, 1);
+      } else {
+        p.draw();
+      }
+    }
+
+    animationFrameId = requestAnimationFrame(loop);
+  }
+  loop();
+
+  // Ambient celebration elements triggers
+  let ambientSparklesInterval = null;
+  let ambientConfettiInterval = null;
+  let ambientBalloonsInterval = null;
+
+  function startAmbientEffects() {
+    // Drifting sparkles
+    ambientSparklesInterval = setInterval(() => {
+      if (particles.length < 150) {
+        particles.push(new DynamicParticle(
+          R() * width, R() * height * 0.8, 'sparkle',
+          '#ffd700', R() * Math.PI * 2, 0.2 + R() * 0.5,
+          0.01, 1.5 + R() * 2
+        ));
+      }
+    }, 120);
+
+    // Continuous confetti falling
+    ambientConfettiInterval = setInterval(() => {
+      if (particles.length < 250) {
+        particles.push(new DynamicParticle(
+          R() * width, -10, 'confetti',
+          colors[Math.floor(R() * colors.length)],
+          Math.PI / 2 + (R() - 0.5) * 0.3,
+          1.8 + R() * 2.5,
+          0.008,
+          4 + R() * 5
+        ));
+      }
+    }, 60);
+
+    // Continuous rising balloons
+    ambientBalloonsInterval = setInterval(() => {
+      if (particles.length < 40) {
+        particles.push(new DynamicParticle(
+          R() * width, height + 40, 'balloon',
+          colors[Math.floor(R() * colors.length)],
+          -Math.PI / 2 + (R() - 0.5) * 0.2,
+          1.2 + R() * 2.0,
+          0.004,
+          13 + R() * 8
+        ));
+      }
+    }, 1200);
+  }
+
+  function triggerExplosion(x, y, count) {
+    _birthdayAudioEngine.playExplosionSound();
+    for (let i = 0; i < count; i++) {
+      const angle = R() * Math.PI * 2;
+      const speed = 4 + R() * 11;
+      particles.push(new DynamicParticle(
+        x, y, 'spark',
+        colors[Math.floor(R() * colors.length)],
+        angle, speed,
+        0.014 + R() * 0.01,
+        2 + R() * 3
+      ));
+    }
+  }
+
+  // Left bottom -> shoot diagonally to TOP RIGHT
+  // Right bottom -> shoot diagonally to TOP LEFT
+  function triggerDiagonalFireworks() {
+    _birthdayAudioEngine.playExplosionSound();
+    // Left bottom diagonal shooter
+    for (let i = 0; i < 45; i++) {
+      particles.push(new DynamicParticle(
+        0, height, 'fountain', 
+        colors[Math.floor(R() * colors.length)], 
+        -Math.PI / 4 + (R() - 0.5) * 0.2, 
+        12 + R() * 9, 
+        0.012, 
+        2.5 + R() * 3
+      ));
+    }
+    // Right bottom diagonal shooter
+    for (let i = 0; i < 45; i++) {
+      particles.push(new DynamicParticle(
+        width, height, 'fountain', 
+        colors[Math.floor(R() * colors.length)], 
+        -3 * Math.PI / 4 + (R() - 0.5) * 0.2, 
+        12 + R() * 9, 
+        0.012, 
+        2.5 + R() * 3
+      ));
+    }
+  }
+
+  // LEFT TOP -> firework shoots to RIGHT
+  // RIGHT TOP -> firework shoots to LEFT
+  function triggerHorizontalFireworks() {
+    _birthdayAudioEngine.playExplosionSound();
+    // Left top shooter heading right
+    for (let i = 0; i < 50; i++) {
+      particles.push(new DynamicParticle(
+        0, height * 0.15, 'fountain',
+        colors[Math.floor(R() * colors.length)],
+        (R() - 0.5) * 0.35,
+        14 + R() * 10,
+        0.012,
+        2.5 + R() * 3
+      ));
+    }
+    // Right top shooter heading left
+    for (let i = 0; i < 50; i++) {
+      particles.push(new DynamicParticle(
+        width, height * 0.15, 'fountain',
+        colors[Math.floor(R() * colors.length)],
+        Math.PI + (R() - 0.5) * 0.35,
+        14 + R() * 10,
+        0.012,
+        2.5 + R() * 3
+      ));
+    }
+  }
+
+  function triggerCelebrationSparksAndHearts(cutX, bottomY) {
+    const gifts = ['🎁', '💝', '⭐', '❤️', '💖'];
+    for (let i = 0; i < 30; i++) {
+      setTimeout(() => {
+        particles.push(new DynamicParticle(
+          cutX + (R() - 0.5) * 70,
+          bottomY - 40,
+          'gift', '#ffd700',
+          -Math.PI / 2 + (R() - 0.5) * 1.2,
+          5 + R() * 8,
+          0.015 + R() * 0.01,
+          12 + R() * 12,
+          gifts[Math.floor(R() * gifts.length)]
+        ));
+      }, i * 60);
+    }
+  }
+
+  // ── Async Timeline Sequencer ──
+  const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+  // Character-by-character typist
+  const typeText = async (element, text, speed = 80) => {
+    element.innerHTML = '';
+    for (let char of text) {
+      if (char === '\n') {
+        element.innerHTML += '<br>';
+      } else {
+        element.innerHTML += char;
+      }
+      await delay(speed);
+    }
+  };
+
+  // Stage 1: 👋 Hello, Name (2 seconds)
+  const showHello = async () => {
+    console.log("Stage 1 Started");
+    try {
+      s1Title.classList.add('visible');
+      await typeText(s1Title, `👋 Hello,\n${name}`, 95);
+      await delay(1200); 
+      console.log("Stage 1 Completed");
+    } catch (e) {
+      console.error("Stage 1 Failed:", e);
+      throw e;
+    }
+  };
+
+  // Stage 2: Ribbon Today is your Birthday (2 seconds)
+  const showTodayBirthday = async () => {
+    console.log("Stage 2 Started");
+    try {
+      s1Title.classList.remove('visible');
+      await delay(600);
+      s1Ribbon.classList.add('visible');
+      
+      // Spark explosion behind the ribbon
+      for (let i = 0; i < 15; i++) {
+        particles.push(new DynamicParticle(
+          width / 2 + (R() - 0.5) * 100,
+          height * 0.4 + (R() - 0.5) * 50,
+          'spark', '#ffd700',
+          R() * Math.PI * 2,
+          1.5 + R() * 3,
+          0.02,
+          2
+        ));
+      }
+
+      await delay(2000);
+      s1Ribbon.classList.remove('visible');
+      await delay(600);
+      console.log("Stage 2 Completed");
+    } catch (e) {
+      console.error("Stage 2 Failed:", e);
+      throw e;
+    }
+  };
+
+  // Stage 3: Continue button for transition to Screen 2
+  const showContinueButton = async () => {
+    console.log("Stage 3 Started");
+    try {
+      s1Btn.classList.add('visible');
+      
+      // Wait for Continue button click
+      await new Promise(resolve => {
+        const onS1BtnClick = (e) => {
+          e.stopPropagation();
+          s1Btn.removeEventListener('click', onS1BtnClick);
+          resolve();
+        };
+        s1Btn.addEventListener('click', onS1BtnClick);
+      });
+
+      // Transition to Screen 2
+      console.log("Transition to Screen 2 Triggered");
+      flash.classList.add('trigger');
+      viewport.classList.add('zoom-blur');
+      _birthdayAudioEngine.playExplosionSound();
+
+      // Confetti burst on flash
+      for (let i = 0; i < 60; i++) {
+        particles.push(new DynamicParticle(
+          width / 2 + (R() - 0.5) * 300,
+          height * 0.4 + (R() - 0.5) * 150,
+          'confetti', colors[Math.floor(R() * colors.length)],
+          R() * Math.PI * 2,
+          3 + R() * 6,
+          0.01,
+          5
+        ));
+      }
+
+      await delay(250);
+      screen1.classList.add('hidden');
+      screen2.classList.add('active');
+
+      await delay(350);
+      viewport.classList.remove('zoom-blur');
+      
+      console.log("Stage 3 Completed");
+    } catch (e) {
+      console.error("Stage 3 Failed:", e);
+      throw e;
+    }
+  };
+
+  // Stage 4: Screen 2 Happy Birthday & music start (5 seconds)
+  const showHappyBirthday = async () => {
+    console.log("Stage 4 Started");
+    try {
+      // Audio engine starts at the exact transition to Screen 2 celebration
+      _birthdayAudioEngine.start();
+      _birthdayAudioEngine.setVolume(0.38, 2.0);
+
+      startAmbientEffects();
+      
+      // Launch diagonal fireworks from bottom corners
+      triggerDiagonalFireworks();
+
+      await delay(5000);
+      console.log("Stage 4 Completed");
+    } catch (e) {
+      console.error("Stage 4 Failed:", e);
+      throw e;
+    }
+  };
+
+  // Stage 5: Cake Rises (2 seconds)
+  const showCake = async () => {
+    console.log("Cake Stage Started");
+    try {
+      cakeScene.classList.add('active');
+      await delay(2000);
+      console.log("Cake Displayed");
+    } catch (e) {
+      console.error("Cake Stage Failed:", e);
+      throw e;
+    }
+  };
+
+  // Stage 6 & 7: Tap cake and slice
+  const waitForCakeClick = async () => {
+    console.log("Waiting for Cake Click Started");
+    try {
+      tapHint.style.opacity = '1';
+      handPointer.style.opacity = '1';
+      let cakeTapped = false;
+      await new Promise((resolve, reject) => {
+        const onCakeClick = (e) => {
+          try {
+            if (cakeTapped) return;
+            cakeTapped = true;
+            console.log("Cake Clicked");
+            e.stopPropagation();
+            cakeScene.removeEventListener('click', onCakeClick);
+            
+            tapHint.style.opacity = '0';
+            handPointer.style.opacity = '0';
+
+            // Execute cut animation
+            cakeScene.classList.add('cutting');
+            _birthdayAudioEngine.playCutSound();
+            
+            setTimeout(() => {
+              try {
+                cakeScene.classList.remove('cutting');
+                cakeScene.classList.add('cut');
+
+                // Split cake halves
+                cakeScene.querySelectorAll('.cb-cake-tier').forEach(tier => {
+                  const shell = tier.querySelector('.cb-cake-drips');
+                  if (!shell) return;
+                  const rightShell = shell.cloneNode(true);
+                  rightShell.className = 'cb-cake-drips right-half';
+                  shell.className = 'cb-cake-drips left-half';
+                  tier.appendChild(rightShell);
+                });
+
+                // Extinguish flames
+                cakeScene.querySelectorAll('.cb-cake-candle-flame').forEach((flame, idx) => {
+                  setTimeout(() => flame.classList.add('out'), idx * 80);
+                });
+                const glowEl = cakeScene.querySelector('.cb-candle-glow');
+                if (glowEl) glowEl.style.opacity = '0';
+
+                // Screen shake
+                overlay.classList.add('shake');
+                setTimeout(() => overlay.classList.remove('shake'), 500);
+
+                // Crumbs, smoke
+                const sr = cakeScene.getBoundingClientRect();
+                const cutX = sr.left + sr.width / 2;
+                const bottomY = sr.top + sr.height - 80;
+
+                // Crumbs
+                for (let i = 0; i < 45; i++) {
+                  particles.push(new DynamicParticle(
+                    cutX + (R() - 0.5) * 12,
+                    bottomY - R() * 120,
+                    'crumb', '#d4af37',
+                    -Math.PI/2 + (R() - 0.5) * 1.5,
+                    2 + R() * 5,
+                    0.02 + R() * 0.02,
+                    1.5 + R() * 3
+                  ));
+                }
+
+                // Smoke
+                for (let i = 0; i < 18; i++) {
+                  particles.push(new DynamicParticle(
+                    cutX, bottomY - R() * 140,
+                    'smoke', '#cccccc',
+                    -Math.PI/2 + (R() - 0.5) * 0.4,
+                    0.8 + R() * 1.2,
+                    0.015,
+                    10 + R() * 15
+                  ));
+                }
+
+                resolve();
+              } catch (innerErr) {
+                reject(innerErr);
+              }
+            }, 1500);
+          } catch (clickErr) {
+            reject(clickErr);
+          }
+        };
+        cakeScene.addEventListener('click', onCakeClick);
+      });
+      console.log("Cake Slicing Completed");
+    } catch (e) {
+      console.error("Waiting for Cake Click / Slicing Failed:", e);
+      throw e;
+    }
+  };
+
+  // Stage 8: Horizontal top shooting fireworks and celebration explosion
+  const playCelebration = async () => {
+    console.log("Celebration Started");
+    try {
+      triggerHorizontalFireworks();
+
+      const sr = cakeScene.getBoundingClientRect();
+      const cutX = sr.left + sr.width / 2;
+      const bottomY = sr.top + sr.height - 80;
+      triggerCelebrationSparksAndHearts(cutX, bottomY);
+
+      // Explosions
+      triggerExplosion(width * 0.5, height * 0.25, 90);
+      triggerExplosion(width * 0.2, height * 0.35, 75);
+      triggerExplosion(width * 0.8, height * 0.35, 75);
+
+      // Wave 2
+      setTimeout(() => {
+        triggerExplosion(width * 0.35, height * 0.45, 60);
+        triggerExplosion(width * 0.65, height * 0.45, 60);
+      }, 1500);
+
+      // Floating balloons
+      for (let i = 0; i < 20; i++) {
+        setTimeout(() => {
+          particles.push(new DynamicParticle(
+            R() * width, height + 40, 'balloon',
+            colors[Math.floor(R() * colors.length)],
+            -Math.PI / 2 + (R() - 0.5) * 0.2,
+            1.5 + R() * 2.5,
+            0.004,
+            14 + R() * 10
+          ));
+        }, i * 150);
+      }
+
+      await delay(5000);
+      console.log("Celebration Completed");
+    } catch (e) {
+      console.error("Celebration Failed:", e);
+      throw e;
+    }
+  };
+
+  // Stage 9: Show final dismiss button
+  const showEnterButton = async () => {
+    console.log("Showing Enter Button");
+    try {
+      s2Header.style.opacity = '0';
+      s2Header.style.transition = 'opacity 0.6s';
+      await delay(600);
+      
+      s2TitleMain.innerHTML = '🎉 Have a Wonderful Birthday! ❤️';
+      s2Name.innerHTML = name;
+      s2Quote.innerHTML = '';
+      
+      enterBtn.classList.add('visible');
+      s2Header.style.opacity = '1';
+      console.log("Enter Button Displayed");
+    } catch (e) {
+      console.error("Showing Enter Button Failed:", e);
+      throw e;
+    }
+  };
+
+  async function runTimeline() {
+    try {
+      console.log("Timeline Init: overlay active");
+      overlay.classList.add('active');
+      await delay(100);
+
+      await showHello();
+      await showTodayBirthday();
+      await showContinueButton();
+      await showHappyBirthday();
+      await showCake();
+      await waitForCakeClick();
+      await playCelebration();
+      await showEnterButton();
+    } catch (err) {
+      console.error("Timeline Execution Halted due to Error:", err);
+    }
+  }
+
+  // Run Sequencer Timeline
+  runTimeline();
+
+  // ── Enter App ──
+  enterBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    
+    // Stop Audio Engine (1s fade out)
+    if (_birthdayAudioEngine) {
+      _birthdayAudioEngine.stop();
+      _birthdayAudioEngine = null;
+    }
+
+    clearInterval(ambientSparklesInterval);
+    clearInterval(ambientConfettiInterval);
+    clearInterval(ambientBalloonsInterval);
+    cancelAnimationFrame(animationFrameId);
+
+    overlay.style.transition = 'opacity 1.0s ease';
+    overlay.style.opacity = '0';
+    setTimeout(() => {
+      overlay.remove();
+      router.navigate('home');
+    }, 1000);
+  });
 }
 
 // ===== THROWBACK THURSDAY =====

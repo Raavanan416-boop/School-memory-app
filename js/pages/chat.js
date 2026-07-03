@@ -428,6 +428,13 @@ async function openGroupChat(container) {
 
 function openChat(container, chatId, name, otherUid = null, isGroup = false, fromProfile = false, groupPic = null) {
   currentChatId = chatId;
+  
+  // Mark any notifications for this chat as read
+  if (chatId) {
+    notificationManager.markRelatedAsRead({ type: 'chat_message', chatId: chatId });
+  }
+
+  const currentUser = authManager.currentUser;
   chatViewOpen = true;
   
   // Clean up previous message listener

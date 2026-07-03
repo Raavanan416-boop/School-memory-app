@@ -32,7 +32,17 @@ const NOTIF_CONFIG = {
   birthday_wish: {
     title: '🎂 New Birthday Wish',
     bodyTemplate: (name) => `${name} sent you a birthday wish.`,
-    getUrl: () => `/?page=birthday`,
+    getUrl: (data) => `/?page=birthday&action=open_wish&wishId=${data.wishId || ''}&birthdayUserId=${data.birthdayUserId || ''}`,
+  },
+  birthday_reply: {
+    title: '❤️ Birthday Wish Reply',
+    bodyTemplate: (name) => `${name} replied to your birthday wish.`,
+    getUrl: (data) => `/?page=birthday&action=open_wish&wishId=${data.wishId || ''}&birthdayUserId=${data.birthdayUserId || ''}`,
+  },
+  birthday_reaction: {
+    title: '❤️ Birthday Reaction',
+    bodyTemplate: (name, data) => `${name} reacted to your birthday wish.`,
+    getUrl: (data) => `/?page=birthday&action=open_wish&wishId=${data.wishId || ''}&birthdayUserId=${data.birthdayUserId || ''}`,
   },
   birthday: {
     title: '🎂 Birthday Today',
@@ -865,8 +875,8 @@ class NotificationManager {
   // ===== CLICK HANDLING / DEEP LINKS =====
 
   _handleNotificationClick(url, notifId) {
-    // Automatically delete notification when clicked (as requested by user)
-    if (notifId) this.deleteNotification(notifId);
+    // Automatically mark notification as read when clicked
+    if (notifId) this.markRead(notifId);
 
     // Parse URL and navigate
     const urlObj = new URL(url, window.location.origin);
@@ -891,7 +901,10 @@ class NotificationManager {
 
   async markRead(notifId) {
     try {
-      await updateDoc(doc(db, 'notifications', notifId), { read: true });
+      await updateDoc(doc(db, 'notifications', notifId), { 
+        read: true,
+        readAt: serverTimestamp()
+      });
     } catch (e) { console.error('Mark read error:', e); }
   }
 
@@ -900,9 +913,35 @@ class NotificationManager {
     try {
       const unread = this.notifications.filter(n => !n.read);
       await Promise.all(unread.map(n =>
-        updateDoc(doc(db, 'notifications', n.id), { read: true })
+        updateDoc(doc(db, 'notifications', n.id), { 
+          read: true,
+          readAt: serverTimestamp()
+        })
       ));
     } catch (e) { console.error('Mark all read error:', e); }
+  }
+
+  async markRelatedAsRead(criteria) {
+    if (!authManager.currentUser) return;
+    try {
+      // Find all unread notifications matching criteria
+      const unreadMatch = this.notifications.filter(n => {
+        if (n.read) return false;
+        for (const [key, value] of Object.entries(criteria)) {
+          if (n[key] !== value) return false;
+        }
+        return true;
+      });
+      
+      if (unreadMatch.length === 0) return;
+      
+      await Promise.all(unreadMatch.map(n => 
+        updateDoc(doc(db, 'notifications', n.id), { 
+          read: true, 
+          readAt: serverTimestamp() 
+        })
+      ));
+    } catch (e) { console.error('Mark related read error:', e); }
   }
 
   // ===== DELETE =====
@@ -925,14 +964,8 @@ class NotificationManager {
   async clearChatNotifications(chatId) {
     if (!authManager.currentUser || !chatId) return;
     try {
-      const q = query(
-        collection(db, 'notifications'),
-        where('userId', '==', authManager.currentUser.uid),
-        where('type', '==', 'chat_message'),
-        where('chatId', '==', chatId)
-      );
-      const snap = await getDocs(q);
-      await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
+      // Mark as read instead of deleting to keep history intact
+      await this.markRelatedAsRead({ type: 'chat_message', chatId: chatId });
     } catch (e) { console.error('Clear chat notifs error:', e); }
   }
 

@@ -5,7 +5,7 @@ import { getTimeSinceSchool, EMOTIONAL_QUOTES, timeAgo, sanitizeHTML, isBirthday
 import { userCache } from '../services/userCache.js';
 import { authManager, awardPoints } from '../auth.js';
 import { router } from '../router.js';
-import { createNotification } from '../notifications.js';
+import { createNotification, notificationManager } from '../notifications.js';
 import { showDeleteConfirmation, deleteDocFull } from '../delete-confirm.js';
 
 let timerInterval = null;
@@ -49,6 +49,10 @@ export function destroyHome() {
 
 export async function renderHome(container, data = null) {
   router.registerDestroy('home', destroyHome);
+  
+  // Mark general announcement notifications as read
+  notificationManager.markRelatedAsRead({ type: 'announcement' });
+  
   destroyHome();
 
   container.innerHTML = `
@@ -394,6 +398,12 @@ function loadFeed(container, data = null) {
       if (data && data.postId) {
         const targetId = data.postId;
         data.postId = null; // Prevent re-scrolling on future snapshot updates
+        
+        // Mark any notifications for this post as read
+        notificationManager.markRelatedAsRead({ type: 'like', postId: targetId });
+        notificationManager.markRelatedAsRead({ type: 'comment', postId: targetId });
+        notificationManager.markRelatedAsRead({ type: 'tag', postId: targetId });
+        
         setTimeout(async () => {
           let targetCard = document.getElementById(`post-${targetId}`);
           if (!targetCard) {
@@ -870,6 +880,12 @@ export function createPostCard(post) {
 // 1. COMMENTS MODAL (INSTAGRAM STYLE)
 // ==========================================
 function showCommentsModal(post) {
+  // Mark comment and tag notifications as read
+  if (post?.id) {
+    notificationManager.markRelatedAsRead({ type: 'comment', postId: post.id });
+    notificationManager.markRelatedAsRead({ type: 'tag', postId: post.id });
+  }
+
   const overlay = document.createElement('div');
   overlay.className = 'fixed inset-0 z-[100] modal-sheet-container modal-sheet-overlay flex flex-col justify-end';
   overlay.innerHTML = `

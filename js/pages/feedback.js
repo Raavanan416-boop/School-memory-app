@@ -2,8 +2,10 @@ import { authManager } from '../auth.js';
 import { db, collection, addDoc, serverTimestamp } from '../firebase-config.js';
 import { showToast } from '../utils.js';
 import { router } from '../router.js';
+import { notificationManager } from '../notifications.js';
 
 export async function renderFeedback(container) {
+  notificationManager.markRelatedAsRead({ type: 'feedback' });
   container.innerHTML = `
     <header class="sticky top-0 z-40 bg-white/95 backdrop-blur-sm border-b border-gray-100 p-4 flex items-center gap-3">
       <button id="back-btn" class="p-2 -ml-2 rounded-full hover:bg-gray-100 transition-colors">

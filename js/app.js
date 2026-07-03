@@ -1076,7 +1076,7 @@ function checkBirthdayCelebration() {
 
   const s2Quote = document.createElement('p');
   s2Quote.className = 'cb-s2-quote';
-  s2Quote.innerHTML = 'Wishing you endless happiness,<br>success,<br>love,<br>and unforgettable memories.';
+  s2Quote.innerHTML = '🎂Wishing you a Very Happy Birthday! Stay Blessed Always,<br>💐May Your Life Be Filled With Happiness and Success,<br>💖Keep Smiling and Creating Beautiful Memories,<br>💫May Every Dream and Wish Come True';
   s2Header.appendChild(s2Quote);
 
   // Enter Button

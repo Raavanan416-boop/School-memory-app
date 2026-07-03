@@ -1889,7 +1889,7 @@ function checkBirthdayCelebration() {
       s2Header.style.transition = 'opacity 0.6s';
       await delay(600);
       
-      s2TitleMain.innerHTML = '🎉Celebrate Every Beautiful Moment❤️';
+      s2TitleMain.innerHTML = '🎉Celebrate <br> Every Beautiful Moment❤️';
       s2Name.innerHTML = name;
       s2Quote.innerHTML = '';
       

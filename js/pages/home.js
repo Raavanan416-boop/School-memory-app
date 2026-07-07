@@ -146,6 +146,17 @@ export async function renderHome(container, data = null) {
     });
   });
 
+  // Start Home Playlist if there's no Birthday Intro
+  const dob = authManager.userData?.dateOfBirth;
+  const isBirthday = dob && isBirthdayToday(dob);
+  const played = sessionStorage.getItem("birthdayIntroPlayed") === "true";
+  
+  if (!isBirthday || played) {
+    if (typeof MusicPlayer !== 'undefined' && MusicPlayer.start) {
+      MusicPlayer.start();
+    }
+  }
+
   // Load feed IMMEDIATELY
   loadFeed(container, data);
 

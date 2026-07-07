@@ -156,6 +156,13 @@ class AuthManager {
     await this._setOnline(true);
     this._startHeartbeat();
 
+    sessionStorage.setItem("loginSession", "true");
+    
+    // Call Birthday Intro immediately after successful login
+    if (window.showBirthdayIntro) {
+      window.showBirthdayIntro();
+    }
+
     return cred.user;
   }
 
@@ -165,6 +172,10 @@ class AuthManager {
     await signOut(auth);
     this.currentUser = null;
     this.userData = null;
+
+    sessionStorage.removeItem("birthdayIntroPlayed");
+    sessionStorage.removeItem("loginSession");
+    window.hasPlayedBirthdayIntro = false;
   }
 
   async resetPassword(email) {

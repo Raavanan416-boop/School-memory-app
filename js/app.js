@@ -1,4 +1,4 @@
-﻿// Main App Entry — Resilient app shell with lazy page loading + auto-login
+// Main App Entry — Resilient app shell with lazy page loading + auto-login
 import { authManager } from './auth.js';
 import { router } from './router.js';
 import { showToast, sanitizeHTML } from './utils.js';
@@ -380,7 +380,6 @@ async function doLogin(email, password) {
     await authManager.login(email, password);
     if (authManager.userData && authManager.userData.passwordChanged) {
       showToast('Welcome back! 🎓', 'success');
-      MusicPlayer.start();
     }
   } catch (err) {
     console.error('Login error:', err);
@@ -591,9 +590,6 @@ function buildAppShell() {
 
   // PWA Install prompt
   setupPWAInstall();
-
-  // Birthday check — show celebration if today is current user's birthday
-  checkBirthdayCelebration();
 
   // Throwback Thursday check
   checkThrowbackThursday();
@@ -839,21 +835,30 @@ function showForcedPasswordModal() {
 }
 
 // ===== NEW PREMIUM CINEMATIC BIRTHDAY EXPERIENCE =====
-// In-memory flag: resets on every fresh page load (refresh / reopen / restart)
-// but survives SPA route changes within the same session.
-let _birthdayCelebrationShown = false;
 let _birthdayAudioEngine = null;
+window.hasPlayedBirthdayIntro = false;
 
-function checkBirthdayCelebration() {
-  if (_birthdayCelebrationShown) return;
+window.showBirthdayIntro = function() {
+  const loggedIn = sessionStorage.getItem("loginSession") === "true";
+  const played = sessionStorage.getItem("birthdayIntroPlayed") === "true";
+
+  if (!loggedIn) return;
+  if (played) return;
+  if (window.hasPlayedBirthdayIntro) return;
+
   if (!authManager.userData?.dateOfBirth) return;
 
   const today = new Date();
   const dob = new Date(authManager.userData.dateOfBirth);
   if (dob.getMonth() !== today.getMonth() || dob.getDate() !== today.getDate()) return;
 
-  _birthdayCelebrationShown = true;
+  window.hasPlayedBirthdayIntro = true;
   const name = authManager.userData.fullName || 'Friend';
+
+  // Ensure no other music is playing during Birthday Intro
+  if (typeof MusicPlayer !== 'undefined' && MusicPlayer.bgAudio) {
+    MusicPlayer.bgAudio.pause();
+  }
 
   // ── Web Audio API Synthesizer ──
   class BirthdayAudioEngine {
@@ -1928,11 +1933,13 @@ function checkBirthdayCelebration() {
   enterBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     
-    // Stop Audio Engine (1s fade out)
+    // Fade out and Stop Audio Engine
     if (_birthdayAudioEngine) {
       _birthdayAudioEngine.stop();
       _birthdayAudioEngine = null;
     }
+
+    sessionStorage.setItem("birthdayIntroPlayed", "true");
 
     clearInterval(ambientSparklesInterval);
     clearInterval(ambientConfettiInterval);
@@ -1944,7 +1951,12 @@ function checkBirthdayCelebration() {
     setTimeout(() => {
       overlay.remove();
       router.navigate('home');
-    }, 1000);
+      
+      // Start Home playlist after Birthday Intro music has completely faded out
+      if (typeof MusicPlayer !== 'undefined' && MusicPlayer.start) {
+        MusicPlayer.start();
+      }
+    }, 1100); // Wait 1.1s to ensure audio engine is fully destroyed
   });
 }
 
@@ -2349,7 +2361,6 @@ async function init() {
         usageTracker.startSession();
         loginTracker.startSession();
         showToast('Welcome back! 🎓', 'success');
-        MusicPlayer.start();
       } else {
         initApp();
         usageTracker.startSession();

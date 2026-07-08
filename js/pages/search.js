@@ -10,6 +10,16 @@ let allUsers = [];
 let allPosts = [];
 let dataLoaded = false;
 let searchPresenceUnsubs = [];
+let unsubSearchPosts = null;
+
+export function destroySearch() {
+  cleanupSearchPresence();
+  if (unsubSearchPosts) {
+    unsubSearchPosts();
+    unsubSearchPosts = null;
+  }
+  dataLoaded = false; // allow reloading if we come back
+}
 
 function cleanupSearchPresence() {
   searchPresenceUnsubs.forEach(u => u());
@@ -17,6 +27,9 @@ function cleanupSearchPresence() {
 }
 
 export async function renderSearch(container) {
+  router.registerDestroy('search', destroySearch);
+  destroySearch();
+
   container.innerHTML = `
     <section class="px-4 pt-4">
       <h2 class="text-xl font-bold text-navy-800 mb-4">Search</h2>
@@ -126,14 +139,23 @@ export async function renderSearch(container) {
     recentEl.classList.add('hidden');
   });
 
-  // Lazy-load data on first search
+  // Setup real-time listener for searchable data
   async function ensureDataLoaded() {
     if (dataLoaded) return;
     try {
-      const postsSnap = await getDocs(query(collection(db, 'posts'), orderBy('createdAt', 'desc'), limit(50)));
       allUsers = userCache.getAllUsers();
-      allPosts = [];
-      postsSnap.forEach(d => allPosts.push({ id: d.id, ...d.data() }));
+      
+      const { onSnapshot } = await import('../firebase-config.js');
+      unsubSearchPosts = onSnapshot(query(collection(db, 'posts'), orderBy('createdAt', 'desc'), limit(50)), (snap) => {
+        allPosts = [];
+        snap.forEach(d => allPosts.push({ id: d.id, ...d.data() }));
+        
+        // If a search is currently active, re-trigger it to update results instantly
+        if (searchInput && searchInput.value.trim() !== '') {
+          searchInput.dispatchEvent(new Event('input'));
+        }
+      });
+
       dataLoaded = true;
     } catch (e) {
       console.error('Search data load error:', e);

@@ -67,19 +67,7 @@ export async function renderProfile(container, data = null) {
   let friendCount = 0;
   const uid = viewingOther ? data.userId : authManager.currentUser?.uid;
 
-  // Initial fetch for smooth first render
-  try {
-    if (uid) {
-      const postSnap = await getDocs(query(collection(db, 'posts'), where('authorId', '==', uid), orderBy('createdAt', 'desc')));
-      postSnap.forEach(d => {
-        const p = d.data();
-        if (p.isHidden && !authManager.isOwner) return;
-        userPosts.push({ id: d.id, ...p });
-        totalLikes += (p.likes?.length || 0);
-        totalComments += (p.commentCount || 0);
-      });
-    }
-  } catch (e) { }
+
 
   // Set up Realtime Sync for Profile Stats & Posts
   if (uid) {
@@ -958,7 +946,11 @@ function showLogoutConfirmation() {
 // ===== STAT DETAIL MODALS =====
 async function showStatDetailModal(type, userPosts, uid) {
   const titles = { posts: '📸 Posts', likes: '❤️ Likes Received', comments: '💬 Comments Received' };
-  const modal = router.openModal('', { title: titles[type] || type });
+  let modalUnsubs = [];
+  const modal = router.openModal('', { 
+    title: titles[type] || type,
+    onClose: () => modalUnsubs.forEach(u => u())
+  });
 
   if (type === 'posts') {
     if (userPosts.length === 0) {
@@ -1026,33 +1018,61 @@ async function showStatDetailModal(type, userPosts, uid) {
     `;
   } else if (type === 'comments') {
     modal.body.innerHTML = '<div class="p-4 text-center text-gray-400 text-sm">Loading comments...</div>';
-    const commentItems = [];
+    
+    // We maintain a map of post ID to its comments to handle real-time updates smoothly
+    const commentsMap = new Map();
+    
+    const renderComments = () => {
+      let allComments = [];
+      commentsMap.forEach(comments => {
+        allComments.push(...comments);
+      });
+      // Sort by time descending
+      allComments.sort((a, b) => b.timestamp - a.timestamp);
+      
+      if (allComments.length === 0) {
+        modal.body.innerHTML = '<div class="p-6 text-center text-gray-400 text-sm">No comments yet</div>';
+        return;
+      }
+      
+      modal.body.innerHTML = `
+        <div class="p-4 space-y-2">
+          ${allComments.slice(0, 30).map(c => `
+            <div class="stat-detail-item">
+              <div class="stat-detail-avatar-placeholder" data-user-pic="${c.authorId}">${(c.authorName || '?')[0]}</div>
+              <div class="flex-1 min-w-0">
+                <p class="text-sm text-navy-800"><span class="font-semibold" data-user-name="${c.authorId}">${sanitizeHTML(c.authorName)}</span> <span class="text-gray-400">on</span> "${sanitizeHTML(c.postContent)}..."</p>
+                <p class="text-[11px] text-gray-400 truncate">"${sanitizeHTML(c.text)}" · ${c.time}</p>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    };
+
     for (const post of userPosts) {
       try {
-        const commentsSnap = await getDocs(query(collection(db, 'posts', post.id, 'comments'), orderBy('createdAt', 'desc')));
-        commentsSnap.forEach(cDoc => {
-          const c = cDoc.data();
-          commentItems.push({ authorName: c.authorName || 'Unknown', authorId: c.authorId, text: c.text?.slice(0, 50) || '', postContent: post.content?.slice(0, 30) || 'a memory', postId: post.id, time: c.createdAt?.toDate ? timeAgo(c.createdAt.toDate()) : '' });
+        const q = query(collection(db, 'posts', post.id, 'comments'), orderBy('createdAt', 'desc'));
+        const unsub = onSnapshot(q, (snap) => {
+          const postComments = [];
+          snap.forEach(cDoc => {
+            const c = cDoc.data();
+            postComments.push({ 
+              authorName: c.authorName || 'Unknown', 
+              authorId: c.authorId, 
+              text: c.text?.slice(0, 50) || '', 
+              postContent: post.content?.slice(0, 30) || 'a memory', 
+              postId: post.id, 
+              time: c.createdAt?.toDate ? timeAgo(c.createdAt.toDate()) : '',
+              timestamp: c.createdAt?.toMillis ? c.createdAt.toMillis() : Date.now()
+            });
+          });
+          commentsMap.set(post.id, postComments);
+          renderComments();
         });
+        modalUnsubs.push(unsub);
       } catch { /* skip */ }
     }
-    if (commentItems.length === 0) {
-      modal.body.innerHTML = '<div class="p-6 text-center text-gray-400 text-sm">No comments yet</div>';
-      return;
-    }
-    modal.body.innerHTML = `
-      <div class="p-4 space-y-2">
-        ${commentItems.slice(0, 30).map(c => `
-          <div class="stat-detail-item">
-            <div class="stat-detail-avatar-placeholder" data-user-pic="${c.authorId}">${(c.authorName || '?')[0]}</div>
-            <div class="flex-1 min-w-0">
-              <p class="text-sm text-navy-800"><span class="font-semibold" data-user-name="${c.authorId}">${sanitizeHTML(c.authorName)}</span> <span class="text-gray-400">on</span> "${sanitizeHTML(c.postContent)}..."</p>
-              <p class="text-[11px] text-gray-400 truncate">"${sanitizeHTML(c.text)}" · ${c.time}</p>
-            </div>
-          </div>
-        `).join('')}
-      </div>
-    `;
   }
 }
 
@@ -1356,7 +1376,12 @@ function renderTaggedTab(el, targetUid) {
     orderBy('taggedAt', 'desc')
   );
 
-  unsubTagged = onSnapshot(q, async (snap) => {
+  let innerUnsubs = [];
+  const mainUnsub = onSnapshot(q, (snap) => {
+    // Clean up old post listeners
+    innerUnsubs.forEach(u => u());
+    innerUnsubs = [];
+
     if (snap.empty) {
       el.innerHTML = `
         <div class="px-4 py-12 text-center">
@@ -1367,66 +1392,88 @@ function renderTaggedTab(el, targetUid) {
       return;
     }
 
-    const postPromises = snap.docs.map(async d => {
-      const postId = d.id;
-      const postSnap = await getDoc(doc(db, 'posts', postId));
-      if (postSnap.exists()) {
-        const p = postSnap.data();
-        if (p.isHidden && !authManager.isOwner) return null;
-        return { id: postSnap.id, ...p };
+    const postsMap = new Map();
+    
+    const renderPosts = () => {
+      const posts = Array.from(postsMap.values()).filter(p => p !== null);
+      // Sort to preserve order from the outer snapshot
+      posts.sort((a, b) => {
+        const indexA = snap.docs.findIndex(d => d.id === a.id);
+        const indexB = snap.docs.findIndex(d => d.id === b.id);
+        return indexA - indexB;
+      });
+
+      if (posts.length === 0 && postsMap.size === snap.docs.length) {
+        el.innerHTML = `
+          <div class="px-4 py-12 text-center">
+            <div class="text-4xl mb-3">🏷️</div>
+            <h3 class="font-semibold text-navy-700 mb-1">No tagged memories</h3>
+            <p class="text-sm text-gray-400">When accepted, tagged memories will appear here.</p>
+          </div>`;
+        return;
       }
-      return null;
-    });
 
-    const posts = (await Promise.all(postPromises)).filter(p => p !== null);
-
-    if (posts.length === 0) {
       el.innerHTML = `
-        <div class="px-4 py-12 text-center">
-          <div class="text-4xl mb-3">🏷️</div>
-          <h3 class="font-semibold text-navy-700 mb-1">No tagged memories</h3>
-          <p class="text-sm text-gray-400">When accepted, tagged memories will appear here.</p>
-        </div>`;
-      return;
-    }
-
-    el.innerHTML = `
-      <div class="px-4 pt-4 pb-20">
-        <div class="grid grid-cols-2 gap-3">
-          ${posts.map(p => `
-            <div class="profile-post-clickable cursor-pointer flex flex-col bg-white rounded-2xl border border-gray-50 shadow-sm overflow-hidden" data-post-id="${p.id}">
-              <div class="aspect-[4/3] bg-cream-100 relative shrink-0">
-                ${(p.imageUrls && p.imageUrls.length > 0) || p.imageUrl
-          ? `<img src="${(p.imageUrls && p.imageUrls.length > 0) ? p.imageUrls[0] : p.imageUrl}" class="w-full h-full object-cover" alt="" loading="lazy"/>`
-          : `<div class="w-full h-full bg-gradient-to-br from-cream-200 to-cream-300 flex flex-col items-center justify-center p-2"><span class="text-2xl mb-1">📝</span></div>`}
-              </div>
-              <div class="p-2.5 flex flex-col flex-grow">
-                <p class="text-xs font-semibold text-navy-800 line-clamp-2 mb-auto">${sanitizeHTML(p.caption || 'Untitled')}</p>
-                <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-gray-50">
-                  <p class="text-[10px] text-gray-400">${(p.createdAt?.toDate ? p.createdAt.toDate() : new Date()).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
-                  <span class="flex items-center gap-0.5 text-[10px] text-gray-400">
-                    <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"/></svg>
-                    ${p.likes?.length || 0}
-                  </span>
+        <div class="px-4 pt-4 pb-20">
+          <div class="grid grid-cols-2 gap-3">
+            ${posts.map(p => `
+              <div class="profile-post-clickable cursor-pointer flex flex-col bg-white rounded-2xl border border-gray-50 shadow-sm overflow-hidden" data-post-id="${p.id}">
+                <div class="aspect-[4/3] bg-cream-100 relative shrink-0">
+                  ${(p.imageUrls && p.imageUrls.length > 0) || p.imageUrl
+            ? `<img src="${(p.imageUrls && p.imageUrls.length > 0) ? p.imageUrls[0] : p.imageUrl}" class="w-full h-full object-cover" alt="" loading="lazy"/>`
+            : `<div class="w-full h-full bg-gradient-to-br from-cream-200 to-cream-300 flex flex-col items-center justify-center p-2"><span class="text-2xl mb-1">📝</span></div>`}
+                </div>
+                <div class="p-2.5 flex flex-col flex-grow">
+                  <p class="text-xs font-semibold text-navy-800 line-clamp-2 mb-auto">${sanitizeHTML(p.caption || 'Untitled')}</p>
+                  <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-gray-50">
+                    <p class="text-[10px] text-gray-400">${(p.createdAt?.toDate ? p.createdAt.toDate() : new Date()).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+                    <span class="flex items-center gap-0.5 text-[10px] text-gray-400">
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"/></svg>
+                      ${p.likes?.length || 0}
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
-          `).join('')}
-        </div>
-      </div>`;
+            `).join('')}
+          </div>
+        </div>`;
 
-    // Add click handlers
-    el.querySelectorAll('.profile-post-clickable').forEach(item => {
-      item.addEventListener('click', () => {
-        const pid = item.dataset.postId;
-        const post = posts.find(p => p.id === pid);
-        if (post) showPostModal(post);
+      // Add click handlers
+      el.querySelectorAll('.profile-post-clickable').forEach(item => {
+        item.addEventListener('click', () => {
+          const pid = item.dataset.postId;
+          const post = posts.find(p => p.id === pid);
+          if (post) showPostModal(post);
+        });
       });
+    };
+
+    snap.docs.forEach(d => {
+      const postId = d.id;
+      const u = onSnapshot(doc(db, 'posts', postId), (postSnap) => {
+        if (postSnap.exists()) {
+          const p = postSnap.data();
+          if (p.isHidden && !authManager.isOwner) {
+            postsMap.set(postId, null);
+          } else {
+            postsMap.set(postId, { id: postSnap.id, ...p });
+          }
+        } else {
+          postsMap.set(postId, null);
+        }
+        renderPosts();
+      });
+      innerUnsubs.push(u);
     });
   }, (err) => {
     console.error('Tagged posts error:', err);
     el.innerHTML = '<div class="px-4 py-12 text-center text-red-500 text-sm">Failed to load tagged memories</div>';
   });
+
+  unsubTagged = () => {
+    mainUnsub();
+    innerUnsubs.forEach(u => u());
+  };
 }
 
 function renderSavedTab(el, targetUid) {
@@ -1449,7 +1496,11 @@ function renderSavedTab(el, targetUid) {
     orderBy('savedAt', 'desc')
   );
 
-  unsubSaved = onSnapshot(q, async (snap) => {
+  let innerUnsubs = [];
+  const mainUnsub = onSnapshot(q, (snap) => {
+    innerUnsubs.forEach(u => u());
+    innerUnsubs = [];
+
     if (snap.empty) {
       el.innerHTML = `
         <div class="px-4 py-12 text-center">
@@ -1467,66 +1518,88 @@ function renderSavedTab(el, targetUid) {
       return bTime - aTime;
     });
 
-    const postPromises = sortedDocs.map(async d => {
-      const postId = d.data().postId || d.id;
-      const postSnap = await getDoc(doc(db, 'posts', postId));
-      if (postSnap.exists()) {
-        const p = postSnap.data();
-        if (p.isHidden && !authManager.isOwner) return null;
-        return { id: postSnap.id, ...p };
+    const postsMap = new Map();
+
+    const renderPosts = () => {
+      const posts = Array.from(postsMap.values()).filter(p => p !== null);
+      // Keep sorted by original array
+      posts.sort((a, b) => {
+        const indexA = sortedDocs.findIndex(d => (d.data().postId || d.id) === a.id);
+        const indexB = sortedDocs.findIndex(d => (d.data().postId || d.id) === b.id);
+        return indexA - indexB;
+      });
+
+      if (posts.length === 0 && postsMap.size === sortedDocs.length) {
+        el.innerHTML = `
+          <div class="px-4 py-12 text-center">
+            <div class="text-4xl mb-3">🔖</div>
+            <h3 class="font-semibold text-navy-700 mb-1">No saved memories</h3>
+            <p class="text-sm text-gray-400">Posts you save will appear here.</p>
+          </div>`;
+        return;
       }
-      return null;
-    });
 
-    const posts = (await Promise.all(postPromises)).filter(p => p !== null);
-
-    if (posts.length === 0) {
       el.innerHTML = `
-        <div class="px-4 py-12 text-center">
-          <div class="text-4xl mb-3">🔖</div>
-          <h3 class="font-semibold text-navy-700 mb-1">No saved memories</h3>
-          <p class="text-sm text-gray-400">Posts you save will appear here.</p>
-        </div>`;
-      return;
-    }
-
-    el.innerHTML = `
-      <div class="px-4 pt-4 pb-20">
-        <div class="grid grid-cols-2 gap-3">
-          ${posts.map(p => `
-            <div class="profile-post-clickable cursor-pointer flex flex-col bg-white rounded-2xl border border-gray-50 shadow-sm overflow-hidden" data-post-id="${p.id}">
-              <div class="aspect-[4/3] bg-cream-100 relative shrink-0">
-                ${(p.imageUrls && p.imageUrls.length > 0) || p.imageUrl
-          ? `<img src="${(p.imageUrls && p.imageUrls.length > 0) ? p.imageUrls[0] : p.imageUrl}" class="w-full h-full object-cover" alt="" loading="lazy"/>`
-          : `<div class="w-full h-full bg-gradient-to-br from-cream-200 to-cream-300 flex flex-col items-center justify-center p-2"><span class="text-2xl mb-1">📝</span></div>`}
-              </div>
-              <div class="p-2.5 flex flex-col flex-grow">
-                <p class="text-xs font-semibold text-navy-800 line-clamp-2 mb-auto">${sanitizeHTML(p.caption || 'Untitled')}</p>
-                <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-gray-50">
-                  <p class="text-[10px] text-gray-400">${(p.createdAt?.toDate ? p.createdAt.toDate() : new Date()).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
-                  <span class="flex items-center gap-0.5 text-[10px] text-gray-400">
-                    <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"/></svg>
-                    ${p.likes?.length || 0}
-                  </span>
+        <div class="px-4 pt-4 pb-20">
+          <div class="grid grid-cols-2 gap-3">
+            ${posts.map(p => `
+              <div class="profile-post-clickable cursor-pointer flex flex-col bg-white rounded-2xl border border-gray-50 shadow-sm overflow-hidden" data-post-id="${p.id}">
+                <div class="aspect-[4/3] bg-cream-100 relative shrink-0">
+                  ${(p.imageUrls && p.imageUrls.length > 0) || p.imageUrl
+            ? `<img src="${(p.imageUrls && p.imageUrls.length > 0) ? p.imageUrls[0] : p.imageUrl}" class="w-full h-full object-cover" alt="" loading="lazy"/>`
+            : `<div class="w-full h-full bg-gradient-to-br from-cream-200 to-cream-300 flex flex-col items-center justify-center p-2"><span class="text-2xl mb-1">📝</span></div>`}
+                </div>
+                <div class="p-2.5 flex flex-col flex-grow">
+                  <p class="text-xs font-semibold text-navy-800 line-clamp-2 mb-auto">${sanitizeHTML(p.caption || 'Untitled')}</p>
+                  <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-gray-50">
+                    <p class="text-[10px] text-gray-400">${(p.createdAt?.toDate ? p.createdAt.toDate() : new Date()).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+                    <span class="flex items-center gap-0.5 text-[10px] text-gray-400">
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"/></svg>
+                      ${p.likes?.length || 0}
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
-          `).join('')}
-        </div>
-      </div>`;
+            `).join('')}
+          </div>
+        </div>`;
 
-    // Add click handlers
-    el.querySelectorAll('.profile-post-clickable').forEach(item => {
-      item.addEventListener('click', () => {
-        const pid = item.dataset.postId;
-        const post = posts.find(p => p.id === pid);
-        if (post) showPostModal(post);
+      // Add click handlers
+      el.querySelectorAll('.profile-post-clickable').forEach(item => {
+        item.addEventListener('click', () => {
+          const pid = item.dataset.postId;
+          const post = posts.find(p => p.id === pid);
+          if (post) showPostModal(post);
+        });
       });
+    };
+
+    sortedDocs.forEach(d => {
+      const postId = d.data().postId || d.id;
+      const u = onSnapshot(doc(db, 'posts', postId), (postSnap) => {
+        if (postSnap.exists()) {
+          const p = postSnap.data();
+          if (p.isHidden && !authManager.isOwner) {
+            postsMap.set(postId, null);
+          } else {
+            postsMap.set(postId, { id: postSnap.id, ...p });
+          }
+        } else {
+          postsMap.set(postId, null);
+        }
+        renderPosts();
+      });
+      innerUnsubs.push(u);
     });
   }, (err) => {
     console.error('Saved posts error:', err);
     el.innerHTML = '<div class="px-4 py-12 text-center text-red-500 text-sm">Failed to load saved memories</div>';
   });
+
+  unsubSaved = () => {
+    mainUnsub();
+    innerUnsubs.forEach(u => u());
+  };
 }
 
 async function renderSlamBookTab(el, user, viewingOther) {
@@ -1996,35 +2069,55 @@ async function showSavedPosts() {
     return;
   }
 
-  const modal = router.openModal('', { title: '🔖 Saved Memories', fullscreen: true });
+  let modalUnsubs = [];
+  const modal = router.openModal('', { 
+    title: '🔖 Saved Memories', 
+    fullscreen: true,
+    onClose: () => modalUnsubs.forEach(u => u())
+  });
+  
   modal.body.innerHTML = '<div class="p-4 text-center"><div class="skeleton w-full h-40"></div></div>';
 
   try {
-    const posts = [];
+    const postsMap = new Map();
+    
+    const renderPosts = () => {
+      const posts = Array.from(postsMap.values()).filter(p => p !== null);
+      // Sort by the order in savedIds
+      posts.sort((a, b) => savedIds.indexOf(a.id) - savedIds.indexOf(b.id));
+      
+      if (posts.length === 0) {
+        modal.body.innerHTML = '<div class="p-8 text-center"><div class="text-3xl mb-2">🔖</div><p class="text-sm text-gray-400">No saved posts found</p></div>';
+        return;
+      }
+
+      modal.body.innerHTML = `
+        <div class="profile-posts-grid p-2">
+          ${posts.map(p => `
+            <div class="profile-post-cell">
+              ${p.imageUrl ? `<img src="${p.imageUrl}" class="w-full h-full object-cover" alt="" loading="lazy"/>` : `
+                <div class="w-full h-full flex flex-col items-center justify-center p-3 text-center bg-cream-200">
+                  <p class="text-xs text-gray-600 font-handwriting">${sanitizeHTML((p.caption || '').slice(0, 60))}</p>
+                  <p class="text-[10px] text-gray-400 mt-1" data-user-name="${p.authorId}">${sanitizeHTML(p.authorName || '')}</p>
+                </div>
+              `}
+            </div>
+          `).join('')}
+        </div>
+      `;
+    };
+
     for (const id of savedIds.slice(0, 20)) {
-      const snap = await getDoc(doc(db, 'posts', id));
-      if (snap.exists()) posts.push({ id: snap.id, ...snap.data() });
+      const u = onSnapshot(doc(db, 'posts', id), (snap) => {
+        if (snap.exists()) {
+          postsMap.set(id, { id: snap.id, ...snap.data() });
+        } else {
+          postsMap.set(id, null);
+        }
+        renderPosts();
+      });
+      modalUnsubs.push(u);
     }
-
-    if (posts.length === 0) {
-      modal.body.innerHTML = '<div class="p-8 text-center"><div class="text-3xl mb-2">🔖</div><p class="text-sm text-gray-400">No saved posts found</p></div>';
-      return;
-    }
-
-    modal.body.innerHTML = `
-      <div class="profile-posts-grid p-2">
-        ${posts.map(p => `
-          <div class="profile-post-cell">
-            ${p.imageUrl ? `<img src="${p.imageUrl}" class="w-full h-full object-cover" alt="" loading="lazy"/>` : `
-              <div class="w-full h-full flex flex-col items-center justify-center p-3 text-center bg-cream-200">
-                <p class="text-xs text-gray-600 font-handwriting">${sanitizeHTML((p.caption || '').slice(0, 60))}</p>
-                <p class="text-[10px] text-gray-400 mt-1" data-user-name="${p.authorId}">${sanitizeHTML(p.authorName || '')}</p>
-              </div>
-            `}
-          </div>
-        `).join('')}
-      </div>
-    `;
   } catch (e) {
     modal.body.innerHTML = '<div class="p-8 text-center text-sm text-gray-400">Failed to load saved posts</div>';
   }
@@ -2089,7 +2182,11 @@ function showThemePickerModal() {
 
 // ===== BIRTHDAY WISH HISTORY =====
 function showBirthdayHistoryModal(userId) {
-  const modal = router.openModal('', { title: '🎂 Birthday Wish History' });
+  let modalUnsubs = [];
+  const modal = router.openModal('', { 
+    title: '🎂 Birthday Wish History',
+    onClose: () => modalUnsubs.forEach(u => u())
+  });
   
   modal.body.innerHTML = `
     <div class="p-4 bg-gray-50 min-h-[50vh]">
@@ -2112,7 +2209,7 @@ function showBirthdayHistoryModal(userId) {
   
   // Fetch history records
   const q = query(collection(db, 'birthdayWishHistory'), where('userId', '==', uid));
-  getDocs(q).then(snap => {
+  const unsub = onSnapshot(q, (snap) => {
     if (snap.empty) {
       listContainer.innerHTML = `
         <div class="text-center py-8">
@@ -2177,8 +2274,9 @@ function showBirthdayHistoryModal(userId) {
       });
     });
     
-  }).catch(err => {
+  }, (err) => {
     console.error('Fetch history error:', err);
     listContainer.innerHTML = `<div class="text-center py-6 text-red-400 text-sm">Failed to load history</div>`;
   });
+  modalUnsubs.push(unsub);
 }

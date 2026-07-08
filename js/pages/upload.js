@@ -5,15 +5,16 @@ import { showToast, compressImage, sanitizeHTML } from '../utils.js';
 import { authManager, awardPoints } from '../auth.js';
 import { createNotification } from '../notifications.js';
 import { router } from '../router.js';
+import { userCache } from '../services/userCache.js';
 
 export async function renderUpload(container) {
   // Load users for tagging/mentioning
   let allUsers = [];
   try {
-    const snap = await getDocs(collection(db, 'users'));
-    snap.forEach(d => {
-      if (d.id !== authManager.currentUser?.uid) {
-        allUsers.push({ id: d.id, ...d.data() });
+    const cachedUsers = userCache.getAllUsers();
+    cachedUsers.forEach(u => {
+      if (u.id !== authManager.currentUser?.uid) {
+        allUsers.push(u);
       }
     });
     allUsers.sort((a, b) => (a.fullName || '').localeCompare(b.fullName || ''));

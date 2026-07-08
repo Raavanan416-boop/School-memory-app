@@ -12,9 +12,13 @@ let timerInterval = null;
 let quoteInterval = null;
 let unsubFeed = null;
 let unsubBdayFeature = null;
+let unsubThrowback = null;
+let activeListeners = [];
 let lastDoc = null;
+let currentLimit = 10;
 let loadingMore = false;
 let allPostsLoaded = false;
+let isFirstLoad = true;
 let feedObserver = null;
 const deletedPostIds = new Set(); // Track locally deleted post IDs
 
@@ -41,10 +45,14 @@ export function destroyHome() {
   if (quoteInterval) clearInterval(quoteInterval);
   if (unsubFeed) unsubFeed();
   if (unsubBdayFeature) unsubBdayFeature();
+  if (unsubThrowback) unsubThrowback();
+  activeListeners.forEach(unsub => unsub());
+  activeListeners = [];
   if (feedObserver) { feedObserver.disconnect(); feedObserver = null; }
-  timerInterval = null; quoteInterval = null; unsubFeed = null; unsubBdayFeature = null;
+  timerInterval = null; quoteInterval = null; unsubFeed = null; unsubBdayFeature = null; unsubThrowback = null;
   lastDoc = null; loadingMore = false; allPostsLoaded = false;
   isFirstLoad = true;
+  currentLimit = 10;
 }
 
 export async function renderHome(container, data = null) {
@@ -157,6 +165,7 @@ export async function renderHome(container, data = null) {
     allPostsLoaded = false;
     if (unsubFeed) unsubFeed();
     isFirstLoad = true;
+    currentLimit = 10;
     const feedEl = container.querySelector('#feed-container');
     if (feedEl) {
       feedEl.innerHTML = `
@@ -197,27 +206,25 @@ export async function renderHome(container, data = null) {
   setTimeout(() => loadThrowback(container), 2000);
 
   // Check for birthdays today lazily
-  setTimeout(async () => {
+  setTimeout(() => {
     try {
-      const usersSnap = await getDocs(collection(db, 'users'));
-      let birthdayUsers = [];
-      usersSnap.forEach(d => {
-        const u = d.data();
-        if (isBirthdayToday(u.dateOfBirth)) {
-          birthdayUsers.push({ id: d.id, ...u });
-        }
-      });
-      
       if (unsubBdayFeature) unsubBdayFeature();
       
       unsubBdayFeature = onSnapshot(doc(db, 'settings', 'features'), (docSnap) => {
         const isEnabled = docSnap.exists() ? docSnap.data().birthdayEnabled ?? false : false;
         const bSection = container.querySelector('#birthday-section');
-        const bActionBtn = container.querySelector('[data-action="birthday"]');
         
         if (!isEnabled && !authManager.isOwner) {
           if (bSection) bSection.innerHTML = '';
         } else {
+          // Use userCache for birthday users to avoid unnecessary Firestore listeners
+          let birthdayUsers = [];
+          userCache.getAllUsers().forEach(u => {
+            if (isBirthdayToday(u.dateOfBirth)) {
+              birthdayUsers.push(u);
+            }
+          });
+          
           if (bSection && birthdayUsers.length > 0) {
             bSection.innerHTML = `
               <section class="px-4 pt-4">
@@ -271,43 +278,45 @@ function renderTimer() {
 async function loadThrowback(container) {
   try {
     const today = new Date();
-    const postsSnap = await getDocs(query(collection(db, 'posts'), orderBy('createdAt', 'desc'), limit(30)));
-    const throwbacks = [];
-    postsSnap.forEach(d => {
-      const post = d.data();
-      if (post.createdAt?.toDate) {
-        const postDate = post.createdAt.toDate();
-        if (postDate.getMonth() === today.getMonth() && postDate.getDate() === today.getDate() &&
-            postDate.getFullYear() < today.getFullYear()) {
-          throwbacks.push({ id: d.id, ...post });
+    if (unsubThrowback) unsubThrowback();
+    unsubThrowback = onSnapshot(query(collection(db, 'posts'), orderBy('createdAt', 'desc'), limit(30)), (postsSnap) => {
+      const throwbacks = [];
+      postsSnap.forEach(d => {
+        const post = d.data();
+        if (post.createdAt?.toDate) {
+          const postDate = post.createdAt.toDate();
+          if (postDate.getMonth() === today.getMonth() && postDate.getDate() === today.getDate() &&
+              postDate.getFullYear() < today.getFullYear()) {
+            throwbacks.push({ id: d.id, ...post });
+          }
+        }
+      });
+
+      if (throwbacks.length > 0) {
+        const section = container.querySelector('#throwback-section');
+        const tbContainer = container.querySelector('#throwback-container');
+        if (section) section.style.display = 'block';
+        if (tbContainer) {
+          tbContainer.innerHTML = throwbacks.map(post => `
+            <div class="flex items-center gap-3 p-2 rounded-xl bg-white/60">
+              ${post.imageUrl ? `<img src="${post.imageUrl}" class="w-14 h-14 rounded-lg object-cover" alt=""/>` : '<div class="w-14 h-14 rounded-lg bg-cream-200 flex items-center justify-center text-2xl">📷</div>'}
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-semibold text-navy-800 truncate">${sanitizeHTML(post.caption || 'A memory')}</p>
+                <p class="text-xs text-gray-400"><span data-user-name="${post.authorId}">${post.authorName || 'Classmate'}</span> · ${post.createdAt?.toDate ? post.createdAt.toDate().getFullYear() : ''}</p>
+              </div>
+            </div>
+          `).join('');
         }
       }
     });
-
-    if (throwbacks.length > 0) {
-      const section = container.querySelector('#throwback-section');
-      const tbContainer = container.querySelector('#throwback-container');
-      if (section) section.style.display = 'block';
-      if (tbContainer) {
-        tbContainer.innerHTML = throwbacks.map(post => `
-          <div class="flex items-center gap-3 p-2 rounded-xl bg-white/60">
-            ${post.imageUrl ? `<img src="${post.imageUrl}" class="w-14 h-14 rounded-lg object-cover" alt=""/>` : '<div class="w-14 h-14 rounded-lg bg-cream-200 flex items-center justify-center text-2xl">📷</div>'}
-            <div class="flex-1 min-w-0">
-              <p class="text-sm font-semibold text-navy-800 truncate">${sanitizeHTML(post.caption || 'A memory')}</p>
-              <p class="text-xs text-gray-400"><span data-user-name="${post.authorId}">${post.authorName || 'Classmate'}</span> · ${post.createdAt?.toDate ? post.createdAt.toDate().getFullYear() : ''}</p>
-            </div>
-          </div>
-        `).join('');
-      }
-    }
   } catch (e) { }
 }
 
-let isFirstLoad = true;
 function loadFeed(container, data = null) {
   const feedEl = container.querySelector('#feed-container');
   try {
-    const q = query(collection(db, 'posts'), orderBy('createdAt', 'desc'), limit(10));
+    if (unsubFeed) unsubFeed();
+    const q = query(collection(db, 'posts'), orderBy('createdAt', 'desc'), limit(currentLimit));
     unsubFeed = onSnapshot(q, (snap) => {
       console.log('Home Feed Posts Loaded:', snap.docs.length);
       
@@ -410,13 +419,21 @@ function loadFeed(container, data = null) {
           let targetCard = document.getElementById(`post-${targetId}`);
           if (!targetCard) {
             // fetch it specifically
-            const { getDoc, doc } = await import('../firebase-config.js');
-            const pDoc = await getDoc(doc(db, 'posts', targetId));
-            if (pDoc.exists()) {
-               const pData = pDoc.data();
-               targetCard = createPostCard({ id: pDoc.id, ...pData });
-               feedEl.insertBefore(targetCard, feedEl.firstChild);
-            }
+            const { onSnapshot, doc } = await import('../firebase-config.js');
+            const unsubScrollPost = onSnapshot(doc(db, 'posts', targetId), (pDoc) => {
+              if (pDoc.exists()) {
+                 const pData = pDoc.data();
+                 let existingTarget = document.getElementById(`post-${targetId}`);
+                 if (!existingTarget) {
+                   targetCard = createPostCard({ id: pDoc.id, ...pData });
+                   feedEl.insertBefore(targetCard, feedEl.firstChild);
+                 } else {
+                   // Update existing card data if needed (it might be handled by feed listener if it's within currentLimit, but this guarantees it)
+                   // The feed listener is already doing this for other posts, we won't reinvent update logic here for a single post card.
+                 }
+              }
+            });
+            activeListeners.push(unsubScrollPost);
           }
           if (targetCard) {
             targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -446,33 +463,13 @@ function loadFeed(container, data = null) {
 async function loadMorePosts(container) {
   if (loadingMore || allPostsLoaded || !lastDoc) return;
   loadingMore = true;
-  const feedEl = container.querySelector('#feed-container');
+  
   const btn = container.querySelector('#load-more-btn');
   if (btn) btn.textContent = 'Loading...';
 
-  try {
-    const q = query(collection(db, 'posts'), orderBy('createdAt', 'desc'), startAfter(lastDoc), limit(10));
-    const snap = await getDocs(q);
-    if (snap.empty) {
-      allPostsLoaded = true;
-      container.querySelector('#load-more-container')?.classList.add('hidden');
-    } else {
-      snap.forEach(d => {
-        const postData = d.data();
-        if (postData.isHidden && !authManager.isOwner) return;
+  currentLimit += 10;
+  loadFeed(container); // This unsubscribes the old and sets a new limit, reusing existing DOM elements safely
 
-        // Privacy filter
-        if (postData.privacy === 'private' && postData.authorId !== authManager.currentUser?.uid) return;
-
-        feedEl.appendChild(createPostCard({ id: d.id, ...postData }));
-        lastDoc = d;
-      });
-      if (snap.size < 10) {
-        allPostsLoaded = true;
-        container.querySelector('#load-more-container')?.classList.add('hidden');
-      }
-    }
-  } catch (e) { console.error(e); }
   loadingMore = false;
   if (btn) btn.textContent = 'Load More Memories';
 }

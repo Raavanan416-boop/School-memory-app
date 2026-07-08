@@ -839,18 +839,17 @@ let _birthdayAudioEngine = null;
 window.hasPlayedBirthdayIntro = false;
 
 window.showBirthdayIntro = function() {
-  const loggedIn = sessionStorage.getItem("loginSession") === "true";
-  const played = sessionStorage.getItem("birthdayIntroPlayed") === "true";
+  if (!authManager.currentUser) return false;
 
-  if (!loggedIn) return;
-  if (played) return;
-  if (window.hasPlayedBirthdayIntro) return;
+  if (!authManager.userData?.dateOfBirth) return false;
 
-  if (!authManager.userData?.dateOfBirth) return;
-
-  const today = new Date();
+  const todayObj = new Date();
   const dob = new Date(authManager.userData.dateOfBirth);
-  if (dob.getMonth() !== today.getMonth() || dob.getDate() !== today.getDate()) return;
+  if (dob.getMonth() !== todayObj.getMonth() || dob.getDate() !== todayObj.getDate()) return false;
+
+  const played = sessionStorage.getItem("birthdayIntroPlayed") === "true";
+  if (played) return false;
+  if (window.hasPlayedBirthdayIntro) return false;
 
   window.hasPlayedBirthdayIntro = true;
   const name = authManager.userData.fullName || 'Friend';
@@ -1928,6 +1927,8 @@ window.showBirthdayIntro = function() {
 
   // Run Sequencer Timeline
   runTimeline();
+  
+
 
   // ── Enter App ──
   enterBtn.addEventListener('click', (e) => {
@@ -1953,11 +1954,15 @@ window.showBirthdayIntro = function() {
       router.navigate('home');
       
       // Start Home playlist after Birthday Intro music has completely faded out
-      if (typeof MusicPlayer !== 'undefined' && MusicPlayer.start) {
+      const started = sessionStorage.getItem("homeMusicStarted") === "true";
+      if (!started && typeof MusicPlayer !== 'undefined' && MusicPlayer.start) {
         MusicPlayer.start();
+        sessionStorage.setItem("homeMusicStarted", "true");
       }
     }, 1100); // Wait 1.1s to ensure audio engine is fully destroyed
   });
+
+  return true;
 }
 
 // ===== THROWBACK THURSDAY =====
@@ -2352,6 +2357,19 @@ async function init() {
         if (!appShellBuilt) {
           buildAppShell();
           appShellBuilt = true;
+          
+          let birthdayPlayed = false;
+          if (window.showBirthdayIntro) {
+            birthdayPlayed = window.showBirthdayIntro();
+          }
+          
+          if (!birthdayPlayed) {
+            const started = sessionStorage.getItem("homeMusicStarted") === "true";
+            if (!started && typeof MusicPlayer !== 'undefined' && MusicPlayer.start) {
+              MusicPlayer.start();
+              sessionStorage.setItem("homeMusicStarted", "true");
+            }
+          }
         }
       };
 

@@ -156,6 +156,10 @@ class AuthManager {
     await this._setOnline(true);
     this._startHeartbeat();
 
+    // Set session flags on explicit fresh login
+    sessionStorage.setItem("loginSession", "true");
+    sessionStorage.setItem("isFreshLogin", "true");
+
     return cred.user;
   }
 
@@ -166,8 +170,16 @@ class AuthManager {
     this.currentUser = null;
     this.userData = null;
 
-    sessionStorage.removeItem("birthdayIntroPlayed");
+    localStorage.removeItem("birthdayIntroPlayed");
+    sessionStorage.removeItem("birthdayIntroCompleted");
+    sessionStorage.removeItem("musicStarted");
     sessionStorage.removeItem("homeMusicStarted");
+    sessionStorage.removeItem("loginSession");
+    sessionStorage.removeItem("isFreshLogin");
+    sessionStorage.removeItem("musicCurrentIndex");
+    sessionStorage.removeItem("musicIsStopped");
+    sessionStorage.removeItem("musicHasStarted");
+    sessionStorage.removeItem("musicCurrentTime");
     window.hasPlayedBirthdayIntro = false;
   }
 

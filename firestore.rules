@@ -244,7 +244,16 @@ service cloud.firestore {
 
     // Slam Books (New system)
     match /slambooks/{bookId} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() && (
+        resource == null || 
+        resource.data.ownerId == request.auth.uid || 
+        resource.data.visibility == 'allFriends' ||
+        resource.data.visibility == 'public' ||
+        resource.data.visibility == 'friends' ||
+        resource.data.visibility == 'all' ||
+        (resource.data.visibility == 'closeFriends' && request.auth.uid in resource.data.selectedFriends) ||
+        (resource.data.visibility == 'close' && request.auth.uid in resource.data.selectedFriends)
+      );
       allow create: if isAuthenticated()
         && request.resource.data.ownerId == request.auth.uid;
       allow update: if isAuthenticated()
@@ -332,6 +341,60 @@ service cloud.firestore {
     match /systemSettings/{docId} {
       allow read: if true;
       allow write: if isAdmin();
+    }
+
+    // Story Books (Self Stories)
+    match /stories/{storyId} {
+      allow read: if isAuthenticated() && (
+        resource == null || 
+        resource.data.authorId == request.auth.uid || 
+        resource.data.visibility == 'allFriends' ||
+        resource.data.visibility == 'public' ||
+        resource.data.visibility == 'friends' ||
+        resource.data.visibility == 'all' ||
+        (resource.data.visibility == 'closeFriends' && request.auth.uid in resource.data.selectedFriends) ||
+        (resource.data.visibility == 'close_friends' && request.auth.uid in resource.data.selectedFriends)
+      );
+      allow create: if isAuthenticated() && request.resource.data.authorId == request.auth.uid;
+      allow update: if isAuthenticated(); // For incrementing views/likes/comments
+      allow delete: if isAdmin() || (isAuthenticated() && resource.data.authorId == request.auth.uid);
+      
+      match /comments/{commentId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+        allow update: if isAuthenticated();
+        allow delete: if isAdmin() || (isAuthenticated() && (resource.data.userId == request.auth.uid || get(/databases/$(database)/documents/stories/$(storyId)).data.authorId == request.auth.uid));
+        
+        match /replies/{replyId} {
+          allow read: if isAuthenticated();
+          allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+          allow update: if isAuthenticated();
+          allow delete: if isAdmin() || (isAuthenticated() && (resource.data.userId == request.auth.uid || get(/databases/$(database)/documents/stories/$(storyId)).data.authorId == request.auth.uid));
+        }
+
+        match /reactions/{userId} {
+          allow read: if isAuthenticated();
+          allow create, update, delete: if isAuthenticated() && request.auth.uid == userId;
+        }
+      }
+
+      match /reactions/{userId} {
+        allow read: if isAuthenticated();
+        allow create, update, delete: if isAuthenticated() && request.auth.uid == userId;
+      }
+      
+      match /views/{userId} {
+        allow read: if isAuthenticated() && get(/databases/$(database)/documents/stories/$(storyId)).data.authorId == request.auth.uid;
+        allow create, update: if isAuthenticated() && request.auth.uid == userId;
+      }
+    }
+    match /storyLikes/{likeId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow delete: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+    }
+    match /storyViews/{viewId} {
+      allow read, write: if isAuthenticated();
     }
   }
 }

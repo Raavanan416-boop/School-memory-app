@@ -1,0 +1,214 @@
+/* ===== STORY BOOK 2.0 (Self Story) CSS ===== */
+
+/* Notebook Themes */
+.theme-school-notebook {
+  background-color: #ffffff;
+  background-image: 
+    linear-gradient(90deg, transparent 39px, #ef5350 39px, #ef5350 41px, transparent 41px),
+    linear-gradient(#e1e4e8 1px, transparent 1px);
+  background-size: 100% 100%, 100% 28px;
+  background-position: 0 0, 0 32px;
+  font-family: 'Caveat', cursive;
+  color: #1a237e;
+  padding-left: 55px;
+}
+
+.theme-old-diary {
+  background-color: #f4ecd8;
+  background-image: url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100' height='100' filter='url(%23noise)' opacity='0.08'/%3E%3C/svg%3E");
+  border-radius: 8px;
+  box-shadow: inset 0 0 50px rgba(139, 69, 19, 0.1);
+  font-family: 'Playfair Display', serif;
+  color: #3e2723;
+  padding: 24px;
+}
+
+.theme-vintage-journal {
+  background-color: #e6d5b8;
+  background-image: 
+    linear-gradient(rgba(100,60,20,0.05) 1px, transparent 1px);
+  background-size: 100% 30px;
+  font-family: 'Playfair Display', serif;
+  color: #2c1a0f;
+  padding: 24px;
+}
+
+.theme-blue-class-note {
+  background-color: #f8fafc;
+  background-image: 
+    linear-gradient(#93c5fd 1px, transparent 1px);
+  background-size: 100% 26px;
+  background-position: 0 40px;
+  font-family: 'Caveat', cursive;
+  color: #0f172a;
+  padding: 24px;
+}
+
+.theme-brown-leather {
+  background-color: #fffdf7;
+  border: 12px solid #5d4037;
+  border-radius: 4px;
+  font-family: 'Georgia', serif;
+  color: #4e342e;
+  padding: 20px;
+  box-shadow: inset 0 0 10px rgba(0,0,0,0.2);
+}
+
+/* Notebook Base Style */
+.notebook-container {
+  box-shadow: 
+    -5px 0 10px rgba(0,0,0,0.1),
+    2px 2px 15px rgba(0,0,0,0.1);
+  position: relative;
+  border-radius: 2px 8px 8px 2px;
+  min-height: 400px;
+}
+
+/* Book Binding Effect */
+.notebook-container::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 25px;
+  background: linear-gradient(90deg, rgba(0,0,0,0.15) 0%, rgba(255,255,255,0.1) 30%, rgba(0,0,0,0.05) 100%);
+  border-right: 1px solid rgba(0,0,0,0.1);
+  border-radius: 2px 0 0 2px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* Editor Input */
+.story-textarea {
+  width: 100%;
+  min-height: 400px;
+  background: transparent;
+  border: none;
+  resize: none;
+  outline: none;
+  line-height: 28px;
+  font-size: 1.15rem;
+}
+.theme-school-notebook .story-textarea { line-height: 28px; }
+.theme-old-diary .story-textarea { line-height: 1.8; }
+.theme-vintage-journal .story-textarea { line-height: 30px; }
+.theme-blue-class-note .story-textarea { line-height: 26px; }
+
+/* Page Turn Animation */
+.page-turn {
+  transform-origin: left center;
+  transition: transform 0.6s cubic-bezier(0.645, 0.045, 0.355, 1);
+  transform-style: preserve-3d;
+}
+.page-turned {
+  transform: rotateY(-180deg);
+}
+
+/* Reader Mode */
+.reader-page {
+  width: 100%;
+  min-height: calc(100vh - 120px);
+}
+
+/* Story Card */
+.story-card-cover {
+  position: relative;
+  box-shadow: inset -2px 0 10px rgba(0,0,0,0.2), 2px 2px 5px rgba(0,0,0,0.1);
+  border-radius: 2px 8px 8px 2px;
+}
+.story-card-cover::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 10px;
+  background: rgba(0,0,0,0.2);
+  border-radius: 2px 0 0 2px;
+}
+
+/* Smooth Slide In */
+@keyframes slideUpFade {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-slide-up-fade {
+  animation: slideUpFade 0.4s ease-out forwards;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out forwards;
+}
+@keyframes bounce-fade-up {
+  0% { opacity: 1; transform: scale(1) translateY(0); }
+  50% { transform: scale(1.5) translateY(-20px); }
+  100% { opacity: 0; transform: scale(1) translateY(-40px); }
+}
+.animate-bounce-fade-up {
+  animation: bounce-fade-up 0.8s ease-out forwards;
+}
+
+
+@keyframes highlight-flash {
+  0% { background-color: transparent; }
+  30% { background-color: rgba(99, 102, 241, 0.3); }
+  100% { background-color: transparent; }
+}
+.animate-highlight {
+  animation: highlight-flash 2s ease-out forwards;
+}
+
+
+/* Story Book WhatsApp-Style Animations & Styles */
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-15px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(15px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes emoji-pop {
+  0% { transform: scale(0.5); opacity: 0; }
+  70% { transform: scale(1.2); }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes highlight-glow {
+  0% { transform: scale(1); background-color: transparent; border-color: transparent; }
+  15% { transform: scale(1.03); background-color: rgba(99, 102, 241, 0.15); border-color: #6366f1; }
+  85% { transform: scale(1.03); background-color: rgba(99, 102, 241, 0.15); border-color: #6366f1; }
+  100% { transform: scale(1); background-color: transparent; border-color: transparent; }
+}
+
+.animate-slide-left { animation: slide-in-left 0.3s ease-out forwards; }
+.animate-slide-right { animation: slide-in-right 0.3s ease-out forwards; }
+.animate-emoji-pop { animation: emoji-pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+.animate-highlight-glow { animation: highlight-glow 2s ease-out forwards; border: 2px solid transparent; border-radius: 22px; }
+
+/* Context Menu */
+.context-menu-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.7); backdrop-filter: blur(2px);
+}
+.context-menu-box {
+  background: white; border-radius: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+  padding: 8px 0; min-width: 200px; animation: bounce-fade-up 0.25s ease-out;
+}
+.context-menu-item {
+  width: 100%; text-align: left; padding: 12px 20px; font-size: 15px; font-weight: 600;
+  color: #1e293b; background: transparent; border: none; cursor: pointer; transition: background 0.15s;
+}
+.context-menu-item:hover { background: #f8fafc; }
+.context-menu-item.danger { color: #ef4444; }
+
+/* Optimistic UI Clock */
+.optimistic-clock {
+  font-size: 10px; opacity: 0.7; margin-left: 4px;
+}
+

@@ -36,7 +36,7 @@ window.syncAllLeaderboardPoints = async () => {
 // ===== MUSIC PLAYER =====
 const MusicPlayer = {
   bgAudio: null,
-  playlist: [
+  songs: [
     'schoolbell.mp3',
     'firstsong.mp3',
     'secondsong.mp3',
@@ -44,13 +44,40 @@ const MusicPlayer = {
     'fourthsong.mp3',
     'applastsong.mp3'
   ],
+  playlist: [],
   currentIndex: 0,
   isStopped: false,
   hasStarted: false,
 
-  start() {
-    if (this.isStopped || this.hasStarted) return;
+  saveState() {
+    sessionStorage.setItem('musicCurrentIndex', this.currentIndex);
+    sessionStorage.setItem('musicIsStopped', this.isStopped ? 'true' : 'false');
+    sessionStorage.setItem('musicHasStarted', this.hasStarted ? 'true' : 'false');
+    if (this.bgAudio) {
+      sessionStorage.setItem('musicCurrentTime', this.bgAudio.currentTime);
+    }
+  },
+
+  loadState() {
+    const idx = sessionStorage.getItem('musicCurrentIndex');
+    const stopped = sessionStorage.getItem('musicIsStopped');
+    const started = sessionStorage.getItem('musicHasStarted');
+    
+    if (idx !== null) this.currentIndex = parseInt(idx, 10);
+    if (stopped !== null) this.isStopped = (stopped === 'true');
+    if (started !== null) this.hasStarted = (started === 'true');
+  },
+
+  start(restore = false) {
+    this.playlist = [...this.songs];
+    this.loadState();
+    if (this.isStopped) {
+      this.hideStopButton();
+      return;
+    }
+    if (this.hasStarted && !restore) return;
     this.hasStarted = true;
+    this.saveState();
 
     this.showStopButton();
     
@@ -60,10 +87,10 @@ const MusicPlayer = {
     }
 
     // Start playing the playlist directly
-    this.playNextSong();
+    this.playNextSong(restore);
   },
 
-  playNextSong() {
+  playNextSong(restore = false) {
     if (this.isStopped) return;
     if (this.currentIndex >= this.playlist.length) {
       this.stopAll();
@@ -77,7 +104,20 @@ const MusicPlayer = {
 
     this.bgAudio = new Audio(this.playlist[this.currentIndex]);
     this.bgAudio.volume = 0.5;
+
+    if (restore) {
+      const savedTime = sessionStorage.getItem('musicCurrentTime');
+      if (savedTime !== null) {
+        this.bgAudio.currentTime = parseFloat(savedTime);
+      }
+    }
+
     this.bgAudio.play().catch(e => console.log('BGAudio play failed:', e));
+    this.saveState();
+
+    this.bgAudio.ontimeupdate = () => {
+      this.saveState();
+    };
 
     this.bgAudio.onended = () => {
       if (this.isStopped) return;
@@ -93,6 +133,7 @@ const MusicPlayer = {
       this.bgAudio.src = '';
     }
     this.playlist = [];
+    this.saveState();
     this.hideStopButton();
   },
 
@@ -847,8 +888,8 @@ window.showBirthdayIntro = function() {
   const dob = new Date(authManager.userData.dateOfBirth);
   if (dob.getMonth() !== todayObj.getMonth() || dob.getDate() !== todayObj.getDate()) return false;
 
-  const played = sessionStorage.getItem("birthdayIntroPlayed") === "true";
-  if (played) return false;
+  const completed = sessionStorage.getItem("birthdayIntroCompleted") === "true";
+  if (completed) return false;
   if (window.hasPlayedBirthdayIntro) return false;
 
   window.hasPlayedBirthdayIntro = true;
@@ -1940,7 +1981,7 @@ window.showBirthdayIntro = function() {
       _birthdayAudioEngine = null;
     }
 
-    sessionStorage.setItem("birthdayIntroPlayed", "true");
+    sessionStorage.setItem("birthdayIntroCompleted", "true");
 
     clearInterval(ambientSparklesInterval);
     clearInterval(ambientConfettiInterval);
@@ -1954,11 +1995,11 @@ window.showBirthdayIntro = function() {
       router.navigate('home');
       
       // Start Home playlist after Birthday Intro music has completely faded out
-      const started = sessionStorage.getItem("homeMusicStarted") === "true";
-      if (!started && typeof MusicPlayer !== 'undefined' && MusicPlayer.start) {
+      if (typeof MusicPlayer !== 'undefined' && MusicPlayer.start) {
         MusicPlayer.start();
-        sessionStorage.setItem("homeMusicStarted", "true");
       }
+      sessionStorage.setItem("musicStarted", "true");
+      sessionStorage.setItem("homeMusicStarted", "true");
     }, 1100); // Wait 1.1s to ensure audio engine is fully destroyed
   });
 
@@ -2357,18 +2398,57 @@ async function init() {
         if (!appShellBuilt) {
           buildAppShell();
           appShellBuilt = true;
-          
-          let birthdayPlayed = false;
-          if (window.showBirthdayIntro) {
-            birthdayPlayed = window.showBirthdayIntro();
-          }
-          
-          if (!birthdayPlayed) {
-            const started = sessionStorage.getItem("homeMusicStarted") === "true";
-            if (!started && typeof MusicPlayer !== 'undefined' && MusicPlayer.start) {
-              MusicPlayer.start();
-              sessionStorage.setItem("homeMusicStarted", "true");
+
+          const isFreshLogin = sessionStorage.getItem("isFreshLogin") === "true";
+          const loginSession = sessionStorage.getItem("loginSession") === "true";
+
+          if (isFreshLogin) {
+            // First Login of the Session
+            sessionStorage.removeItem("isFreshLogin");
+
+            // Check Birthday User
+            let isBirthday = false;
+            if (authManager.userData?.dateOfBirth) {
+              const todayObj = new Date();
+              const dob = new Date(authManager.userData.dateOfBirth);
+              isBirthday = (dob.getMonth() === todayObj.getMonth() && dob.getDate() === todayObj.getDate());
             }
+
+            if (isBirthday) {
+              // Show Birthday Intro and do NOT start any background music
+              let birthdayPlayed = false;
+              if (window.showBirthdayIntro) {
+                birthdayPlayed = window.showBirthdayIntro();
+              }
+              // If showBirthdayIntro returned false for some reason, start music
+              if (!birthdayPlayed) {
+                if (typeof MusicPlayer !== 'undefined' && MusicPlayer.start) {
+                  MusicPlayer.start();
+                  sessionStorage.setItem("musicStarted", "true");
+                  sessionStorage.setItem("homeMusicStarted", "true");
+                }
+              }
+            } else {
+              // Normal User: Start playlist immediately
+              if (typeof MusicPlayer !== 'undefined' && MusicPlayer.start) {
+                MusicPlayer.start();
+                sessionStorage.setItem("musicStarted", "true");
+                sessionStorage.setItem("homeMusicStarted", "true");
+              }
+            }
+          } else if (loginSession) {
+            // Browser Reload
+            // Continue whatever music state already exists. Never restart the playlist.
+            if (typeof MusicPlayer !== 'undefined') {
+              MusicPlayer.loadState();
+              const wasPlaying = sessionStorage.getItem('musicHasStarted') === 'true' && sessionStorage.getItem('musicIsStopped') !== 'true';
+              if (wasPlaying && MusicPlayer.start) {
+                MusicPlayer.start(true); // Continue playing from saved state/time
+              }
+            }
+          } else {
+            // App Open / Close-reopen without logging in again
+            // Do NOT show Birthday Intro, do NOT start playlist.
           }
         }
       };

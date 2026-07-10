@@ -5,14 +5,18 @@ import { authManager } from '../auth.js';
 import { router } from '../router.js';
 import { createNotification } from '../notifications.js';
 
+import { destroySlamBook, renderSlamBookTab } from './slambook.js';
+
 // Track active badge listener for cleanup
 let unsubBadges = null;
+let unsubPosts = null;
+let unsubTagged = null;
 
 export function destroyProfile() {
-  if (unsubBadges) {
-    unsubBadges();
-    unsubBadges = null;
-  }
+  if (unsubBadges) { unsubBadges(); unsubBadges = null; }
+  if (unsubPosts) { unsubPosts(); unsubPosts = null; }
+  if (unsubTagged) { unsubTagged(); unsubTagged = null; }
+  destroySlamBook();
 }
 
 export async function renderProfile(container, data = null) {
@@ -38,9 +42,16 @@ export async function renderProfile(container, data = null) {
   let friendCount = 0;
   const uid = viewingOther ? data.userId : authManager.currentUser?.uid;
 
-  try {
-    if (uid) {
-      const postSnap = await getDocs(query(collection(db, 'posts'), where('authorId', '==', uid), orderBy('createdAt', 'desc')));
+  let hasRendered = false;
+  let activeTab = 'posts';
+  let highlights = [];
+
+  const getPostsPromise = new Promise(resolve => {
+    if (!uid) return resolve();
+    unsubPosts = onSnapshot(query(collection(db, 'posts'), where('authorId', '==', uid), orderBy('createdAt', 'desc')), (postSnap) => {
+      userPosts = [];
+      totalLikes = 0;
+      totalComments = 0;
       postSnap.forEach(d => {
         const p = d.data();
         if (p.isHidden && !authManager.isOwner) return;
@@ -48,20 +59,44 @@ export async function renderProfile(container, data = null) {
         totalLikes += (p.likes?.length || 0);
         totalComments += (p.commentCount || 0);
       });
-    }
-  } catch (e) { }
+      highlights = [...userPosts].sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0)).slice(0, 6);
+      
+      if (hasRendered) {
+        const btnLikes = container.querySelector('[data-stat="likes"] .profile-stat-value');
+        if (btnLikes) btnLikes.textContent = formatNumber(totalLikes);
+        const btnComments = container.querySelector('[data-stat="comments"] .profile-stat-value');
+        if (btnComments) btnComments.textContent = formatNumber(totalComments);
+        const btnPosts = container.querySelector('[data-stat="posts"] .profile-stat-value');
+        if (btnPosts) btnPosts.textContent = userPosts.length;
+        
+        const tabContent = container.querySelector('#tab-content');
+        if (tabContent) {
+          if (activeTab === 'posts') renderPostsTab(tabContent, userPosts, viewingOther, user);
+          if (activeTab === 'memories') renderHighlightsTab(tabContent, highlights);
+        }
+      }
+      resolve();
+    }, (e) => { console.error(e); resolve(); });
+  });
 
-  // Get tagged posts
-  try {
-    if (uid) {
-      const tagSnap = await getDocs(query(collection(db, 'posts'), where('taggedFriends', 'array-contains', uid), orderBy('createdAt', 'desc')));
+  const getTaggedPromise = new Promise(resolve => {
+    if (!uid) return resolve();
+    unsubTagged = onSnapshot(query(collection(db, 'posts'), where('taggedFriends', 'array-contains', uid), orderBy('createdAt', 'desc')), (tagSnap) => {
+      taggedPosts = [];
       tagSnap.forEach(d => {
         const p = d.data();
         if (p.isHidden && !authManager.isOwner) return;
         taggedPosts.push({ id: d.id, ...p });
       });
-    }
-  } catch (e) { }
+      if (hasRendered && activeTab === 'tagged') {
+        const tabContent = container.querySelector('#tab-content');
+        if (tabContent) renderTaggedTab(tabContent, taggedPosts);
+      }
+      resolve();
+    }, (e) => { console.error(e); resolve(); });
+  });
+
+  await Promise.all([getPostsPromise, getTaggedPromise]);
 
   // Count friends (all other users)
   try {
@@ -70,14 +105,6 @@ export async function renderProfile(container, data = null) {
   } catch (e) { }
 
   // Dynamic badges
-  const badges = [];
-  if (userPosts.length >= 1) badges.push({ icon: '📸', name: 'Memory Maker' });
-  if (userPosts.length >= 10) badges.push({ icon: '🌟', name: 'Prolific' });
-  if (totalLikes >= 10) badges.push({ icon: '❤️', name: 'Beloved' });
-  if (totalLikes >= 50) badges.push({ icon: '⭐', name: 'Star' });
-
-  // Memory highlights — most liked posts
-  const highlights = [...userPosts].sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0)).slice(0, 6);
 
   // Birthday check
   const isBirthday = (() => {
@@ -158,7 +185,10 @@ export async function renderProfile(container, data = null) {
 
       <!-- Badges -->
       <div class="flex flex-wrap gap-2 mt-4 justify-center" id="profile-badges">
-        ${badges.map(b => `<span class="badge-chip">${b.icon} ${b.name}</span>`).join('')}
+        ${userPosts.length >= 1 ? `<span class="badge-chip">📸 Memory Maker</span>` : ''}
+        ${userPosts.length >= 10 ? `<span class="badge-chip">🌟 Prolific</span>` : ''}
+        ${totalLikes >= 10 ? `<span class="badge-chip">❤️ Beloved</span>` : ''}
+        ${totalLikes >= 50 ? `<span class="badge-chip">⭐ Star</span>` : ''}
         ${user.endYear ? `<span class="badge-chip">🎓 Batch of ${sanitizeHTML(user.endYear)}</span>` : ''}
       </div>
 
@@ -353,7 +383,6 @@ export async function renderProfile(container, data = null) {
   `;
 
   // === TAB SYSTEM ===
-  let activeTab = 'posts';
   const tabContent = container.querySelector('#tab-content');
 
   function renderTabContent(tab) {
@@ -378,6 +407,7 @@ export async function renderProfile(container, data = null) {
   });
 
   renderTabContent('posts');
+  hasRendered = true;
 
   // === SETTINGS DRAWER ===
   const settingsBtn = container.querySelector('#settings-menu-btn');
@@ -1212,9 +1242,8 @@ function renderTaggedTab(el, posts) {
     </div>`;
 }
 
-async function renderSlamBookTab(el, user, viewingOther) {
-
-
+  // slambook render is imported
+  
   function renderHighlightsTab(el, highlights) {
     if (highlights.length === 0) {
       el.innerHTML = `
@@ -1695,5 +1724,3 @@ async function renderSlamBookTab(el, user, viewingOther) {
       });
     });
   }
-
-}

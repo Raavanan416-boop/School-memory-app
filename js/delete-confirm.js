@@ -50,9 +50,7 @@ export function showDeleteConfirmation(title = 'this item', onConfirm, options =
   });
 
   const close = () => {
-    overlay.classList.add('opacity-0');
-    overlay.querySelector('.transform').classList.add('scale-95');
-    setTimeout(() => overlay.remove(), 300);
+    overlay.remove();
   };
 
   overlay.querySelector('.delete-confirm-cancel').addEventListener('click', close);
@@ -65,34 +63,22 @@ export function showDeleteConfirmation(title = 'this item', onConfirm, options =
     btn.disabled = true;
     btn.innerHTML = '<div class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mx-auto"></div>';
 
-    // 1. INSTANT: Close popup
-    close();
-
-    // 2. INSTANT: Animate out the DOM element (optimistic removal)
-    if (element) {
-      element.style.transition = 'all 0.3s ease';
-      element.style.opacity = '0';
-      element.style.transform = 'scale(0.95) translateX(-20px)';
-      element.style.maxHeight = element.scrollHeight + 'px';
-      element.style.overflow = 'hidden';
-      setTimeout(() => {
-        element.style.maxHeight = '0';
-        element.style.padding = '0';
-        element.style.margin = '0';
-        element.style.border = 'none';
-      }, 150);
-      setTimeout(() => {
-        if (element.parentNode) element.remove();
-      }, 400);
-    }
-
-    // 3. BACKGROUND: Run the actual Firestore delete (non-blocking)
     try {
       await onConfirm();
       showToast('✨ Memory permanently removed', 'success');
+      
+      // Close instantly after success
+      close();
+      
+      // Remove element instantly
+      if (element && element.parentNode) {
+        element.remove();
+      }
     } catch (e) {
       console.warn('[Delete] Background error:', e?.message || e);
       showToast('Error deleting memory', 'error');
+      btn.disabled = false;
+      btn.textContent = confirmText;
     }
   });
 }
@@ -129,22 +115,19 @@ export async function deleteStorageFile(fileUrl) {
  */
 export async function deleteDocFull(collectionPath, docId, subcollections = [], cloudinaryPublicIds = [], resourceType = 'image') {
   try {
-    // 1. Delete Media from Cloudinary (Server-Side API Route)
+    // 1. Delete Media from Cloudinary (Background)
     if (cloudinaryPublicIds && cloudinaryPublicIds.length > 0) {
-      try {
-        const { app } = await import('./firebase-config.js');
-        const { getFunctions, httpsCallable } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-functions.js');
-        const functions = getFunctions(app);
-        const deleteCloudinaryMedia = httpsCallable(functions, 'deleteCloudinaryMedia');
-        
-        await deleteCloudinaryMedia({
-          publicIds: cloudinaryPublicIds,
-          resourceType: resourceType
+      import('./firebase-config.js').then(({ app }) => {
+        import('https://www.gstatic.com/firebasejs/10.8.0/firebase-functions.js').then(({ getFunctions, httpsCallable }) => {
+          const functions = getFunctions(app);
+          const deleteCloudinaryMedia = httpsCallable(functions, 'deleteCloudinaryMedia');
+          
+          deleteCloudinaryMedia({
+            publicIds: cloudinaryPublicIds,
+            resourceType: resourceType
+          }).catch(e => console.warn('[Delete] Cloudinary deletion failed', e));
         });
-        console.log('[Delete] Cloudinary media deleted successfully');
-      } catch (cloudErr) {
-        console.warn('[Delete] Cloudinary deletion failed (backend likely not deployed). Proceeding with Firestore delete.', cloudErr);
-      }
+      });
     }
 
     // 2. Delete Firestore Document and Subcollections

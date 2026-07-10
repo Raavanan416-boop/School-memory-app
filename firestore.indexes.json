@@ -47,6 +47,23 @@
         { "fieldPath": "monthOfBirth", "order": "ASCENDING" },
         { "fieldPath": "dayOfBirth", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "stories",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "authorId", "order": "ASCENDING" },
+        { "fieldPath": "visibility", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "stories",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "authorId", "order": "ASCENDING" },
+        { "fieldPath": "visibility", "order": "ASCENDING" },
+        { "fieldPath": "selectedFriends", "arrayConfig": "CONTAINS" }
+      ]
     }
   ],
   "fieldOverrides": []

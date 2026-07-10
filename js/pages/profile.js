@@ -32,18 +32,15 @@ export function destroyProfile() {
     profilePresenceUnsub();
     profilePresenceUnsub = null;
   }
-  if (unsubTagged) {
-    unsubTagged();
-    unsubTagged = null;
-  }
-  if (unsubSaved) {
-    unsubSaved();
-    unsubSaved = null;
-  }
   if (unsubUserPosts) {
     unsubUserPosts();
     unsubUserPosts = null;
   }
+  
+  // Also run tab cleanup on full destroy
+  if (unsubTagged) { unsubTagged(); unsubTagged = null; }
+  if (unsubSaved) { unsubSaved(); unsubSaved = null; }
+  import('./slambook.js').then(m => m.destroySlamBook()).catch(() => {});
 }
 
 export async function renderProfile(container, data = null) {
@@ -71,7 +68,7 @@ export async function renderProfile(container, data = null) {
 
   // Set up Realtime Sync for Profile Stats & Posts
   if (uid) {
-    const qPosts = query(collection(db, 'posts'), where('authorId', '==', uid), orderBy('createdAt', 'desc'));
+    const qPosts = query(collection(db, 'posts'), where('authorId', '==', uid));
     unsubUserPosts = onSnapshot(qPosts, (snap) => {
       userPosts = [];
       totalLikes = 0;
@@ -84,6 +81,8 @@ export async function renderProfile(container, data = null) {
         totalLikes += (p.likes?.length || 0);
         totalComments += (p.commentCount || 0);
       });
+      
+      userPosts.sort((a, b) => (b.createdAt?.toMillis ? b.createdAt.toMillis() : Date.now()) - (a.createdAt?.toMillis ? a.createdAt.toMillis() : Date.now()));
 
       console.log(`Profile Posts Count: ${userPosts.length}`);
       console.log(`Profile Likes Count: ${totalLikes}`);
@@ -112,9 +111,6 @@ export async function renderProfile(container, data = null) {
         const tabContent = container.querySelector('#tab-content');
         if (activeTab === 'posts') {
           renderPostsTab(tabContent, userPosts, viewingOther, user);
-        } else if (activeTab === 'memories') {
-          const highlights = [...userPosts].sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0)).slice(0, 6);
-          renderHighlightsTab(tabContent, highlights);
         }
       }
     }, (error) => {
@@ -236,10 +232,7 @@ export async function renderProfile(container, data = null) {
         <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"/></svg>
         <span>Slam Book</span>
       </button>
-      <button class="profile-tab" data-tab="memories">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"/></svg>
-        <span>Highlights</span>
-      </button>
+
       ${!viewingOther ? `
       <button class="profile-tab" data-tab="saved">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z"/></svg>
@@ -411,7 +404,16 @@ export async function renderProfile(container, data = null) {
   let activeTab = 'posts';
   const tabContent = container.querySelector('#tab-content');
 
+  function cleanupTabListeners() {
+    if (unsubTagged) { unsubTagged(); unsubTagged = null; }
+    if (unsubSaved) { unsubSaved(); unsubSaved = null; }
+    import('./slambook.js').then(m => m.destroySlamBook()).catch(() => {});
+  }
+
   function renderTabContent(tab) {
+    if (activeTab !== tab) {
+      cleanupTabListeners();
+    }
     activeTab = tab;
     container.querySelectorAll('.profile-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
 
@@ -424,10 +426,7 @@ export async function renderProfile(container, data = null) {
       case 'posts': renderPostsTab(tabContent, userPosts, viewingOther, user); break;
       case 'tagged': renderTaggedTab(tabContent, uid); break;
       case 'slambook': renderSlamBookTab(tabContent, user, viewingOther); break;
-      case 'memories': 
-        const highlights = [...userPosts].sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0)).slice(0, 6);
-        renderHighlightsTab(tabContent, highlights); 
-        break;
+
       case 'saved': renderSavedTab(tabContent, uid); break;
     }
   }
@@ -1605,40 +1604,6 @@ function renderSavedTab(el, targetUid) {
 async function renderSlamBookTab(el, user, viewingOther) {
   const { renderSlamBookTab: newRenderSlamBookTab } = await import('./slambook.js');
   await newRenderSlamBookTab(el, user, viewingOther);
-}
-
-
-function renderHighlightsTab(el, highlights) {
-  if (highlights.length === 0) {
-    el.innerHTML = `
-      <div class="px-4 py-12 text-center">
-        <div class="text-4xl mb-3">✨</div>
-        <h3 class="font-semibold text-navy-700 mb-1">No highlights yet</h3>
-        <p class="text-sm text-gray-400">Your most loved memories will appear here.</p>
-      </div>`;
-    return;
-  }
-  el.innerHTML = `
-    <div class="px-4 py-4">
-      <p class="text-xs text-gray-400 text-center mb-4">Your most cherished moments ✨</p>
-      <div class="grid grid-cols-2 gap-3">
-        ${highlights.map(p => `
-          <div class="highlight-card">
-            ${p.imageUrl
-      ? `<img src="${p.imageUrl}" class="w-full aspect-square object-cover rounded-xl" alt="" loading="lazy"/>`
-      : `<div class="w-full aspect-square bg-gradient-to-br from-warm-100 to-cream-300 rounded-xl flex items-center justify-center text-4xl">📷</div>`}
-            <div class="mt-2">
-              <p class="text-xs text-navy-800 font-medium truncate">${sanitizeHTML(p.caption || 'A memory')}</p>
-              <p class="text-[10px] text-gray-400 flex items-center gap-1 mt-0.5">
-                <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"/></svg>
-                ${p.likes?.length || 0} likes
-              </p>
-            </div>
-          </div>
-        `).join('')}
-      </div>
-    </div>
-  `;
 }
 
 // ===== MODALS =====

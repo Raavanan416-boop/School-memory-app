@@ -13,6 +13,7 @@ class PresenceManager {
     this._statusCache = {};
     this._boundBeforeUnload = null;
     this._boundVisChange = null;
+    this._connectedRefUnsub = null;
   }
 
   // Set current user online
@@ -26,7 +27,12 @@ class PresenceManager {
         const lastOnlineRef = ref(rtdb, `presence/${uid}/lastSeen`);
         const connectedRef = ref(rtdb, '.info/connected');
 
-        onValue(connectedRef, (snap) => {
+        // Unsubscribe from any previous listener to avoid duplicates
+        if (this._connectedRefUnsub) {
+          this._connectedRefUnsub();
+        }
+
+        this._connectedRefUnsub = onValue(connectedRef, (snap) => {
           if (snap.val() === true) {
             rtdbSet(myConnectionsRef, true);
             onDisconnect(myConnectionsRef).set(false);
@@ -62,26 +68,16 @@ class PresenceManager {
     } catch (e) { /* ignore */ }
   }
 
-  // Start listening for browser close/tab switch to update presence
+  // Start listening for RTDB presence
   startPresenceTracking() {
-    this._boundBeforeUnload = () => {
-      this.setOffline();
-    };
-    this._boundVisChange = () => {
-      if (document.visibilityState === 'hidden') {
-        this.setOffline();
-      } else if (document.visibilityState === 'visible') {
-        this.setOnline();
-      }
-    };
-    window.addEventListener('beforeunload', this._boundBeforeUnload);
-    document.addEventListener('visibilitychange', this._boundVisChange);
     this.setOnline();
   }
 
   stopPresenceTracking() {
-    if (this._boundBeforeUnload) window.removeEventListener('beforeunload', this._boundBeforeUnload);
-    if (this._boundVisChange) document.removeEventListener('visibilitychange', this._boundVisChange);
+    if (this._connectedRefUnsub) {
+      this._connectedRefUnsub();
+      this._connectedRefUnsub = null;
+    }
     this.setOffline();
   }
 
@@ -163,15 +159,15 @@ class PresenceManager {
 
   // Get human-readable last seen text
   getLastSeenText(status) {
-    if (!status.lastSeen) return '⚫ Offline';
+    if (!status.lastSeen) return '⚪ Offline';
     const diff = Date.now() - status.lastSeen.getTime();
     // Staleness override: even if status.online is true, if heartbeat is stale (>2.5 min),
     // show as offline with last seen time
     if (status.online && diff < 150000) return '🟢 Online';
-    if (diff < 60000) return '⚫ Last seen just now';
-    if (diff < 3600000) return `⚫ Last seen ${Math.floor(diff / 60000)} min ago`;
-    if (diff < 86400000) return `⚫ Last seen ${Math.floor(diff / 3600000)}h ago`;
-    return `⚫ Last seen ${status.lastSeen.toLocaleDateString()}`;
+    if (diff < 60000) return '⚪ Last seen just now';
+    if (diff < 3600000) return `⚪ Last seen ${Math.floor(diff / 60000)} min ago`;
+    if (diff < 86400000) return `⚪ Last seen ${Math.floor(diff / 3600000)}h ago`;
+    return `⚪ Last seen ${status.lastSeen.toLocaleDateString()}`;
   }
 
   // Stop watching a user
@@ -188,6 +184,10 @@ class PresenceManager {
   cleanup() {
     Object.values(this._rtdbUnsubs).forEach(unsub => unsub());
     this._rtdbUnsubs = {};
+    if (this._connectedRefUnsub) {
+      this._connectedRefUnsub();
+      this._connectedRefUnsub = null;
+    }
     this._callbacks = {};
     this._statusCache = {};
     Object.values(this.typingTimers).forEach(t => clearTimeout(t));

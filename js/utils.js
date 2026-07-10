@@ -114,6 +114,18 @@ export function throttle(fn, ms = 300) {
   };
 }
 
+export function withTimeout(promise, ms = 15000, timeoutError = new Error('Operation timed out')) {
+  let timeoutId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(timeoutError);
+    }, ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    clearTimeout(timeoutId);
+  });
+}
+
 export function formatNumber(n) {
   if (!n && n !== 0) return '0';
   if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';

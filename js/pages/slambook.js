@@ -4,55 +4,220 @@ import { router } from '../router.js';
 import { showToast, sanitizeHTML, timeAgo } from '../utils.js';
 import { showDeleteConfirmation } from '../delete-confirm.js';
 import { userCache } from '../services/userCache.js';
+import { openStoryEditor, openStoryReader, openCloseFriendsSelector } from './storybook.js';
 
 let unsubSlam = null;
 let unsubBooks = null;
+let unsubBooksClose = null;
+let unsubStories = null;
+let unsubStoriesClose = null;
 
 export function destroySlamBook() {
   if (unsubSlam) { unsubSlam(); unsubSlam = null; }
   if (unsubBooks) { unsubBooks(); unsubBooks = null; }
+  if (unsubBooksClose) { unsubBooksClose(); unsubBooksClose = null; }
+  if (unsubStories) { unsubStories(); unsubStories = null; }
+  if (unsubStoriesClose) { unsubStoriesClose(); unsubStoriesClose = null; }
 }
 
 export async function renderSlamBookTab(el, user, viewingOther) {
   destroySlamBook();
 
-  const q = query(collection(db, 'slambooks'), where('ownerId', '==', user.id));
-
   el.innerHTML = '<div class="p-8 text-center text-gray-400">Loading Slam Books...</div>';
 
-  unsubBooks = onSnapshot(q, (snap) => {
-    const books = [];
-    snap.forEach(d => books.push({ id: d.id, ...d.data() }));
+  let fetchedBooksAll = [];
+  let fetchedBooksClose = [];
+  let fetchedStoriesAll = [];
+  let fetchedStoriesClose = [];
 
-    // Sort descending client-side to avoid requiring composite index
-    books.sort((a, b) => {
+  const updateList = () => {
+    let combined = [...fetchedBooksAll, ...fetchedBooksClose, ...fetchedStoriesAll, ...fetchedStoriesClose];
+    // Deduplicate by ID
+    const unique = [];
+    const seen = new Set();
+    for (const item of combined) {
+      if (!seen.has(item.id)) {
+        seen.add(item.id);
+        unique.push(item);
+      }
+    }
+    combined = unique;
+
+    combined.sort((a, b) => {
       const ta = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
       const tb = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
       return tb - ta;
     });
 
     if (!viewingOther) {
-      renderOwnerBooksList(el, user, books);
+      renderOwnerBooksList(el, user, combined);
     } else {
-      renderGuestBooksList(el, user, books);
+      // Filter out drafts (visibility is already handled securely by queries)
+      combined = combined.filter(b => {
+        if (b._type === 'story') {
+          if (b.status === 'draft') return false;
+          return true;
+        }
+        return true;
+      });
+      renderGuestBooksList(el, user, combined);
     }
-  });
+  };
+
+  const localBookCacheAll = new Map();
+  const localBookCacheClose = new Map();
+
+  const processBookSnapshot = (snap, cacheMap, setArrayFn) => {
+    snap.docChanges().forEach(change => {
+      const data = { id: change.doc.id, _type: 'question', ...change.doc.data() };
+      if (change.type === 'removed') {
+        cacheMap.delete(data.id);
+      } else {
+        cacheMap.set(data.id, data);
+      }
+    });
+    setArrayFn(Array.from(cacheMap.values()));
+    updateList();
+  };
+
+  if (!viewingOther) {
+    let qBooks = query(collection(db, 'slambooks'), where('ownerId', '==', user.id));
+    unsubBooks = onSnapshot(qBooks, (snap) => {
+      processBookSnapshot(snap, localBookCacheAll, arr => fetchedBooksAll = arr);
+    });
+  } else {
+    // 1. All Friends (includes legacy)
+    let qBooksAll = query(collection(db, 'slambooks'), 
+      where('ownerId', '==', user.id), 
+      where('visibility', 'in', ['allFriends', 'public', 'friends', 'all'])
+    );
+    unsubBooks = onSnapshot(qBooksAll, (snap) => {
+      processBookSnapshot(snap, localBookCacheAll, arr => fetchedBooksAll = arr);
+    });
+
+    // 2. Close Friends
+    if (authManager.currentUser) {
+      let qBooksClose = query(collection(db, 'slambooks'), 
+        where('ownerId', '==', user.id), 
+        where('visibility', 'in', ['closeFriends', 'close_friends', 'close']),
+        where('selectedFriends', 'array-contains', authManager.currentUser.uid)
+      );
+      unsubBooksClose = onSnapshot(qBooksClose, (snap) => {
+        processBookSnapshot(snap, localBookCacheClose, arr => fetchedBooksClose = arr);
+      });
+    }
+  }
+
+  const localStoryCacheAll = new Map();
+  const localStoryCacheClose = new Map();
+
+  const processStorySnapshot = (snap, cacheMap, setArrayFn) => {
+    snap.docChanges().forEach(change => {
+      const data = { id: change.doc.id, _type: 'story', ...change.doc.data() };
+      if (change.type === 'removed') {
+        cacheMap.delete(data.id);
+      } else {
+        const existing = cacheMap.get(data.id);
+        const newTime = data.updatedAt?.toMillis ? data.updatedAt.toMillis() : 0;
+        const oldTime = existing?.updatedAt?.toMillis ? existing.updatedAt.toMillis() : 0;
+        
+        // BUG 5 FIX: Ignore stale draft snapshots that attempt to revert a published story
+        if (existing && existing.status === 'published' && data.status === 'draft') {
+          if (newTime <= oldTime) return;
+        }
+        cacheMap.set(data.id, data);
+      }
+    });
+    setArrayFn(Array.from(cacheMap.values()));
+    updateList();
+  };
+
+  if (!viewingOther) {
+    let qStories = query(collection(db, 'stories'), where('authorId', '==', user.id));
+    unsubStories = onSnapshot(qStories, (snap) => {
+      processStorySnapshot(snap, localStoryCacheAll, arr => fetchedStoriesAll = arr);
+    });
+  } else {
+    // 1. All Friends (includes legacy 'public' and 'friends')
+    let qStoriesAll = query(collection(db, 'stories'), 
+      where('authorId', '==', user.id), 
+      where('visibility', 'in', ['allFriends', 'public', 'friends'])
+    );
+    unsubStories = onSnapshot(qStoriesAll, (snap) => {
+      processStorySnapshot(snap, localStoryCacheAll, arr => fetchedStoriesAll = arr);
+    });
+
+    // 2. Close Friends (via selectedFriends array)
+    if (authManager.currentUser) {
+      let qStoriesClose = query(collection(db, 'stories'), 
+        where('authorId', '==', user.id), 
+        where('visibility', 'in', ['closeFriends', 'close_friends']),
+        where('selectedFriends', 'array-contains', authManager.currentUser.uid)
+      );
+      unsubStoriesClose = onSnapshot(qStoriesClose, (snap) => {
+        processStorySnapshot(snap, localStoryCacheClose, arr => fetchedStoriesClose = arr);
+      });
+    }
+  }
 }
 
 // -----------------------------------------
 // OWNER VIEW: LIST BOOKS
 // -----------------------------------------
+function showDualModeSelectionModal() {
+  const modal = router.openModal({
+    id: 'sb-dual-mode',
+    bottomSheet: true
+  });
+  modal.body.innerHTML = `
+    <div class="p-6">
+      <h3 class="text-2xl font-bold text-navy-800 mb-2 font-handwriting">Build My Slam Book</h3>
+      <p class="text-gray-500 text-sm mb-6">Choose how you want to capture your memories today.</p>
+      
+      <div class="space-y-4">
+        <!-- Option 1: Question Book -->
+        <div class="p-4 bg-indigo-50 border border-indigo-100 rounded-2xl cursor-pointer hover:bg-indigo-100 transition-colors flex items-center gap-4" id="btn-mode-question">
+          <div class="w-14 h-14 bg-indigo-200 text-indigo-700 text-3xl flex items-center justify-center rounded-xl shadow-inner">📘</div>
+          <div>
+            <h4 class="font-bold text-navy-800 text-lg">Question Book</h4>
+            <p class="text-sm text-gray-600">Ask your friends fun questions.</p>
+          </div>
+        </div>
+
+        <!-- Option 2: Self Story Book -->
+        <div class="p-4 bg-orange-50 border border-orange-100 rounded-2xl cursor-pointer hover:bg-orange-100 transition-colors flex items-center gap-4" id="btn-mode-story">
+          <div class="w-14 h-14 bg-orange-200 text-orange-700 text-3xl flex items-center justify-center rounded-xl shadow-inner">📓</div>
+          <div>
+            <h4 class="font-bold text-navy-800 text-lg">Self Story Book</h4>
+            <p class="text-sm text-gray-600">Write your memories, feelings and life stories.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  modal.body.querySelector('#btn-mode-question').addEventListener('click', () => {
+    modal.close();
+    showSlamBookConfigurator();
+  });
+  
+  modal.body.querySelector('#btn-mode-story').addEventListener('click', () => {
+    modal.close();
+    openStoryEditor();
+  });
+}
+
 function renderOwnerBooksList(el, user, books) {
   if (books.length === 0) {
     el.innerHTML = `
       <div class="px-4 py-10 text-center animate-fadeIn">
         <div class="text-5xl mb-4">📚</div>
-        <h3 class="text-xl font-bold text-navy-800 mb-2 font-handwriting">Create Your First Slam Book</h3>
-        <p class="text-sm text-gray-500 mb-6">Ask your friends anything! Add custom questions, emojis, and more.</p>
-        <button id="btn-create-slambook" class="px-6 py-3 bg-navy-600 hover:bg-navy-700 text-white font-bold rounded-xl shadow-lg transition-all transform hover:scale-105">+ Build My Slam Book (+6 Pts)</button>
+        <h3 class="text-xl font-bold text-navy-800 mb-2 font-handwriting">Create Your First Book</h3>
+        <p class="text-sm text-gray-500 mb-6">Start saving memories with your friends today.</p>
+        <button id="btn-create-slambook" class="px-6 py-3 bg-navy-600 hover:bg-navy-700 text-white font-bold rounded-xl shadow-lg transition-all transform hover:scale-105">+ Build My Slam Book</button>
       </div>
     `;
-    el.querySelector('#btn-create-slambook')?.addEventListener('click', () => showSlamBookConfigurator());
+    el.querySelector('#btn-create-slambook')?.addEventListener('click', () => showDualModeSelectionModal());
     return;
   }
 
@@ -64,62 +229,78 @@ function renderOwnerBooksList(el, user, books) {
       </div>
       
       <div class="space-y-4">
-        ${books.map(b => `
-          <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden cursor-pointer hover:shadow-md transition-shadow slambook-card" data-id="${b.id}">
-            <div class="h-20 bg-gradient-to-r from-indigo-500 to-purple-600 relative">
-              <div class="absolute inset-0 opacity-20 bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMCIgaGVpZ2h0PSIyMCI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjIiIGZpbGw9IiNmZmYiLz48L3N2Zz4=')]"></div>
-            </div>
-            <div class="p-4 relative">
-              <div class="absolute -top-10 right-4 w-16 h-20 bg-white rounded shadow border-l-4 border-indigo-500 flex items-center justify-center">
-                <span class="text-3xl">📖</span>
+        ${books.map(b => {
+          if (b._type === 'question') {
+            return `
+              <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden cursor-pointer hover:shadow-md transition-shadow slambook-card" data-id="${b.id}" data-type="question">
+                <div class="h-20 bg-gradient-to-r from-indigo-500 to-purple-600 relative">
+                  <div class="absolute inset-0 opacity-20 bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMCIgaGVpZ2h0PSIyMCI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjIiIGZpbGw9IiNmZmYiLz48L3N2Zz4=')]"></div>
+                </div>
+                <div class="p-4 relative">
+                  <div class="absolute -top-10 right-4 w-16 h-20 bg-white rounded shadow border-l-4 border-indigo-500 flex items-center justify-center">
+                    <span class="text-3xl">📘</span>
+                  </div>
+                  <h4 class="font-bold text-navy-800 text-lg mb-1">${sanitizeHTML(b.title || 'Untitled Book')}</h4>
+                  <p class="text-xs text-gray-500 mb-3">${b.questions?.length || 0} Questions • ${b.visibility === 'closeFriends' || b.visibility === 'close' ? '⭐ Close Friends' : '🌍 All Friends'}</p>
+                  <div class="flex items-center gap-2">
+                    <button class="flex-1 text-xs py-2 bg-indigo-50 text-indigo-700 font-bold rounded-lg btn-dashboard" data-id="${b.id}" data-type="question">View Dashboard</button>
+                  </div>
+                </div>
               </div>
-              <h4 class="font-bold text-navy-800 text-lg mb-1">${sanitizeHTML(b.title || 'Untitled Book')}</h4>
-              <p class="text-xs text-gray-500 mb-3">${b.questions?.length || 0} Questions • ${b.visibility === 'public' ? '🌍 Public' : '👥 Friends Only'}</p>
-              
-              <div class="flex items-center gap-2">
-                <button class="flex-1 text-xs py-2 bg-indigo-50 text-indigo-700 font-bold rounded-lg btn-dashboard" data-id="${b.id}">View Dashboard</button>
+            `;
+          } else {
+            return `
+              <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden cursor-pointer hover:shadow-md transition-shadow slambook-card" data-id="${b.id}" data-type="story">
+                <div class="h-20 bg-gradient-to-r from-orange-400 to-red-500 relative"></div>
+                <div class="p-4 relative">
+                  <div class="absolute -top-10 right-4 w-16 h-20 bg-white rounded shadow border-l-4 border-orange-500 flex items-center justify-center">
+                    <span class="text-3xl">📓</span>
+                  </div>
+                  <div class="flex items-center gap-2 mb-1">
+                    ${b.status === 'draft' ? '<span class="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded">DRAFT</span>' : ''}
+                    <h4 class="font-bold text-navy-800 text-lg">${sanitizeHTML(b.title || 'Untitled Story')}</h4>
+                  </div>
+                  <p class="text-xs text-gray-500 mb-3">${b.mood} • ${Math.max(1, Math.ceil((b.wordCount||0) / 200))} min read • ❤️ ${b.likesCount || 0} • 💬 ${b.commentsCount || 0}</p>
+                  <div class="flex items-center gap-2">
+                    <button class="flex-1 text-xs py-2 bg-orange-50 text-orange-700 font-bold rounded-lg btn-dashboard" data-id="${b.id}" data-type="story">${b.status === 'draft' ? 'Continue Writing' : 'Read & Stats'}</button>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-        `).join('')}
+            `;
+          }
+        }).join('')}
       </div>
     </div>
   `;
 
-  el.querySelector('#btn-create-slambook')?.addEventListener('click', () => showSlamBookConfigurator());
+  el.querySelector('#btn-create-slambook')?.addEventListener('click', () => showDualModeSelectionModal());
 
-  el.querySelectorAll('.btn-dashboard').forEach(btn => {
+  el.querySelectorAll('.btn-dashboard, .slambook-card').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const book = books.find(b => b.id === btn.dataset.id);
-      if (book) openOwnerDashboard(book);
-    });
-  });
-
-
-
-  el.querySelectorAll('.slambook-card').forEach(card => {
-    card.addEventListener('click', (e) => {
-      if (e.target.closest('button')) return;
-      const book = books.find(b => b.id === card.dataset.id);
-      if (book) showSlamBookConfigurator(book);
+      const id = btn.dataset.id;
+      const type = btn.dataset.type;
+      const book = books.find(b => b.id === id);
+      if (!book) return;
+      
+      if (type === 'question') {
+        if (btn.classList.contains('btn-dashboard')) openOwnerDashboard(book);
+        else showSlamBookConfigurator(book);
+      } else {
+        if (book.status === 'draft') openStoryEditor(book);
+        else openStoryReader(book); // Can implement stats inside reader for owner
+      }
     });
   });
 }
 
-// -----------------------------------------
-// GUEST VIEW: LIST BOOKS
-// -----------------------------------------
 function renderGuestBooksList(el, user, books) {
-  // Simple check for friendship could be added here. For now assume if they can see the profile, they can see 'public'.
-  // If visibility is 'close', we'd normally check friends list. 
-
   if (books.length === 0) {
     el.innerHTML = `
       <div class="px-4 py-16 text-center animate-fadeIn">
-        <div class="text-5xl mb-4">📘</div>
-        <h3 class="text-xl font-bold text-navy-800 mb-2 font-handwriting">${user.fullName}'s Slam Books</h3>
-        <p class="text-sm text-gray-500">They haven't created any Slam Books yet!</p>
+        <div class="text-5xl mb-4">📚</div>
+        <h3 class="text-xl font-bold text-navy-800 mb-2 font-handwriting">${user.fullName}'s Books</h3>
+        <p class="text-sm text-gray-500">They haven't created any public books yet!</p>
       </div>
     `;
     return;
@@ -127,25 +308,50 @@ function renderGuestBooksList(el, user, books) {
 
   el.innerHTML = `
     <div class="px-4 py-6 animate-fadeIn">
-      <h3 class="text-lg font-bold text-navy-800 font-handwriting mb-4">📘 Write in ${sanitizeHTML(user.fullName)}'s Books</h3>
+      <h3 class="text-lg font-bold text-navy-800 font-handwriting mb-4">📚 ${sanitizeHTML(user.fullName)}'s Books</h3>
       <div class="grid grid-cols-2 gap-4">
-        ${books.map(b => `
-          <div class="cursor-pointer relative aspect-[3/4] bg-gradient-to-br from-indigo-500 to-purple-600 rounded-r-2xl rounded-l shadow-lg overflow-hidden transform hover:-translate-y-1 transition-all guest-book-card" data-id="${b.id}">
-            <div class="absolute left-0 top-0 bottom-0 w-4 bg-black/20 z-10"></div>
-            <div class="absolute inset-0 p-4 flex flex-col justify-center items-center text-center">
-              <p class="font-handwriting text-xl text-white font-bold leading-tight mb-2">${sanitizeHTML(b.title || 'Slam Book')}</p>
-              <p class="text-white/80 text-[10px] uppercase tracking-widest bg-white/20 px-2 py-1 rounded">${b.questions?.length || 0} Qs</p>
-            </div>
-          </div>
-        `).join('')}
+        ${books.map(b => {
+          if (b._type === 'question') {
+            return `
+              <div class="cursor-pointer relative aspect-[3/4] bg-gradient-to-br from-indigo-500 to-purple-600 rounded-r-2xl rounded-l shadow-lg overflow-hidden transform hover:-translate-y-1 transition-all guest-book-card" data-id="${b.id}" data-type="question">
+                <div class="absolute left-0 top-0 bottom-0 w-4 bg-black/20 z-10"></div>
+                <div class="absolute inset-0 p-4 flex flex-col justify-center items-center text-center">
+                  <span class="text-2xl mb-2">📘</span>
+                  <p class="font-handwriting text-xl text-white font-bold leading-tight mb-2">${sanitizeHTML(b.title || 'Slam Book')}</p>
+                  <p class="text-white/80 text-[10px] uppercase tracking-widest bg-white/20 px-2 py-1 rounded">${b.questions?.length || 0} Qs</p>
+                </div>
+              </div>
+            `;
+          } else {
+            return `
+              <div class="cursor-pointer relative aspect-[3/4] bg-gradient-to-br from-orange-400 to-red-500 rounded-r-2xl rounded-l shadow-lg overflow-hidden transform hover:-translate-y-1 transition-all guest-book-card" data-id="${b.id}" data-type="story">
+                <div class="absolute left-0 top-0 bottom-0 w-4 bg-black/20 z-10"></div>
+                <div class="absolute inset-0 p-4 flex flex-col justify-center items-center text-center">
+                  <span class="text-2xl mb-2">📓</span>
+                  <p class="font-handwriting text-xl text-white font-bold leading-tight mb-2">${sanitizeHTML(b.title || 'Story Book')}</p>
+                  <p class="text-white/80 text-[10px] uppercase tracking-widest bg-white/20 px-2 py-1 rounded mb-2">${b.mood}</p>
+                  <p class="text-white/90 text-[10px] font-bold">❤️ ${b.likesCount || 0} &nbsp; 💬 ${b.commentsCount || 0}</p>
+                </div>
+              </div>
+            `;
+          }
+        }).join('')}
       </div>
     </div>
   `;
 
   el.querySelectorAll('.guest-book-card').forEach(card => {
     card.addEventListener('click', () => {
-      const book = books.find(b => b.id === card.dataset.id);
-      if (book) openGuestWriter(user, book);
+      const id = card.dataset.id;
+      const type = card.dataset.type;
+      const book = books.find(b => b.id === id);
+      if (book) {
+        if (type === 'question') {
+          openGuestWriter(user, book);
+        } else {
+          openStoryReader(book);
+        }
+      }
     });
   });
 }
@@ -156,7 +362,11 @@ function renderGuestBooksList(el, user, books) {
 function showSlamBookConfigurator(existingBook = null) {
   let title = existingBook?.title || 'My School Memories';
   let description = existingBook?.description || '';
-  let visibility = existingBook?.visibility || 'public';
+  let visibility = existingBook?.visibility || 'allFriends';
+  if (visibility === 'public' || visibility === 'friends' || visibility === 'all') visibility = 'allFriends';
+  if (visibility === 'close_friends' || visibility === 'close') visibility = 'closeFriends';
+  
+  let selectedFriends = existingBook?.selectedFriends || [];
   let allowAnonymous = existingBook?.allowAnonymous ?? true;
 
   let questions = existingBook?.questions ? JSON.parse(JSON.stringify(existingBook.questions)) : [
@@ -256,11 +466,15 @@ function showSlamBookConfigurator(existingBook = null) {
         
         <div class="flex gap-4 max-w-sm mx-auto">
           <div class="flex-1 bg-white/10 p-3 rounded-xl border border-white/20">
-            <label class="block text-[10px] uppercase text-indigo-200 font-bold mb-1">Visibility</label>
-            <select id="sb-priv" class="w-full text-xs font-bold bg-transparent text-white focus:outline-none">
-              <option value="public" class="text-navy-800" ${visibility === 'public' ? 'selected' : ''}>🌍 Public</option>
-              <option value="friends" class="text-navy-800" ${visibility === 'friends' ? 'selected' : ''}>👥 Friends Only</option>
-            </select>
+            <label class="block text-[10px] uppercase text-indigo-200 font-bold mb-2">Visibility</label>
+            <div class="flex flex-wrap gap-2" id="sb-visibility-container">
+              <button data-val="allFriends" class="vis-chip px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${visibility === 'allFriends' ? 'bg-white text-indigo-600 shadow' : 'bg-transparent text-white border border-white/30 hover:bg-white/10'}">🌍 All Friends</button>
+              <button data-val="closeFriends" class="vis-chip px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${visibility === 'closeFriends' ? 'bg-white text-indigo-600 shadow' : 'bg-transparent text-white border border-white/30 hover:bg-white/10'}">⭐ Close Friends</button>
+            </div>
+            <div id="sb-close-friends-info" class="text-[10px] text-white font-bold mt-2 flex items-center gap-2 ${visibility === 'closeFriends' ? '' : 'hidden'}">
+              <span id="sb-cf-count">⭐ ${selectedFriends.length} Selected</span>
+              <button id="sb-edit-cf" class="underline hover:text-indigo-200">Edit</button>
+            </div>
           </div>
           <div class="flex-1 bg-white/10 p-3 rounded-xl border border-white/20 flex flex-col justify-center items-center cursor-pointer">
             <label class="block text-[10px] uppercase text-indigo-200 font-bold mb-1 text-center cursor-pointer">Allow Anonymous</label>
@@ -287,6 +501,54 @@ function showSlamBookConfigurator(existingBook = null) {
 
   renderQuestions();
 
+  const visibilityContainer = modal.body.querySelector('#sb-visibility-container');
+  const cfInfo = modal.body.querySelector('#sb-close-friends-info');
+  const cfCount = modal.body.querySelector('#sb-cf-count');
+  const editCfBtn = modal.body.querySelector('#sb-edit-cf');
+
+  const updateVisUI = () => {
+    visibilityContainer.querySelectorAll('.vis-chip').forEach(chip => {
+      if (chip.dataset.val === visibility) {
+        chip.className = 'vis-chip px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-white text-indigo-600 shadow';
+      } else {
+        chip.className = 'vis-chip px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-transparent text-white border border-white/30 hover:bg-white/10';
+      }
+    });
+    if (visibility === 'closeFriends') {
+      cfInfo.classList.remove('hidden');
+      cfCount.textContent = `⭐ ${selectedFriends.length} Selected`;
+    } else {
+      cfInfo.classList.add('hidden');
+    }
+  };
+
+  visibilityContainer.addEventListener('click', (e) => {
+    const chip = e.target.closest('.vis-chip');
+    if (!chip) return;
+    const newVal = chip.dataset.val;
+    if (newVal === 'closeFriends' && visibility !== 'closeFriends') {
+      openCloseFriendsSelector(selectedFriends, (newSelection) => {
+        if (newSelection) {
+          selectedFriends = newSelection;
+          visibility = 'closeFriends';
+          updateVisUI();
+        }
+      });
+    } else {
+      visibility = newVal;
+      updateVisUI();
+    }
+  });
+
+  editCfBtn.addEventListener('click', () => {
+    openCloseFriendsSelector(selectedFriends, (newSelection) => {
+      if (newSelection) {
+        selectedFriends = newSelection;
+        updateVisUI();
+      }
+    });
+  });
+
   modal.body.querySelector('#sb-save-config').addEventListener('click', async () => {
     const validQuestions = questions.filter(q => q.text.trim().length > 0);
     if (validQuestions.length === 0) { showToast('Add at least 1 question!', 'warning'); return; }
@@ -294,7 +556,8 @@ function showSlamBookConfigurator(existingBook = null) {
     const finalConfig = {
       ownerId: authManager.currentUser.uid,
       title: modal.body.querySelector('#sb-title').value.trim() || 'My Slam Book',
-      visibility: modal.body.querySelector('#sb-priv').value,
+      visibility: visibility,
+      selectedFriends: visibility === 'closeFriends' ? selectedFriends : [],
       allowAnonymous: modal.body.querySelector('#sb-anon').checked,
       questions: validQuestions,
       updatedAt: serverTimestamp(),
@@ -311,8 +574,8 @@ function showSlamBookConfigurator(existingBook = null) {
         showToast('Book updated!', 'success');
       } else {
         await addDoc(collection(db, 'slambooks'), finalConfig);
+        awardPoints(authManager.currentUser.uid, 6, 'Slam Book Created').catch(e => console.warn(e));
         showToast('Slam Book Created! +6 Points Earned 🌟', 'success');
-        await awardPoints(authManager.currentUser.uid, 6, 'Slam Book Created');
       }
       modal.close();
     } catch (e) {
@@ -693,6 +956,8 @@ async function openGuestWriter(targetUser, book) {
         return;
       }
 
+      const { createNotification } = await import('../notifications.js');
+      
       await addDoc(collection(db, 'slambookResponses'), {
         slambookId: book.id,
         targetUserId: targetUser.id,
@@ -702,16 +967,15 @@ async function openGuestWriter(targetUser, book) {
         isPinned: false,
         createdAt: serverTimestamp()
       });
-
-      // Send notification
-      const { createNotification } = await import('../notifications.js');
-      await createNotification('slambook_response', targetUser.id, {
+      
+      // Background notifications and points
+      createNotification('slambook_response', targetUser.id, {
         fromName: isAnon ? 'Someone' : authManager.userData.fullName,
         fromId: isAnon ? null : myUid
-      });
+      }).catch(e => console.warn(e));
+      awardPoints(authManager.currentUser.uid, 3, 'Slam Book Answer Submit').catch(e => console.warn(e));
 
       showToast('Slam Book signed! +3 Points earned 🌟', 'success');
-      await awardPoints(authManager.currentUser.uid, 3, 'Slam Book Answer Submit');
       modal.close();
     } catch (e) {
       console.error(e);

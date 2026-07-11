@@ -885,6 +885,8 @@ function showLogoutConfirmation() {
   overlay.querySelector('.logout-cancel-btn').addEventListener('click', close);
   overlay.querySelector('.logout-confirm-btn').addEventListener('click', async () => {
     close();
+    sessionStorage.removeItem("birthdayIntroShownThisLogin");
+    sessionStorage.removeItem("playlistStartedThisLogin");
     await authManager.logout();
     showToast('See you soon! 👋', 'info');
   });

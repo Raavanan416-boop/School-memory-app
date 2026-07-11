@@ -2000,6 +2000,7 @@ window.showBirthdayIntro = function() {
       }
       sessionStorage.setItem("musicStarted", "true");
       sessionStorage.setItem("homeMusicStarted", "true");
+      sessionStorage.setItem("playlistStartedThisLogin", "true");
     }, 1100); // Wait 1.1s to ensure audio engine is fully destroyed
   });
 
@@ -2399,12 +2400,36 @@ async function init() {
           buildAppShell();
           appShellBuilt = true;
 
-          const isFreshLogin = sessionStorage.getItem("isFreshLogin") === "true";
+          const isExplicitLogin = sessionStorage.getItem("isExplicitLoginEvent") === "true";
           const loginSession = sessionStorage.getItem("loginSession") === "true";
 
-          if (isFreshLogin) {
-            // First Login of the Session
+          if (isExplicitLogin) {
+            // Explicit login success event
+            sessionStorage.removeItem("isExplicitLoginEvent");
             sessionStorage.removeItem("isFreshLogin");
+
+            // Clear temporary login flags
+            sessionStorage.removeItem("birthdayIntroShownThisLogin");
+            sessionStorage.removeItem("playlistStartedThisLogin");
+
+            // Reset birthday intro state to allow replay on re-login
+            window.hasPlayedBirthdayIntro = false;
+            sessionStorage.removeItem("birthdayIntroCompleted");
+
+            // Reset MusicPlayer state to start playlist from beginning
+            if (typeof MusicPlayer !== 'undefined') {
+              MusicPlayer.isStopped = false;
+              MusicPlayer.hasStarted = false;
+              MusicPlayer.currentIndex = 0;
+              if (MusicPlayer.bgAudio) {
+                MusicPlayer.bgAudio.pause();
+                MusicPlayer.bgAudio.src = '';
+              }
+              sessionStorage.removeItem("musicCurrentIndex");
+              sessionStorage.removeItem("musicIsStopped");
+              sessionStorage.removeItem("musicHasStarted");
+              sessionStorage.removeItem("musicCurrentTime");
+            }
 
             // Check Birthday User
             let isBirthday = false;
@@ -2420,12 +2445,15 @@ async function init() {
               if (window.showBirthdayIntro) {
                 birthdayPlayed = window.showBirthdayIntro();
               }
-              // If showBirthdayIntro returned false for some reason, start music
-              if (!birthdayPlayed) {
+              if (birthdayPlayed) {
+                sessionStorage.setItem("birthdayIntroShownThisLogin", "true");
+              } else {
+                // Fallback: If showBirthdayIntro returned false for some reason, start music
                 if (typeof MusicPlayer !== 'undefined' && MusicPlayer.start) {
                   MusicPlayer.start();
                   sessionStorage.setItem("musicStarted", "true");
                   sessionStorage.setItem("homeMusicStarted", "true");
+                  sessionStorage.setItem("playlistStartedThisLogin", "true");
                 }
               }
             } else {
@@ -2434,6 +2462,7 @@ async function init() {
                 MusicPlayer.start();
                 sessionStorage.setItem("musicStarted", "true");
                 sessionStorage.setItem("homeMusicStarted", "true");
+                sessionStorage.setItem("playlistStartedThisLogin", "true");
               }
             }
           } else if (loginSession) {

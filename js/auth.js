@@ -150,37 +150,33 @@ class AuthManager {
   }
 
   async login(email, password) {
-    const cred = await signInWithEmailAndPassword(auth, email, password);
-    this.currentUser = cred.user;
-    await this._loadUserData(cred.user.uid);
-    await this._setOnline(true);
-    this._startHeartbeat();
-
-    // Set session flags on explicit fresh login
     sessionStorage.setItem("loginSession", "true");
     sessionStorage.setItem("isFreshLogin", "true");
-
-    return cred.user;
+    sessionStorage.setItem("isExplicitLoginEvent", "true");
+    try {
+      const cred = await signInWithEmailAndPassword(auth, email, password);
+      this.currentUser = cred.user;
+      await this._loadUserData(cred.user.uid);
+      await this._setOnline(true);
+      this._startHeartbeat();
+      return cred.user;
+    } catch (err) {
+      sessionStorage.removeItem("loginSession");
+      sessionStorage.removeItem("isFreshLogin");
+      sessionStorage.removeItem("isExplicitLoginEvent");
+      throw err;
+    }
   }
 
   async logout() {
+    sessionStorage.removeItem("birthdayIntroShownThisLogin");
+    sessionStorage.removeItem("playlistStartedThisLogin");
+
     await this._setOnline(false);
     this._stopHeartbeat();
     await signOut(auth);
     this.currentUser = null;
     this.userData = null;
-
-    localStorage.removeItem("birthdayIntroPlayed");
-    sessionStorage.removeItem("birthdayIntroCompleted");
-    sessionStorage.removeItem("musicStarted");
-    sessionStorage.removeItem("homeMusicStarted");
-    sessionStorage.removeItem("loginSession");
-    sessionStorage.removeItem("isFreshLogin");
-    sessionStorage.removeItem("musicCurrentIndex");
-    sessionStorage.removeItem("musicIsStopped");
-    sessionStorage.removeItem("musicHasStarted");
-    sessionStorage.removeItem("musicCurrentTime");
-    window.hasPlayedBirthdayIntro = false;
   }
 
   async resetPassword(email) {

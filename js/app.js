@@ -405,11 +405,11 @@ function showLogin() {
     e.preventDefault();
     const email = lp.querySelector('#login-email').value.trim();
     const pass = lp.querySelector('#login-password').value;
-    await doLogin(email, pass);
+    await doLogin(email, pass, true);
   });
 }
 
-async function doLogin(email, password) {
+async function doLogin(email, password, isManual = false) {
   const lp = $('#login-page');
   const errEl = lp?.querySelector('#login-error');
   const btn = lp?.querySelector('#login-submit');
@@ -418,7 +418,7 @@ async function doLogin(email, password) {
   if (errEl) errEl.classList.add('hidden');
 
   try {
-    await authManager.login(email, password);
+    await authManager.login(email, password, isManual);
     if (authManager.userData && authManager.userData.passwordChanged) {
       showToast('Welcome back! 🎓', 'success');
     }
@@ -879,7 +879,7 @@ function showForcedPasswordModal() {
 let _birthdayAudioEngine = null;
 window.hasPlayedBirthdayIntro = false;
 
-window.showBirthdayIntro = function() {
+window.showBirthdayIntro = function(startPlaylistAfter = false) {
   if (!authManager.currentUser) return false;
 
   if (!authManager.userData?.dateOfBirth) return false;
@@ -1994,13 +1994,15 @@ window.showBirthdayIntro = function() {
       overlay.remove();
       router.navigate('home');
       
-      // Start Home playlist after Birthday Intro music has completely faded out
-      if (typeof MusicPlayer !== 'undefined' && MusicPlayer.start) {
-        MusicPlayer.start();
+      if (startPlaylistAfter) {
+        // Start Home playlist after Birthday Intro music has completely faded out
+        if (typeof MusicPlayer !== 'undefined' && MusicPlayer.start) {
+          MusicPlayer.start();
+        }
+        sessionStorage.setItem("musicStarted", "true");
+        sessionStorage.setItem("homeMusicStarted", "true");
+        sessionStorage.setItem("playlistStartedThisLogin", "true");
       }
-      sessionStorage.setItem("musicStarted", "true");
-      sessionStorage.setItem("homeMusicStarted", "true");
-      sessionStorage.setItem("playlistStartedThisLogin", "true");
     }, 1100); // Wait 1.1s to ensure audio engine is fully destroyed
   });
 
@@ -2440,10 +2442,10 @@ async function init() {
             }
 
             if (isBirthday) {
-              // Show Birthday Intro and do NOT start any background music
+              // Show Birthday Intro and start playlist after Intro finishes
               let birthdayPlayed = false;
               if (window.showBirthdayIntro) {
-                birthdayPlayed = window.showBirthdayIntro();
+                birthdayPlayed = window.showBirthdayIntro(true);
               }
               if (birthdayPlayed) {
                 sessionStorage.setItem("birthdayIntroShownThisLogin", "true");
@@ -2465,19 +2467,27 @@ async function init() {
                 sessionStorage.setItem("playlistStartedThisLogin", "true");
               }
             }
-          } else if (loginSession) {
-            // Browser Reload
-            // Continue whatever music state already exists. Never restart the playlist.
-            if (typeof MusicPlayer !== 'undefined') {
-              MusicPlayer.loadState();
-              const wasPlaying = sessionStorage.getItem('musicHasStarted') === 'true' && sessionStorage.getItem('musicIsStopped') !== 'true';
-              if (wasPlaying && MusicPlayer.start) {
-                MusicPlayer.start(true); // Continue playing from saved state/time
+          } else {
+            // App Open, Reload, Browser Restart, Page Refresh
+            // Music can only start after a successful LOGIN. Never start music here.
+            
+            // Show Birthday Intro automatically on Birthday, but do NOT start playlist after
+            let isBirthday = false;
+            if (authManager.userData?.dateOfBirth) {
+              const todayObj = new Date();
+              const dob = new Date(authManager.userData.dateOfBirth);
+              isBirthday = (dob.getMonth() === todayObj.getMonth() && dob.getDate() === todayObj.getDate());
+            }
+
+            if (isBirthday) {
+              let birthdayPlayed = false;
+              if (window.showBirthdayIntro) {
+                birthdayPlayed = window.showBirthdayIntro(false);
+              }
+              if (birthdayPlayed) {
+                sessionStorage.setItem("birthdayIntroShownThisLogin", "true");
               }
             }
-          } else {
-            // App Open / Close-reopen without logging in again
-            // Do NOT show Birthday Intro, do NOT start playlist.
           }
         }
       };

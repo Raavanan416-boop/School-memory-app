@@ -149,10 +149,14 @@ class AuthManager {
     }
   }
 
-  async login(email, password) {
+  async login(email, password, isManual = false) {
     sessionStorage.setItem("loginSession", "true");
     sessionStorage.setItem("isFreshLogin", "true");
-    sessionStorage.setItem("isExplicitLoginEvent", "true");
+    if (isManual) {
+      sessionStorage.setItem("isExplicitLoginEvent", "true");
+    } else {
+      sessionStorage.removeItem("isExplicitLoginEvent");
+    }
     try {
       const cred = await signInWithEmailAndPassword(auth, email, password);
       this.currentUser = cred.user;

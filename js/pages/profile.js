@@ -929,6 +929,7 @@ function showLogoutConfirmation() {
     close();
     sessionStorage.removeItem("birthdayIntroShownThisLogin");
     sessionStorage.removeItem("playlistStartedThisLogin");
+    localStorage.removeItem("birthdayIntroLastShown");
     if (window.animateLogout) {
       await window.animateLogout();
     }

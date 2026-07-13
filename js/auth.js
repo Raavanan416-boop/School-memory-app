@@ -175,6 +175,7 @@ class AuthManager {
   async logout() {
     sessionStorage.removeItem("birthdayIntroShownThisLogin");
     sessionStorage.removeItem("playlistStartedThisLogin");
+    localStorage.removeItem("birthdayIntroLastShown");
 
     await this._setOnline(false);
     this._stopHeartbeat();

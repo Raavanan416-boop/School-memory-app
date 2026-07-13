@@ -888,9 +888,23 @@ window.showBirthdayIntro = function(startPlaylistAfter = false) {
   const dob = new Date(authManager.userData.dateOfBirth);
   if (dob.getMonth() !== todayObj.getMonth() || dob.getDate() !== todayObj.getDate()) return false;
 
+  // Format today's date in YYYY-MM-DD format
+  const year = todayObj.getFullYear();
+  const month = String(todayObj.getMonth() + 1).padStart(2, '0');
+  const day = String(todayObj.getDate()).padStart(2, '0');
+  const todayStr = `${year}-${month}-${day}`;
+
+  // Check if the Birthday Intro was already shown today
+  if (localStorage.getItem("birthdayIntroLastShown") === todayStr) {
+    return false;
+  }
+
   const completed = sessionStorage.getItem("birthdayIntroCompleted") === "true";
   if (completed) return false;
   if (window.hasPlayedBirthdayIntro) return false;
+
+  // Record that the Birthday Intro is successfully shown today
+  localStorage.setItem("birthdayIntroLastShown", todayStr);
 
   window.hasPlayedBirthdayIntro = true;
   const name = authManager.userData.fullName || 'Friend';

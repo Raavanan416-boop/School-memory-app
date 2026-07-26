@@ -250,6 +250,35 @@ export async function renderOwnerPanel(container) {
             </button>
           </div>
 
+          <!-- Special Intro Manager (Friendship Day) -->
+          <div class="bg-[#1e293b] rounded-2xl p-4 border border-amber-500/30 shadow-md">
+            <div class="flex items-center justify-between mb-3">
+              <div>
+                <h3 class="text-white font-bold text-sm flex items-center gap-1.5">
+                  <span class="text-amber-400">✨</span> Special Intro Manager
+                </h3>
+                <p class="text-xs text-gray-400 mt-0.5">Intro Type: <span class="text-amber-300 font-semibold">Friendship Day</span></p>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="toggle-friendship-intro" class="sr-only peer">
+                <div class="w-11 h-6 bg-gray-700 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+              </label>
+            </div>
+            
+            <div class="mb-3">
+              <label class="block text-xs text-gray-400 mb-1">Activation Date</label>
+              <input type="date" id="friendship-intro-date" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-400">
+            </div>
+
+            <button id="btn-save-friendship-intro" class="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-black font-bold rounded-xl transition-all text-sm mb-2">
+              SAVE FRIENDSHIP INTRO SETTINGS
+            </button>
+            <button id="btn-preview-friendship-intro" class="w-full py-2 bg-gray-800 border border-gray-600 hover:bg-gray-700 text-amber-300 font-semibold rounded-xl transition-all text-sm flex items-center justify-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              Preview Friendship Intro
+            </button>
+          </div>
+
           <div class="bg-[#1e293b] rounded-2xl p-4 border border-gray-700/50 shadow-md flex items-center justify-between">
             <h3 class="text-white font-bold text-sm">Birthday Feature</h3>
             <label class="relative inline-flex items-center cursor-pointer">
@@ -340,6 +369,7 @@ export async function renderOwnerPanel(container) {
   // Setup birthday toggle
   setupBirthdayToggle(container);
   setupLaunchControl(container);
+  setupFriendshipIntroControl(container);
 
   // Load data in background
   setTimeout(() => loadPosts(container), 500);
@@ -1861,6 +1891,53 @@ async function setupLaunchControl(container) {
       showToast('Could not load preview', 'error');
     }
   });
+}
+
+async function setupFriendshipIntroControl(container) {
+  const toggle = container.querySelector('#toggle-friendship-intro');
+  const dateInput = container.querySelector('#friendship-intro-date');
+  const saveBtn = container.querySelector('#btn-save-friendship-intro');
+  const previewBtn = container.querySelector('#btn-preview-friendship-intro');
+  if (!toggle || !dateInput || !saveBtn || !previewBtn) return;
+
+  try {
+    const { friendshipIntroManager } = await import('../services/friendshipIntroManager.js');
+    const settings = await friendshipIntroManager.fetchSettings();
+    toggle.checked = Boolean(settings.enabled);
+    if (settings.selectedDate) {
+      dateInput.value = settings.selectedDate;
+    } else {
+      dateInput.value = '2026-08-02';
+    }
+
+    saveBtn.addEventListener('click', async () => {
+      if (!dateInput.value) {
+        showToast('Please select date', 'error');
+        return;
+      }
+
+      try {
+        await friendshipIntroManager.saveSettings(toggle.checked, dateInput.value);
+        friendshipIntroManager.resetSessionSeen();
+        showToast('Friendship Intro Settings Saved!', 'success');
+        await friendshipIntroManager.checkAndRunIntro();
+      } catch(e) {
+        console.error(e);
+        showToast('Failed to save intro settings', 'error');
+      }
+    });
+
+    previewBtn.addEventListener('click', async () => {
+      try {
+        await friendshipIntroManager.playFriendshipIntro(true);
+      } catch(e) {
+        console.error(e);
+        showToast('Could not load preview', 'error');
+      }
+    });
+  } catch (e) {
+    console.error('Error setting up Friendship Intro control:', e);
+  }
 }
 
 async function loadBdayHistory(container) {

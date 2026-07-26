@@ -2,6 +2,45 @@
 export function $(sel, ctx = document) { return ctx.querySelector(sel); }
 export function $$(sel, ctx = document) { return [...ctx.querySelectorAll(sel)]; }
 
+export function isDobPassword(password, dobString) {
+  if (!password || !dobString) return false;
+  
+  const pTrim = String(password).trim().toLowerCase();
+  const dobTrim = String(dobString).trim().toLowerCase();
+
+  if (pTrim === dobTrim) return true;
+
+  const pDigits = pTrim.replace(/\D/g, '');
+  const dobDigits = dobTrim.replace(/\D/g, '');
+
+  if (pDigits && dobDigits && pDigits === dobDigits) return true;
+
+  const parsed = new Date(dobString);
+  if (!isNaN(parsed.getTime())) {
+    const yyyy = String(parsed.getFullYear());
+    const mm = String(parsed.getMonth() + 1).padStart(2, '0');
+    const dd = String(parsed.getDate()).padStart(2, '0');
+
+    const formats = [
+      `${yyyy}${mm}${dd}`,
+      `${dd}${mm}${yyyy}`,
+      `${mm}${dd}${yyyy}`,
+      `${yyyy}-${mm}-${dd}`,
+      `${dd}-${mm}-${yyyy}`,
+      `${mm}-${dd}-${yyyy}`,
+      `${yyyy}/${mm}/${dd}`,
+      `${dd}/${mm}/${yyyy}`,
+      `${mm}/${dd}/${yyyy}`
+    ];
+
+    if (formats.some(f => f.toLowerCase() === pTrim || (pDigits && f.replace(/\D/g, '') === pDigits))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export function html(tag, attrs = {}, children = []) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {

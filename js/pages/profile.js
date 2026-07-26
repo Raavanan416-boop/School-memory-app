@@ -1,7 +1,7 @@
 // Profile page — Instagram-style with cover photo, tabs, hidden settings menu
 import { db, doc, getDoc, getDocs, collection, query, where, orderBy, addDoc, onSnapshot, serverTimestamp, arrayUnion, arrayRemove, updateDoc, deleteDoc, rtdb, ref, onValue } from '../firebase-config.js';
 import { uploadMedia } from '../services/cloudinary.js';
-import { sanitizeHTML, formatNumber, timeAgo, showToast, EMOTIONAL_QUOTES } from '../utils.js';
+import { sanitizeHTML, formatNumber, timeAgo, showToast, EMOTIONAL_QUOTES, isDobPassword } from '../utils.js';
 import { userCache } from '../services/userCache.js';
 import { authManager } from '../auth.js';
 import { router } from '../router.js';
@@ -1932,12 +1932,19 @@ function showChangePasswordModal() {
     if (newPass.length < 6) { errEl.textContent = 'Password must be at least 6 characters'; errEl.classList.remove('hidden'); return; }
     if (newPass !== confirm) { errEl.textContent = 'Passwords do not match'; errEl.classList.remove('hidden'); return; }
 
+    const dob = authManager.userData?.dateOfBirth;
+    if (dob && isDobPassword(newPass, dob)) {
+      errEl.textContent = '❌ Your password cannot be your Date of Birth. Please choose a stronger password.';
+      errEl.classList.remove('hidden');
+      return;
+    }
+
     try {
       await authManager.changePassword(current, newPass);
       showToast('Password changed! 🔐', 'success');
       modal.close();
     } catch (err) {
-      let msg = 'Failed to change password';
+      let msg = err.message || 'Failed to change password';
       if (err.code === 'auth/wrong-password') msg = 'Current password is incorrect';
       else if (err.code === 'auth/weak-password') msg = 'New password is too weak';
       errEl.textContent = msg;

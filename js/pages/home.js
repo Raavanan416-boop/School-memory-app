@@ -91,7 +91,6 @@ export async function renderHome(container, data = null) {
     <!-- Quick Actions -->
     <section class="px-4 pb-3">
       <div class="flex gap-2 overflow-x-auto no-scrollbar pb-1">
-        <button class="quick-action-chip" data-action="timecapsule">🔒 Time Capsule</button>
         <button class="quick-action-chip" data-action="diary">📖 Diary</button>
         <button class="quick-action-chip" data-action="polls">📊 Polls</button>
         <button class="quick-action-chip" data-action="leaderboard">🏆 Leaderboard</button>

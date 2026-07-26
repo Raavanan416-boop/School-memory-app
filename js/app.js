@@ -1,15 +1,15 @@
 // Main App Entry — Resilient app shell with lazy page loading + auto-login
 import { authManager } from './auth.js';
 import { router } from './router.js';
-import { showToast, sanitizeHTML } from './utils.js';
+import { showToast, sanitizeHTML, isDobPassword } from './utils.js';
 import { presenceManager } from './presence.js';
-import { timeCapsuleManager } from './timecapsuleManager.js';
 import { userCache } from './services/userCache.js';
 import { db, collection, getDocs, doc, writeBatch, query, where, onSnapshot } from './firebase-config.js';
 // removed unused import
 import { usageTracker } from './services/usageTracker.js';
 import { loginTracker } from './services/loginTracker.js';
 import { launchManager } from './services/launchManager.js';
+import { friendshipIntroManager } from './services/friendshipIntroManager.js';
 
 window.syncAllLeaderboardPoints = async () => {
   console.log("Starting Emergency Sync...");
@@ -490,7 +490,6 @@ function buildAppShell() {
   router.register('games', lazyPage('./pages/games.js', 'renderGames'));
   router.register('profile', lazyPage('./pages/profile.js', 'renderProfile'));
   router.register('notifications', lazyPage('./pages/notifications.js', 'renderNotifications'));
-  router.register('timecapsule', lazyPage('./pages/timecapsule.js', 'renderTimeCapsule'));
   router.register('diary', lazyPage('./pages/diary.js', 'renderDiary'));
   router.register('birthday', lazyPage('./pages/birthday.js', 'renderBirthday'));
   router.register('leaderboard', lazyPage('./pages/leaderboard.js', 'renderLeaderboard'));
@@ -548,7 +547,6 @@ function buildAppShell() {
 
   // Start presence tracking (online/offline status)
   presenceManager.startPresenceTracking();
-  timeCapsuleManager.start();
 
   router.navigate('home');
 
@@ -805,27 +803,32 @@ function showTagRequestModal(notifId, notif, post) {
 function showForcedPasswordModal() {
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
-    overlay.className = 'fixed inset-0 z-[300] flex items-center justify-center p-4 bg-navy-900/90 backdrop-blur-md transition-opacity duration-300';
+    overlay.className = 'fixed inset-0 z-[300] flex items-center justify-center p-4 bg-navy-900/95 backdrop-blur-md transition-opacity duration-300';
     overlay.innerHTML = `
-      <div class="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl p-6">
-        <h2 class="text-2xl font-playfair font-bold text-navy-800 mb-2">Update Password</h2>
-        <p class="text-sm text-gray-600 mb-6">For your security, please change your default password before continuing.</p>
+      <div class="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl p-6 text-center">
+        <div class="text-4xl mb-2">🔒</div>
+        <h2 class="text-2xl font-playfair font-bold text-navy-800 mb-2">Security Update Required</h2>
+        <p class="text-xs text-gray-600 mb-6 leading-relaxed">
+          For your account safety,<br/>
+          your password cannot be your Date of Birth.<br/><br/>
+          Please create a new secure password.
+        </p>
         
-        <form id="force-password-form" class="space-y-4">
+        <form id="force-password-form" class="space-y-4 text-left">
           <div>
-            <label class="text-xs font-bold text-navy-700 uppercase tracking-wider mb-1 block">Current Password (DOB)</label>
-            <input type="password" id="current-pass" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-navy-500 outline-none" required>
+            <label class="text-xs font-bold text-navy-700 uppercase tracking-wider mb-1 block">Current Password</label>
+            <input type="password" id="current-pass" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-navy-500 outline-none" placeholder="Current Password" required>
           </div>
           <div>
             <label class="text-xs font-bold text-navy-700 uppercase tracking-wider mb-1 block">New Password</label>
-            <input type="password" id="new-pass" minlength="6" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-navy-500 outline-none" required>
+            <input type="password" id="new-pass" minlength="6" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-navy-500 outline-none" placeholder="New Password" required>
           </div>
           <div>
-            <label class="text-xs font-bold text-navy-700 uppercase tracking-wider mb-1 block">Confirm New Password</label>
-            <input type="password" id="confirm-pass" minlength="6" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-navy-500 outline-none" required>
+            <label class="text-xs font-bold text-navy-700 uppercase tracking-wider mb-1 block">Confirm Password</label>
+            <input type="password" id="confirm-pass" minlength="6" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-navy-500 outline-none" placeholder="Confirm Password" required>
           </div>
-          <div id="pwd-error" class="text-red-500 text-xs hidden font-medium"></div>
-          <button type="submit" id="pwd-submit" class="w-full bg-navy-600 text-white font-bold py-3 rounded-xl shadow-md hover:bg-navy-700 transition-colors mt-2">
+          <div id="pwd-error" class="text-red-500 text-xs hidden font-medium p-2 bg-red-50 rounded-xl text-center"></div>
+          <button type="submit" id="pwd-submit" class="w-full bg-navy-600 text-white font-bold py-3.5 rounded-xl shadow-md hover:bg-navy-700 transition-colors mt-2">
             Update Password
           </button>
         </form>
@@ -843,6 +846,7 @@ function showForcedPasswordModal() {
       const current = overlay.querySelector('#current-pass').value;
       const newPass = overlay.querySelector('#new-pass').value;
       const confirmPass = overlay.querySelector('#confirm-pass').value;
+      const dob = authManager.userData?.dateOfBirth;
 
       if (newPass !== confirmPass) {
         errEl.textContent = 'New passwords do not match.';
@@ -854,16 +858,54 @@ function showForcedPasswordModal() {
         errEl.classList.remove('hidden');
         return;
       }
+      if (dob && isDobPassword(newPass, dob)) {
+        errEl.textContent = '❌ Your password cannot be your Date of Birth. Please choose a stronger password.';
+        errEl.classList.remove('hidden');
+        return;
+      }
 
       btn.disabled = true;
       btn.textContent = 'Updating...';
 
       try {
         await authManager.changePassword(current, newPass);
-        await authManager.updateProfile({ passwordChanged: true });
-        overlay.remove();
-        showToast('Password updated successfully!', 'success');
-        resolve();
+        console.log("Password Updated");
+
+        const dobVal = authManager.userData?.dateOfBirth;
+        if (!isDobPassword(newPass, dobVal)) {
+          console.log("DOB Check Passed");
+
+          if (authManager.userData) {
+            authManager.userData.passwordChanged = true;
+            authManager.userData.forcePasswordChange = false;
+            authManager.userData.mustChangePassword = false;
+          }
+          console.log("Force Password Flag Cleared");
+
+          console.log("Refreshing User Session");
+          if (authManager.currentUser) {
+            await authManager._loadUserData(authManager.currentUser.uid);
+          }
+
+          overlay.remove();
+
+          console.log("Navigating Home");
+          router.navigate('home');
+
+          await new Promise(r => setTimeout(r, 300));
+          console.log("Home Loaded");
+
+          console.log("Starting Playlist");
+          startPlaylist();
+
+          showToast('Password updated successfully! 🎓', 'success');
+          resolve();
+        } else {
+          btn.disabled = false;
+          btn.textContent = 'Update Password';
+          errEl.textContent = '❌ Your password cannot be your Date of Birth. Please choose a stronger password.';
+          errEl.classList.remove('hidden');
+        }
       } catch (err) {
         console.error(err);
         btn.disabled = false;
@@ -2008,14 +2050,9 @@ window.showBirthdayIntro = function(startPlaylistAfter = false) {
       overlay.remove();
       router.navigate('home');
       
-      if (startPlaylistAfter) {
-        // Start Home playlist after Birthday Intro music has completely faded out
-        if (typeof MusicPlayer !== 'undefined' && MusicPlayer.start) {
-          MusicPlayer.start();
-        }
-        sessionStorage.setItem("musicStarted", "true");
-        sessionStorage.setItem("homeMusicStarted", "true");
-        sessionStorage.setItem("playlistStartedThisLogin", "true");
+      if (typeof window._onBirthdayIntroComplete === 'function') {
+        window._onBirthdayIntroComplete();
+        window._onBirthdayIntroComplete = null;
       }
     }, 1100); // Wait 1.1s to ensure audio engine is fully destroyed
   });
@@ -2404,6 +2441,180 @@ async function init() {
 
   console.log('[ClassMemories] Splash done, initializing auth...');
 
+  function stopPlaylist() {
+    if (typeof MusicPlayer !== 'undefined') {
+      MusicPlayer.isStopped = true;
+      MusicPlayer.hasStarted = false;
+      MusicPlayer.currentIndex = 0;
+      if (MusicPlayer.bgAudio) {
+        MusicPlayer.bgAudio.pause();
+        MusicPlayer.bgAudio.src = '';
+      }
+      sessionStorage.removeItem("musicCurrentIndex");
+      sessionStorage.removeItem("musicIsStopped");
+      sessionStorage.removeItem("musicHasStarted");
+      sessionStorage.removeItem("musicCurrentTime");
+      if (typeof MusicPlayer.hideStopButton === 'function') {
+        MusicPlayer.hideStopButton();
+      }
+    }
+  }
+
+  function stopAllAudioSources() {
+    stopPlaylist();
+
+    if (typeof _birthdayAudioEngine !== 'undefined' && _birthdayAudioEngine) {
+      try {
+        _birthdayAudioEngine.stop();
+        _birthdayAudioEngine = null;
+      } catch (e) {}
+    }
+
+    if (typeof friendshipIntroManager !== 'undefined' && friendshipIntroManager) {
+      try {
+        friendshipIntroManager.stopIntroMusic();
+      } catch (e) {}
+    }
+
+    document.querySelectorAll('audio').forEach(a => {
+      try {
+        a.pause();
+        a.currentTime = 0;
+        a.src = '';
+      } catch (e) {}
+    });
+
+    if (typeof MusicPlayer !== 'undefined' && MusicPlayer.bgAudio) {
+      try {
+        MusicPlayer.bgAudio.pause();
+        MusicPlayer.bgAudio.currentTime = 0;
+        MusicPlayer.bgAudio.src = '';
+      } catch (e) {}
+    }
+  }
+
+  function startPlaylist() {
+    if (!authManager.currentUser) return;
+    const lastPass = authManager.lastEnteredPassword || sessionStorage.getItem("lastEnteredPassword");
+    const dob = authManager.userData?.dateOfBirth;
+    if (dob && isDobPassword(lastPass, dob)) return;
+    if (authManager.userData?.passwordChanged !== true) return;
+    if (document.querySelector('#force-password-form')) return;
+
+    if (typeof MusicPlayer !== 'undefined' && MusicPlayer.start) {
+      if (MusicPlayer.bgAudio && !MusicPlayer.bgAudio.paused && MusicPlayer.bgAudio.src) {
+        return;
+      }
+      MusicPlayer.isStopped = false;
+      MusicPlayer.hasStarted = false;
+      MusicPlayer.currentIndex = 0;
+      MusicPlayer.start();
+      sessionStorage.setItem("musicStarted", "true");
+      sessionStorage.setItem("homeMusicStarted", "true");
+      sessionStorage.setItem("playlistStartedThisLogin", "true");
+    }
+  }
+
+  function shouldShowBirthdayIntro() {
+    if (!authManager.currentUser) return false;
+    if (!authManager.userData?.dateOfBirth) return false;
+
+    const todayObj = new Date();
+    const dob = new Date(authManager.userData.dateOfBirth);
+    if (dob.getMonth() !== todayObj.getMonth() || dob.getDate() !== todayObj.getDate()) return false;
+
+    const year = todayObj.getFullYear();
+    const month = String(todayObj.getMonth() + 1).padStart(2, '0');
+    const day = String(todayObj.getDate()).padStart(2, '0');
+    const todayStr = `${year}-${month}-${day}`;
+
+    if (localStorage.getItem("birthdayIntroLastShown") === todayStr) return false;
+    if (sessionStorage.getItem("birthdayIntroCompleted") === "true") return false;
+    if (window.hasPlayedBirthdayIntro) return false;
+
+    return true;
+  }
+
+  function playBirthdayIntro() {
+    return new Promise((resolve) => {
+      window._onBirthdayIntroComplete = () => {
+        window._onBirthdayIntroComplete = null;
+        resolve();
+      };
+      let played = false;
+      if (window.showBirthdayIntro) {
+        played = window.showBirthdayIntro(false);
+      }
+      if (!played) {
+        window._onBirthdayIntroComplete = null;
+        resolve();
+      }
+    });
+  }
+
+  async function shouldShowFriendshipIntro() {
+    const settings = await friendshipIntroManager.fetchSettings();
+    const enabled = Boolean(settings?.enabled);
+    const rawActivationDate = settings?.selectedDate || settings?.date || settings?.activationDate || '';
+    const activationDate = friendshipIntroManager.formatToYYYYMMDD(rawActivationDate);
+    const today = friendshipIntroManager.getTodayDateString();
+
+    const dateFormatMatch = Boolean(activationDate && activationDate === today);
+    const introAlreadyShown = (sessionStorage.getItem('friendshipIntroShownThisLogin') === 'true');
+
+    return Boolean(enabled && dateFormatMatch && !introAlreadyShown);
+  }
+
+  async function playFriendshipIntro() {
+    await friendshipIntroManager.playFriendshipIntro(false);
+  }
+
+  async function startAppMusicFlow() {
+    console.log("Login Success");
+
+    console.log("Checking Birthday Intro...");
+    const birthdayReq = shouldShowBirthdayIntro();
+
+    console.log("Checking Friendship Intro...");
+    const friendshipReq = await shouldShowFriendshipIntro();
+
+    const introRequired = birthdayReq || friendshipReq;
+    console.log("Intro Required:", introRequired ? "YES" : "NO");
+
+    if (birthdayReq) {
+      console.log("Stopping Playlist");
+      stopPlaylist();
+
+      console.log("Playing Intro");
+      await playBirthdayIntro();
+
+      console.log("Intro Finished");
+      await new Promise(r => setTimeout(r, 300));
+
+      console.log("Starting Playlist");
+      startPlaylist();
+      return;
+    }
+
+    if (friendshipReq) {
+      console.log("Stopping Playlist");
+      stopPlaylist();
+
+      console.log("Playing Intro");
+      await playFriendshipIntro();
+
+      console.log("Intro Finished");
+      await new Promise(r => setTimeout(r, 300));
+
+      console.log("Starting Playlist");
+      startPlaylist();
+      return;
+    }
+
+    console.log("Starting Playlist");
+    startPlaylist();
+  }
+
   let appShellBuilt = false;
 
   authManager.onChange(async (user) => {
@@ -2411,7 +2622,22 @@ async function init() {
       console.log('[ClassMemories] User logged in:', user.email);
       hideLogin();
       
-      const initApp = () => {
+      const lastPass = authManager.lastEnteredPassword || sessionStorage.getItem("lastEnteredPassword");
+      const dob = authManager.userData?.dateOfBirth;
+      const isDob = isDobPassword(lastPass, dob);
+      const isDefaultFlag = authManager.userData?.passwordChanged !== true || authManager.userData?.mustChangePassword === true || authManager.userData?.forcePasswordChange === true;
+      const isDobOrDefault = Boolean(authManager.userData && (isDob || isDefaultFlag));
+
+      if (isDobOrDefault) {
+        // Stop every audio source — 100% silent while security update screen is open
+        stopAllAudioSources();
+
+        // Open forced password change modal immediately BEFORE initializing app shell, intros, or music!
+        await showForcedPasswordModal();
+        return;
+      }
+
+      const initApp = async () => {
         if (!appShellBuilt) {
           buildAppShell();
           appShellBuilt = true;
@@ -2424,101 +2650,42 @@ async function init() {
             sessionStorage.removeItem("isExplicitLoginEvent");
             sessionStorage.removeItem("isFreshLogin");
 
-            // Clear temporary login flags
+            // Clear temporary login flags & reset Friendship Intro session
             sessionStorage.removeItem("birthdayIntroShownThisLogin");
             sessionStorage.removeItem("playlistStartedThisLogin");
+            friendshipIntroManager.resetSessionSeen();
 
             // Reset birthday intro state to allow replay on re-login
             window.hasPlayedBirthdayIntro = false;
             sessionStorage.removeItem("birthdayIntroCompleted");
 
-            // Reset MusicPlayer state to start playlist from beginning
-            if (typeof MusicPlayer !== 'undefined') {
-              MusicPlayer.isStopped = false;
-              MusicPlayer.hasStarted = false;
-              MusicPlayer.currentIndex = 0;
-              if (MusicPlayer.bgAudio) {
-                MusicPlayer.bgAudio.pause();
-                MusicPlayer.bgAudio.src = '';
-              }
-              sessionStorage.removeItem("musicCurrentIndex");
-              sessionStorage.removeItem("musicIsStopped");
-              sessionStorage.removeItem("musicHasStarted");
-              sessionStorage.removeItem("musicCurrentTime");
-            }
-
-            // Check Birthday User
-            let isBirthday = false;
-            if (authManager.userData?.dateOfBirth) {
-              const todayObj = new Date();
-              const dob = new Date(authManager.userData.dateOfBirth);
-              isBirthday = (dob.getMonth() === todayObj.getMonth() && dob.getDate() === todayObj.getDate());
-            }
-
-            if (isBirthday) {
-              // Show Birthday Intro and start playlist after Intro finishes
-              let birthdayPlayed = false;
-              if (window.showBirthdayIntro) {
-                birthdayPlayed = window.showBirthdayIntro(true);
-              }
-              if (birthdayPlayed) {
-                sessionStorage.setItem("birthdayIntroShownThisLogin", "true");
+            await startAppMusicFlow();
+          } else {
+            // Page reload / Auto-login
+            try {
+              const friendshipReq = await shouldShowFriendshipIntro();
+              if (friendshipReq) {
+                stopPlaylist();
+                await playFriendshipIntro();
               } else {
-                // Fallback: If showBirthdayIntro returned false for some reason, start music
-                if (typeof MusicPlayer !== 'undefined' && MusicPlayer.start) {
-                  MusicPlayer.start();
-                  sessionStorage.setItem("musicStarted", "true");
-                  sessionStorage.setItem("homeMusicStarted", "true");
-                  sessionStorage.setItem("playlistStartedThisLogin", "true");
+                if (shouldShowBirthdayIntro()) {
+                  stopPlaylist();
+                  await playBirthdayIntro();
                 }
               }
-            } else {
-              // Normal User: Start playlist immediately
-              if (typeof MusicPlayer !== 'undefined' && MusicPlayer.start) {
-                MusicPlayer.start();
-                sessionStorage.setItem("musicStarted", "true");
-                sessionStorage.setItem("homeMusicStarted", "true");
-                sessionStorage.setItem("playlistStartedThisLogin", "true");
-              }
-            }
-          } else {
-            // App Open, Reload, Browser Restart, Page Refresh
-            // Music can only start after a successful LOGIN. Never start music here.
-            
-            // Show Birthday Intro automatically on Birthday, but do NOT start playlist after
-            let isBirthday = false;
-            if (authManager.userData?.dateOfBirth) {
-              const todayObj = new Date();
-              const dob = new Date(authManager.userData.dateOfBirth);
-              isBirthday = (dob.getMonth() === todayObj.getMonth() && dob.getDate() === todayObj.getDate());
-            }
-
-            if (isBirthday) {
-              let birthdayPlayed = false;
-              if (window.showBirthdayIntro) {
-                birthdayPlayed = window.showBirthdayIntro(false);
-              }
-              if (birthdayPlayed) {
-                sessionStorage.setItem("birthdayIntroShownThisLogin", "true");
-              }
+            } catch (e) {
+              console.error("[ClassMemories] Intro check on auto-login error:", e);
             }
           }
         }
       };
 
-      if (authManager.userData && !authManager.userData.passwordChanged) {
-        await showForcedPasswordModal();
-        initApp();
-        usageTracker.startSession();
-        loginTracker.startSession();
-        showToast('Welcome back! 🎓', 'success');
-      } else {
-        initApp();
-        usageTracker.startSession();
-        loginTracker.startSession();
-      }
+      await initApp();
+      usageTracker.startSession();
+      loginTracker.startSession();
     } else {
       console.log('[ClassMemories] No user, showing login...');
+      sessionStorage.removeItem("friendshipIntroShownThisLogin");
       appShellBuilt = false;
       usageTracker.endSession();
       loginTracker.endSession();

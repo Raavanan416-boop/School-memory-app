@@ -5,6 +5,7 @@ import { auth, db, signInWithEmailAndPassword, signOut, onAuthStateChanged, send
   runTransaction } from './firebase-config.js';
 import { uploadMedia } from './services/cloudinary.js';
 import { presenceManager } from './presence.js';
+import { isDobPassword } from './utils.js';
 
 const OWNER_EMAIL = 'kaviraj@school.com';
 
@@ -15,6 +16,7 @@ class AuthManager {
     this.listeners = [];
     this._presenceInterval = null;
     this._isOwner = false;
+    this.lastEnteredPassword = sessionStorage.getItem("lastEnteredPassword") || null;
   }
 
   get isOwner() { return this._isOwner; }
@@ -152,6 +154,8 @@ class AuthManager {
   async login(email, password, isManual = false) {
     sessionStorage.setItem("loginSession", "true");
     sessionStorage.setItem("isFreshLogin", "true");
+    sessionStorage.setItem("lastEnteredPassword", password);
+    this.lastEnteredPassword = password;
     if (isManual) {
       sessionStorage.setItem("isExplicitLoginEvent", "true");
     } else {
@@ -168,6 +172,8 @@ class AuthManager {
       sessionStorage.removeItem("loginSession");
       sessionStorage.removeItem("isFreshLogin");
       sessionStorage.removeItem("isExplicitLoginEvent");
+      sessionStorage.removeItem("lastEnteredPassword");
+      this.lastEnteredPassword = null;
       throw err;
     }
   }
@@ -175,7 +181,10 @@ class AuthManager {
   async logout() {
     sessionStorage.removeItem("birthdayIntroShownThisLogin");
     sessionStorage.removeItem("playlistStartedThisLogin");
+    sessionStorage.removeItem("friendshipIntroShownThisLogin");
+    sessionStorage.removeItem("lastEnteredPassword");
     localStorage.removeItem("birthdayIntroLastShown");
+    this.lastEnteredPassword = null;
 
     await this._setOnline(false);
     this._stopHeartbeat();
@@ -190,9 +199,24 @@ class AuthManager {
 
   async changePassword(currentPassword, newPassword) {
     if (!this.currentUser) throw new Error('Not logged in');
+    
+    // DOB Password Prevention Rule
+    if (this.userData?.dateOfBirth && isDobPassword(newPassword, this.userData.dateOfBirth)) {
+      throw new Error('❌ Your password cannot be your Date of Birth. Please choose a stronger password.');
+    }
+
     const credential = EmailAuthProvider.credential(this.currentUser.email, currentPassword);
     await reauthenticateWithCredential(this.currentUser, credential);
     await updatePassword(this.currentUser, newPassword);
+
+    this.lastEnteredPassword = newPassword;
+    sessionStorage.setItem("lastEnteredPassword", newPassword);
+
+    await this.updateProfile({ 
+      passwordChanged: true,
+      forcePasswordChange: false,
+      mustChangePassword: false
+    });
   }
 
   async updateProfile(fields) {
@@ -209,15 +233,6 @@ class AuthManager {
     const url = res.url;
     await this.updateProfile({ profilePic: url });
     return url;
-  }
-
-  async changePassword(currentPassword, newPassword) {
-    if (!this.currentUser) throw new Error('Not logged in');
-    // Re-authenticate first
-    const credential = EmailAuthProvider.credential(this.currentUser.email, currentPassword);
-    await reauthenticateWithCredential(this.currentUser, credential);
-    // Now update
-    await updatePassword(this.currentUser, newPassword);
   }
 
   async updateSlamBook(data) {

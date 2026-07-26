@@ -1,4 +1,4 @@
-import { db, doc, getDoc, setDoc, serverTimestamp } from '../firebase-config.js';
+import { db, doc, getDoc, setDoc, serverTimestamp, collection, getDocs, query, limit } from '../firebase-config.js';
 
 class FriendshipIntroManager {
   constructor() {
@@ -275,14 +275,96 @@ class FriendshipIntroManager {
     }
   }
 
-  // ===== CINEMATIC INTRO CONTROLLER =====
-  playFriendshipIntro(isPreview = false) {
-    return new Promise((resolve) => {
-      this.isPlaying = true;
-      if (!isPreview) {
-        this.markIntroSeenInSession();
-      }
+  async getUniquePhotoPool() {
+    const defaultAssets = [
+      '/assets/KA8_6114.JPG',
+      '/assets/KA8_6118.JPG',
+      '/assets/school.jpg',
+      '/assets/KA8_6103.JPG',
+      '/assets/KA8_6101.JPG',
+      '/assets/campus-bg.png'
+    ];
 
+    const uniqueSet = new Set(defaultAssets);
+
+    try {
+      const postsSnap = await getDocs(query(collection(db, 'posts'), limit(40)));
+      postsSnap.forEach(d => {
+        const data = d.data();
+        if (data.imageUrl && typeof data.imageUrl === 'string' && data.imageUrl.startsWith('http')) {
+          uniqueSet.add(data.imageUrl);
+        }
+        if (Array.isArray(data.media)) {
+          data.media.forEach(m => {
+            const u = m.url || m.src;
+            if (u && typeof u === 'string' && u.startsWith('http')) uniqueSet.add(u);
+          });
+        }
+      });
+    } catch (e) {}
+
+    try {
+      const usersSnap = await getDocs(query(collection(db, 'users'), limit(40)));
+      usersSnap.forEach(d => {
+        const data = d.data();
+        if (data.profilePic && typeof data.profilePic === 'string' && data.profilePic.startsWith('http')) {
+          uniqueSet.add(data.profilePic);
+        }
+        if (data.coverPic && typeof data.coverPic === 'string' && data.coverPic.startsWith('http')) {
+          uniqueSet.add(data.coverPic);
+        }
+      });
+    } catch (e) {}
+
+    return Array.from(uniqueSet);
+  }
+
+  shuffleArray(array) {
+    const arr = [...array];
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  preloadImages(urls) {
+    return Promise.all(
+      urls.map(url => {
+        return new Promise((resolve) => {
+          const img = new Image();
+          img.onload = () => resolve({ url, success: true });
+          img.onerror = () => resolve({ url, success: false });
+          img.src = url;
+        });
+      })
+    );
+  }
+
+  // ===== CINEMATIC INTRO CONTROLLER =====
+  async playFriendshipIntro(isPreview = false) {
+    this.isPlaying = true;
+    if (!isPreview) {
+      this.markIntroSeenInSession();
+    }
+
+    const rawPool = await this.getUniquePhotoPool();
+    const shuffledPool = this.shuffleArray(rawPool);
+    const selectedPhotos = shuffledPool.slice(0, 25);
+
+    await this.preloadImages(selectedPhotos);
+
+    const gatePhotoUrl = selectedPhotos[0] || '/assets/school.jpg';
+
+    const captions = [
+      'Classroom Fun 📸', 'Lunch Breaks 🥪', 'Bench Partners ✏️',
+      'Sports Day 🏆', 'Annual Day 🎭', 'Last Bench 🎒',
+      'Exam Stress 📝', 'Teachers Day 🌸', 'School Bus 🚌',
+      'Best Memories ❤️', 'Group Photo 📷', 'Golden Days ✨',
+      'Forever Friends 🤝', 'Farewell 🎓', 'Unforgettable Days 🎓'
+    ];
+
+    return new Promise((resolve) => {
       const overlay = document.createElement('div');
       overlay.id = 'friendship-intro-overlay';
       this.activeOverlay = overlay;
@@ -301,9 +383,12 @@ class FriendshipIntroManager {
             <h2 class="fi-text-s1">"Some friendships<br/>never grow old..."</h2>
           </div>
 
-          <!-- Screen 2: School Gate Sunrise -->
+          <!-- Screen 2: School Gate Sunrise with Revealed Class Photo -->
           <div class="fi-screen" id="fi-s2">
             <div class="fi-gate-wrapper" id="fi-gate">
+              <div class="fi-gate-photo-container">
+                <img src="${gatePhotoUrl}" id="fi-gate-photo" class="fi-gate-photo" alt="Class Memory"/>
+              </div>
               <div class="fi-gate-door fi-gate-left">
                 <div class="fi-gate-bar"></div>
                 <div class="fi-gate-emblem">🏫</div>
@@ -328,22 +413,33 @@ class FriendshipIntroManager {
             </div>
           </div>
 
-          <!-- Screen 4: Polaroids & Paper Airplanes -->
+          <!-- Screen 4: Flying Polaroids Memory Wall -->
           <div class="fi-screen" id="fi-s4">
             <div class="fi-paper-plane">✈️</div>
-            <div class="fi-polaroids-grid" id="fi-polaroids">
-              <div class="fi-polaroid fi-polaroid-1">
-                <img src="/assets/KA8_6114.JPG" alt="Memory 1" onError="console.error('Image failed: KA8_6114.JPG. Reason: 404/Invalid path:', this.src); this.src='/assets/class-memories-logo.png';"/>
-                <div class="fi-polaroid-caption">Classroom Fun 📸</div>
-              </div>
-              <div class="fi-polaroid fi-polaroid-2">
-                <img src="/assets/KA8_6118.JPG" alt="Memory 2" onError="console.error('Image failed: KA8_6118.JPG. Reason: 404/Invalid path:', this.src); this.src='/assets/class-memories-logo.png';"/>
-                <div class="fi-polaroid-caption">Lunch Breaks 🥪</div>
-              </div>
-              <div class="fi-polaroid fi-polaroid-3">
-                <img src="/assets/school.jpg" alt="Memory 3" onError="console.error('Image failed: school.jpg. Reason: 404/Invalid path:', this.src); this.src='/assets/class-memories-logo.png';"/>
-                <div class="fi-polaroid-caption">Bench Partners ✏️</div>
-              </div>
+            <div class="fi-memory-wall" id="fi-memory-wall">
+              ${selectedPhotos.map((imgUrl, idx) => {
+                const caption = captions[idx % captions.length];
+                const rot = Math.floor(Math.random() * 24) - 12;
+                const scale = (Math.random() * 0.3 + 0.75).toFixed(2);
+                const delay = (idx * 0.08).toFixed(2);
+                const floatDelay = (Math.random() * 2).toFixed(2);
+                const floatDuration = (Math.random() * 2.5 + 3.5).toFixed(2);
+                const zIndex = Math.floor(Math.random() * 20) + 1;
+
+                return `
+                  <div class="fi-wall-polaroid" style="
+                    --base-rot: ${rot}deg;
+                    --base-scale: ${scale};
+                    z-index: ${zIndex};
+                    transition-delay: ${delay}s;
+                    animation: fiPolaroidFloat ${floatDuration}s ease-in-out infinite;
+                    animation-delay: ${floatDelay}s;
+                  ">
+                    <img src="${imgUrl}" alt="Memory" onError="this.src='/assets/class-memories-logo.png';"/>
+                    <div class="fi-wall-polaroid-caption">${caption}</div>
+                  </div>
+                `;
+              }).join('')}
             </div>
           </div>
 
@@ -351,7 +447,7 @@ class FriendshipIntroManager {
           <div class="fi-screen" id="fi-s5">
             <div class="fi-scrapbook-stage">
               <div class="fi-balloons-container" id="fi-balloons"></div>
-              <div class="fi-silhouette" style="background-image: url('/assets/KA8_6103.JPG');"></div>
+              <div class="fi-silhouette" style="background-image: url('${selectedPhotos[1] || '/assets/KA8_6103.JPG'}');"></div>
               <p class="font-caveat text-2xl text-amber-300 font-bold mt-4">Unforgettable Days 🎓</p>
             </div>
           </div>
@@ -436,17 +532,7 @@ class FriendshipIntroManager {
         s3.classList.remove('active');
         s3.classList.add('exit');
         s4.classList.add('active');
-        overlay.querySelector('#fi-polaroids')?.classList.add('show');
-
-        const imgs = overlay.querySelectorAll('#fi-polaroids img');
-        imgs.forEach((img, index) => {
-          console.log(`Image Element ${index + 1}:`, img);
-          console.log(`Current src:`, img.src);
-          console.log(`Natural Width:`, img.naturalWidth);
-          console.log(`Natural Height:`, img.naturalHeight);
-          console.log(`Loaded:`, img.complete && img.naturalWidth > 0);
-          console.log(`Complete:`, img.complete);
-        });
+        overlay.querySelector('#fi-memory-wall')?.classList.add('show');
       }, 10500);
 
       setTimeout(() => {

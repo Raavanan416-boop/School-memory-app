@@ -633,11 +633,20 @@ export async function renderUpload(container) {
         return { id: cb.value, name: item.dataset.name };
       });
 
+      const displayName = authManager.userData?.displayName || authManager.userData?.fullName || authManager.currentUser?.displayName || '';
+      const profilePhoto = authManager.userData?.profilePic || authManager.currentUser?.photoURL || '';
+      const nowTs = Timestamp.now();
+
       // Construct payload
       const postData = {
+        uid: uid,
         authorId: uid,
-        authorName: authManager.userData?.fullName || 'Unknown',
-        authorPhoto: authManager.userData?.profilePic || '',
+        displayName: displayName,
+        authorName: displayName,
+        profilePhoto: profilePhoto,
+        authorPhoto: profilePhoto,
+        timestamp: nowTs,
+        createdAt: nowTs,
         caption,
         location,
         privacy,
@@ -651,8 +660,7 @@ export async function renderUpload(container) {
         taggedFriends: [], // Accepted tags go here
         mentions, // Instant mentions
         likes: [],
-        commentCount: 0,
-        createdAt: Timestamp.now()
+        commentCount: 0
       };
 
       // Add single `imageUrl` and `mediaType` for backwards compatibility with parts of the app not updated yet

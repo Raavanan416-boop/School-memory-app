@@ -2236,7 +2236,7 @@ function showBirthdayHistoryModal(userId) {
         modal.close();
         try {
           const birthdayModule = await import('./birthday.js');
-          const userName = document.querySelector('[data-user-name]')?.textContent || 'User';
+          const userName = document.querySelector('[data-user-name]')?.textContent || userCache.getUser(uid).displayName || '';
           if (birthdayModule.showViewWishesModal) {
             birthdayModule.showViewWishesModal(uid, userName, true, year);
           } else {

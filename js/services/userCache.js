@@ -1,4 +1,4 @@
-import { db, collection, onSnapshot } from '../firebase-config.js';
+import { db, collection, onSnapshot, doc, getDoc } from '../firebase-config.js';
 import { sanitizeHTML } from '../utils.js';
 
 class UserCacheManager {
@@ -40,25 +40,48 @@ class UserCacheManager {
     });
   }
 
+  async fetchUser(uid) {
+    if (!uid) return null;
+    if (this.users.has(uid)) return this.users.get(uid);
+    try {
+      const userDoc = await getDoc(doc(db, 'users', uid));
+      if (userDoc.exists()) {
+        const data = userDoc.data();
+        data.id = uid;
+        this.users.set(uid, data);
+        this.updateDOM(uid, data);
+        return data;
+      }
+    } catch (e) {
+      console.error('[UserCache] Error fetching user by uid:', uid, e);
+    }
+    return null;
+  }
+
   getUser(uid) {
+    if (!uid) return { displayName: '', fullName: '', photoURL: '', profilePic: '', username: '', nickname: '', rollNumber: '' };
     const user = this.users.get(uid);
     if (user) {
+      const displayName = user.displayName || user.fullName || user.username || user.nickname || '';
       return {
         ...user,
-        displayName: user.displayName || user.fullName || user.username || user.nickname || 'User',
+        displayName: displayName,
+        fullName: user.fullName || displayName,
         username: user.username || user.nickname || '',
         photoURL: (user.photoURL && user.photoURL !== 'undefined') ? user.photoURL : ((user.profilePic && user.profilePic !== 'undefined') ? user.profilePic : ''),
         profilePic: (user.photoURL && user.photoURL !== 'undefined') ? user.photoURL : ((user.profilePic && user.profilePic !== 'undefined') ? user.profilePic : ''),
         rollNumber: user.rollNumber || ''
       };
     }
+    // Fetch asynchronously from Users collection if not cached
+    this.fetchUser(uid);
     return { 
-      displayName: 'User',
-      fullName: 'User', 
+      displayName: '',
+      fullName: '', 
       photoURL: '',
       profilePic: '', 
-      username: 'Anonymous',
-      nickname: 'Anonymous',
+      username: '',
+      nickname: '',
       points: 0,
       rollNumber: 'N/A'
     };
@@ -68,7 +91,7 @@ class UserCacheManager {
     return Array.from(this.users.values()).map(u => ({ 
       ...u,
       id: u.id,
-      displayName: u.displayName || u.fullName || u.username || u.nickname || 'User',
+      displayName: u.displayName || u.fullName || u.username || u.nickname || '',
       username: u.username || u.nickname || '',
       photoURL: (u.photoURL && u.photoURL !== 'undefined') ? u.photoURL : ((u.profilePic && u.profilePic !== 'undefined') ? u.profilePic : ''),
       profilePic: (u.photoURL && u.photoURL !== 'undefined') ? u.photoURL : ((u.profilePic && u.profilePic !== 'undefined') ? u.profilePic : ''),
@@ -77,7 +100,8 @@ class UserCacheManager {
   }
 
   updateDOM(uid, user) {
-    const name = user.displayName || user.fullName || user.username || user.nickname || 'User';
+    const name = user.displayName || user.fullName || user.username || user.nickname || '';
+    if (!name) return;
     const safeName = sanitizeHTML(name);
     let safePic = user.photoURL ? user.photoURL : (user.profilePic ? user.profilePic : '');
     if (safePic) safePic = safePic.replace(/&amp;/g, '&');

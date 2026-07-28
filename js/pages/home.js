@@ -474,10 +474,16 @@ async function loadMorePosts(container) {
 }
 
 export function createPostCard(post) {
-  const user = userCache.getUser(post.authorId);
-  const userName = user.fullName || post.authorName || 'Classmate';
-  const avatar = user.profilePic || post.authorPhoto;
-  const time = post.createdAt?.toDate ? timeAgo(post.createdAt.toDate()) : '';
+  const authorUid = post.uid || post.authorId;
+  const user = userCache.getUser(authorUid);
+  let userName = post.displayName || user.displayName || user.fullName || post.authorName || '';
+
+  if (!userName && authorUid) {
+    userCache.fetchUser(authorUid);
+  }
+
+  const avatar = user.profilePic || post.profilePhoto || post.authorPhoto;
+  const time = (post.timestamp?.toDate ? timeAgo(post.timestamp.toDate()) : (post.createdAt?.toDate ? timeAgo(post.createdAt.toDate()) : ''));
   const likes = post.likes?.length || 0;
   const commentCount = post.commentCount || 0;
   const liked = post.likes?.includes(authManager.currentUser?.uid);

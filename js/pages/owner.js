@@ -1911,19 +1911,33 @@ async function setupFriendshipIntroControl(container) {
     }
 
     saveBtn.addEventListener('click', async () => {
+      if (saveBtn.disabled) return;
       if (!dateInput.value) {
         showToast('Please select date', 'error');
         return;
       }
 
+      saveBtn.disabled = true;
+      let saveSuccess = false;
+
       try {
         await friendshipIntroManager.saveSettings(toggle.checked, dateInput.value);
         friendshipIntroManager.resetSessionSeen();
         showToast('Friendship Intro Settings Saved!', 'success');
-        await friendshipIntroManager.checkAndRunIntro();
+        saveSuccess = true;
       } catch(e) {
         console.error(e);
         showToast('Failed to save intro settings', 'error');
+      } finally {
+        saveBtn.disabled = false;
+      }
+
+      if (saveSuccess) {
+        try {
+          await friendshipIntroManager.checkAndRunIntro();
+        } catch(err) {
+          console.error('[FriendshipIntro] Error in post-save checkAndRunIntro:', err);
+        }
       }
     });
 

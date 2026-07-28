@@ -13,6 +13,7 @@ import { createNotification, notificationManager } from '../notifications.js';
 let unsubChats = null;
 let unsubMessages = null;
 let unsubTyping = null;
+let unsubGroupChat = null;
 let currentChatId = null;
 let chatViewOpen = false;
 
@@ -20,7 +21,8 @@ export function destroyChat() {
   if (unsubChats) unsubChats();
   if (unsubMessages) unsubMessages();
   if (unsubTyping) unsubTyping();
-  unsubChats = null; unsubMessages = null; unsubTyping = null;
+  if (unsubGroupChat) unsubGroupChat();
+  unsubChats = null; unsubMessages = null; unsubTyping = null; unsubGroupChat = null;
   currentChatId = null; chatViewOpen = false;
   // Hide the chat view overlay
   const cv = document.getElementById('chat-view');
@@ -252,6 +254,29 @@ function loadChatList(container) {
     </div>`;
 
   try {
+    if (unsubGroupChat) { unsubGroupChat(); unsubGroupChat = null; }
+    unsubGroupChat = onSnapshot(doc(db, 'chats', 'core37'), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        const nameEl = container.querySelector('#core37-name');
+        const avatarEl = container.querySelector('#core37-avatar');
+        const msgEl = container.querySelector('#core37-last-msg');
+        if (nameEl && data.name) nameEl.textContent = data.name;
+        if (msgEl && data.lastMessage) msgEl.textContent = data.lastMessage;
+        if (avatarEl) {
+          if (data.profilePic) {
+            avatarEl.innerHTML = `<img src="${data.profilePic}" class="w-full h-full object-cover rounded-full" alt="Group"/>`;
+            avatarEl.classList.remove('avatar-placeholder', 'text-sm');
+            avatarEl.classList.add('p-0');
+          } else {
+            avatarEl.innerHTML = (data.name || 'Core 37').slice(0, 2);
+            avatarEl.classList.add('avatar-placeholder', 'text-sm');
+            avatarEl.classList.remove('p-0');
+          }
+        }
+      }
+    }, (err) => console.error('[GroupChatSync] error:', err));
+
     // Simple query WITHOUT orderBy to avoid composite index requirement
     // We'll sort client-side after receiving data
     const q = query(
@@ -880,11 +905,23 @@ function openChat(container, chatId, name, otherUid = null, isGroup = false, fro
   
   setupMessageListener();
 
-  // Typing indicator + Pinned message bar - watch the chat document
+  // Typing indicator + Pinned message bar + Group Name Sync - watch the chat document
   unsubTyping = onSnapshot(doc(db, 'chats', chatId), (snap) => {
     const data = snap.data();
     if (!data) return;
-    
+
+    // Live sync group name & avatar in open chat header
+    if (isGroup && data.name) {
+      const headerNameEl = chatView.querySelector('.group-name-header');
+      if (headerNameEl && headerNameEl.textContent !== data.name) {
+        headerNameEl.textContent = data.name;
+      }
+      const listNameEl = document.querySelector('#core37-name');
+      if (listNameEl && listNameEl.textContent !== data.name) {
+        listNameEl.textContent = data.name;
+      }
+    }
+
     // Typing indicator
     const typingUsers = presenceManager.getTypingUsers(data);
     const indicator = chatView.querySelector('#typing-indicator') || document.querySelector('#typing-indicator');

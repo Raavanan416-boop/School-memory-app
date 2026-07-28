@@ -1,13 +1,63 @@
-import { db, doc, getDoc, setDoc, serverTimestamp, collection, getDocs, query, limit } from '../firebase-config.js';
+import { db, doc, getDoc, setDoc, serverTimestamp } from '../firebase-config.js';
+
+export const FRIENDSHIP_INTRO_MUSIC = '/assets/96slowbgm.mp3';
+
+export const friendshipImages = [
+  '/assets/school.jpg',
+  '/assets/KA8_6114.JPG',
+  '/assets/KA8_6118.JPG',
+  '/assets/KA8_5940.JPG',
+  '/assets/KA8_6103.JPG',
+  '/assets/KA8_6092.JPG',
+  '/assets/KA8_5966.JPG',
+  '/assets/KA8_5988.JPG',
+  '/assets/KA8_6026.JPG',
+  '/assets/school.jpg',
+  '/assets/KA8_6043.JPG',
+  '/assets/KA8_6048.JPG'
+];
+
+const FRIENDSHIP_CAPTIONS = [
+  'Classroom Fun 📸',
+  'Lunch Breaks 🥪',
+  'Bench Partners ✏️',
+  'Golden Days 🎓',
+  'Sports Day 🏆',
+  'Assembly Time 🔔',
+  'Farewell 💖',
+  'Best Friends 🌟',
+  'School Gate 🏫',
+  'Magic Memories ✨',
+  'Laughter & Smiles 😁',
+  'Forever Together ❤️'
+];
 
 class FriendshipIntroManager {
   constructor() {
     this.settingsRef = doc(db, 'systemSettings', 'friendshipIntro');
-    this.audioCtx = null;
-    this.bgMusicTimer = null;
+    this.customAudio = null;
     this.isPlaying = false;
     this.activeOverlay = null;
     this.cachedSettings = { enabled: false, selectedDate: '2026-08-02' };
+  }
+
+  preloadImages(images) {
+    return Promise.all(images.map(src => {
+      return new Promise(resolve => {
+        const img = new Image();
+        img.loading = 'eager';
+        img.decoding = 'sync';
+        img.onload = () => {
+          if (img.decode) {
+            img.decode().then(() => resolve(src)).catch(() => resolve(src));
+          } else {
+            resolve(src);
+          }
+        };
+        img.onerror = () => resolve(src);
+        img.src = src;
+      });
+    }));
   }
 
   // Convert any date value (String, Date, Timestamp) to strict YYYY-MM-DD format
@@ -159,212 +209,75 @@ class FriendshipIntroManager {
     return shouldShowIntro;
   }
 
-  // ===== AUDIO SYNTHESIS & SOUND EFFECTS =====
-  initAudioContext() {
-    if (!this.audioCtx) {
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      if (AudioContextClass) {
-        this.audioCtx = new AudioContextClass();
-      }
-    }
-    if (this.audioCtx && this.audioCtx.state === 'suspended') {
-      this.audioCtx.resume().catch(() => {});
-    }
-  }
-
-  playSchoolBell() {
+  // ===== AUDIO CONTROL =====
+  stopAllAppAudio() {
     try {
-      const bellAudio = new Audio('/schoolbell.mp3');
-      bellAudio.volume = 0.6;
-      bellAudio.play().catch(() => {
-        this.initAudioContext();
-        if (!this.audioCtx) return;
-        const now = this.audioCtx.currentTime;
-        [830, 1245, 1660].forEach(freq => {
-          const osc = this.audioCtx.createOscillator();
-          const gain = this.audioCtx.createGain();
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime(freq, now);
-          gain.gain.setValueAtTime(0.2, now);
-          gain.gain.exponentialRampToValueAtTime(0.001, now + 1.8);
-          osc.connect(gain);
-          gain.connect(this.audioCtx.destination);
-          osc.start(now);
-          osc.stop(now + 1.9);
-        });
+      document.querySelectorAll('audio').forEach(a => {
+        try {
+          a.pause();
+          a.currentTime = 0;
+        } catch (e) {}
       });
     } catch (e) {}
+
+    if (typeof window !== 'undefined' && window.bgAudio) {
+      try {
+        window.bgAudio.pause();
+        window.bgAudio.currentTime = 0;
+      } catch (e) {}
+    }
   }
 
-  playBirdChirp() {
-    try {
-      this.initAudioContext();
-      if (!this.audioCtx) return;
-      const now = this.audioCtx.currentTime;
-      [0, 0.25, 0.5].forEach((delay, idx) => {
-        const osc = this.audioCtx.createOscillator();
-        const gain = this.audioCtx.createGain();
-        osc.type = 'sine';
-        const startFreq = 2200 + idx * 300;
-        osc.frequency.setValueAtTime(startFreq, now + delay);
-        osc.frequency.exponentialRampToValueAtTime(3200, now + delay + 0.08);
-        gain.gain.setValueAtTime(0.06, now + delay);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.12);
-        osc.connect(gain);
-        gain.connect(this.audioCtx.destination);
-        osc.start(now + delay);
-        osc.stop(now + delay + 0.13);
+  playCustomMusic() {
+    this.stopIntroMusic();
+    const primaryPath = FRIENDSHIP_INTRO_MUSIC || '/assets/96slowbgm.mp3';
+    const candidatePaths = Array.from(new Set([
+      primaryPath,
+      '/assets/96slowbgm.mp3',
+      '/audio/96slowbgm.mp3',
+      '/96slowbgm.mp3',
+      '/audio/friendship-intro.mp3',
+      '/assets/friendship-intro.mp3'
+    ].filter(Boolean)));
+
+    const tryPlayIndex = (idx) => {
+      if (idx >= candidatePaths.length) return;
+      const src = candidatePaths[idx];
+      const audio = new Audio(src);
+      audio.volume = 1.0;
+
+      audio.play().then(() => {
+        this.customAudio = audio;
+      }).catch((err) => {
+        console.warn(`[FriendshipIntro] Audio candidate failed (${src}), trying next candidate...`, err);
+        tryPlayIndex(idx + 1);
       });
-    } catch (e) {}
-  }
+    };
 
-  startEmotionalMusic() {
-    try {
-      this.initAudioContext();
-      if (!this.audioCtx) return;
-
-      const notes = [
-        [261.63, 329.63, 392.00],
-        [196.00, 246.94, 293.66],
-        [220.00, 261.63, 329.63],
-        [174.61, 220.00, 261.63]
-      ];
-      let step = 0;
-
-      const playChord = () => {
-        if (!this.isPlaying || !this.audioCtx) return;
-        const currentChord = notes[step % notes.length];
-        const now = this.audioCtx.currentTime;
-
-        currentChord.forEach((freq, i) => {
-          const osc = this.audioCtx.createOscillator();
-          const gain = this.audioCtx.createGain();
-          osc.type = 'triangle';
-          osc.frequency.setValueAtTime(freq, now + i * 0.15);
-
-          gain.gain.setValueAtTime(0, now + i * 0.15);
-          gain.gain.linearRampToValueAtTime(0.05, now + i * 0.15 + 0.4);
-          gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.15 + 2.2);
-
-          osc.connect(gain);
-          gain.connect(this.audioCtx.destination);
-
-          osc.start(now + i * 0.15);
-          osc.stop(now + i * 0.15 + 2.3);
-        });
-
-        step++;
-      };
-
-      playChord();
-      this.bgMusicTimer = setInterval(playChord, 2200);
-    } catch (e) {}
+    tryPlayIndex(0);
   }
 
   stopIntroMusic() {
     this.isPlaying = false;
-    if (this.bgMusicTimer) {
-      clearInterval(this.bgMusicTimer);
-      this.bgMusicTimer = null;
-    }
-    if (this.audioCtx) {
+    if (this.customAudio) {
       try {
-        this.audioCtx.close().catch(() => {});
+        this.customAudio.pause();
+        this.customAudio.currentTime = 0;
       } catch (e) {}
-      this.audioCtx = null;
+      this.customAudio = null;
     }
-  }
-
-  async getUniquePhotoPool() {
-    const defaultAssets = [
-      '/assets/KA8_6114.JPG',
-      '/assets/KA8_6118.JPG',
-      '/assets/school.jpg',
-      '/assets/KA8_6103.JPG',
-      '/assets/KA8_6101.JPG',
-      '/assets/campus-bg.png'
-    ];
-
-    const uniqueSet = new Set(defaultAssets);
-
-    try {
-      const postsSnap = await getDocs(query(collection(db, 'posts'), limit(40)));
-      postsSnap.forEach(d => {
-        const data = d.data();
-        if (data.imageUrl && typeof data.imageUrl === 'string' && data.imageUrl.startsWith('http')) {
-          uniqueSet.add(data.imageUrl);
-        }
-        if (Array.isArray(data.media)) {
-          data.media.forEach(m => {
-            const u = m.url || m.src;
-            if (u && typeof u === 'string' && u.startsWith('http')) uniqueSet.add(u);
-          });
-        }
-      });
-    } catch (e) {}
-
-    try {
-      const usersSnap = await getDocs(query(collection(db, 'users'), limit(40)));
-      usersSnap.forEach(d => {
-        const data = d.data();
-        if (data.profilePic && typeof data.profilePic === 'string' && data.profilePic.startsWith('http')) {
-          uniqueSet.add(data.profilePic);
-        }
-        if (data.coverPic && typeof data.coverPic === 'string' && data.coverPic.startsWith('http')) {
-          uniqueSet.add(data.coverPic);
-        }
-      });
-    } catch (e) {}
-
-    return Array.from(uniqueSet);
-  }
-
-  shuffleArray(array) {
-    const arr = [...array];
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    return arr;
-  }
-
-  preloadImages(urls) {
-    return Promise.all(
-      urls.map(url => {
-        return new Promise((resolve) => {
-          const img = new Image();
-          img.onload = () => resolve({ url, success: true });
-          img.onerror = () => resolve({ url, success: false });
-          img.src = url;
-        });
-      })
-    );
   }
 
   // ===== CINEMATIC INTRO CONTROLLER =====
   async playFriendshipIntro(isPreview = false) {
-    this.isPlaying = true;
-    if (!isPreview) {
-      this.markIntroSeenInSession();
-    }
-
-    const rawPool = await this.getUniquePhotoPool();
-    const shuffledPool = this.shuffleArray(rawPool);
-    const selectedPhotos = shuffledPool.slice(0, 25);
-
-    await this.preloadImages(selectedPhotos);
-
-    const gatePhotoUrl = selectedPhotos[0] || '/assets/school.jpg';
-
-    const captions = [
-      'Classroom Fun 📸', 'Lunch Breaks 🥪', 'Bench Partners ✏️',
-      'Sports Day 🏆', 'Annual Day 🎭', 'Last Bench 🎒',
-      'Exam Stress 📝', 'Teachers Day 🌸', 'School Bus 🚌',
-      'Best Memories ❤️', 'Group Photo 📷', 'Golden Days ✨',
-      'Forever Friends 🤝', 'Farewell 🎓', 'Unforgettable Days 🎓'
-    ];
+    await this.preloadImages(friendshipImages);
 
     return new Promise((resolve) => {
+      this.isPlaying = true;
+      if (!isPreview) {
+        this.markIntroSeenInSession();
+      }
+
       const overlay = document.createElement('div');
       overlay.id = 'friendship-intro-overlay';
       this.activeOverlay = overlay;
@@ -383,11 +296,11 @@ class FriendshipIntroManager {
             <h2 class="fi-text-s1">"Some friendships<br/>never grow old..."</h2>
           </div>
 
-          <!-- Screen 2: School Gate Sunrise with Revealed Class Photo -->
+          <!-- Screen 2: School Gate Sunrise & Memory Collage -->
           <div class="fi-screen" id="fi-s2">
             <div class="fi-gate-wrapper" id="fi-gate">
-              <div class="fi-gate-photo-container">
-                <img src="${gatePhotoUrl}" id="fi-gate-photo" class="fi-gate-photo" alt="Class Memory"/>
+              <div class="fi-gate-backdrop" id="fi-gate-backdrop">
+                <div class="fi-collage-grid" id="fi-gate-collage"></div>
               </div>
               <div class="fi-gate-door fi-gate-left">
                 <div class="fi-gate-bar"></div>
@@ -413,41 +326,23 @@ class FriendshipIntroManager {
             </div>
           </div>
 
-          <!-- Screen 4: Flying Polaroids Memory Wall -->
+          <!-- Screen 4: Masonry Polaroids & Paper Airplanes -->
           <div class="fi-screen" id="fi-s4">
             <div class="fi-paper-plane">✈️</div>
-            <div class="fi-memory-wall" id="fi-memory-wall">
-              ${selectedPhotos.map((imgUrl, idx) => {
-                const caption = captions[idx % captions.length];
-                const rot = Math.floor(Math.random() * 24) - 12;
-                const scale = (Math.random() * 0.3 + 0.75).toFixed(2);
-                const delay = (idx * 0.08).toFixed(2);
-                const floatDelay = (Math.random() * 2).toFixed(2);
-                const floatDuration = (Math.random() * 2.5 + 3.5).toFixed(2);
-                const zIndex = Math.floor(Math.random() * 20) + 1;
-
-                return `
-                  <div class="fi-wall-polaroid" style="
-                    --base-rot: ${rot}deg;
-                    --base-scale: ${scale};
-                    z-index: ${zIndex};
-                    transition-delay: ${delay}s;
-                    animation: fiPolaroidFloat ${floatDuration}s ease-in-out infinite;
-                    animation-delay: ${floatDelay}s;
-                  ">
-                    <img src="${imgUrl}" alt="Memory" onError="this.src='/assets/class-memories-logo.png';"/>
-                    <div class="fi-wall-polaroid-caption">${caption}</div>
-                  </div>
-                `;
-              }).join('')}
-            </div>
+            <div class="fi-polaroids-grid" id="fi-polaroids"></div>
           </div>
 
-          <!-- Screen 5: Group Silhouettes & Balloons -->
+          <!-- Screen 5: Premium Photo Frame & Balloons -->
           <div class="fi-screen" id="fi-s5">
             <div class="fi-scrapbook-stage">
               <div class="fi-balloons-container" id="fi-balloons"></div>
-              <div class="fi-silhouette" style="background-image: url('${selectedPhotos[1] || '/assets/KA8_6103.JPG'}');"></div>
+              <div class="fi-polaroid-frame-wrapper" id="fi-unforgettable-frame">
+                <div class="fi-premium-polaroid-frame">
+                  <div class="fi-frame-photo-container">
+                    <img src="${friendshipImages[0] || '/assets/school.jpg'}" class="fi-frame-photo" loading="eager" decoding="sync" alt="Unforgettable Days" onError="this.src='/assets/class-memories-logo.png';"/>
+                  </div>
+                </div>
+              </div>
               <p class="font-caveat text-2xl text-amber-300 font-bold mt-4">Unforgettable Days 🎓</p>
             </div>
           </div>
@@ -470,11 +365,40 @@ class FriendshipIntroManager {
 
       document.body.appendChild(overlay);
 
+      // Render Gate Memory Collage (9 images)
+      const gateCollage = overlay.querySelector('#fi-gate-collage');
+      if (gateCollage) {
+        const collageImgs = friendshipImages.slice(0, 9);
+        gateCollage.innerHTML = collageImgs.map((src, i) => `
+          <img src="${src}" loading="eager" decoding="sync" style="object-fit: cover; image-rendering: auto;" alt="Memories ${i+1}" onError="this.src='/assets/class-memories-logo.png';"/>
+        `).join('');
+      }
+
+      // Render Non-overlapping Polaroid Grid (9 images)
+      const polaroidGrid = overlay.querySelector('#fi-polaroids');
+      if (polaroidGrid) {
+        const polaroidImgs = friendshipImages.slice(0, 9);
+        const rotations = [-6, 5, -4, 7, -3, 6, -5, 4, -7];
+        polaroidGrid.innerHTML = polaroidImgs.map((src, i) => {
+          const rot = rotations[i % rotations.length];
+          const delay = (i * 0.15).toFixed(2);
+          const animDelay = (Math.random() * 1.5).toFixed(2);
+          const caption = FRIENDSHIP_CAPTIONS[i % FRIENDSHIP_CAPTIONS.length];
+          return `
+            <div class="fi-polaroid" style="--rot: ${rot}deg; transition-delay: ${delay}s; animation-delay: ${animDelay}s;">
+              <img src="${src}" loading="eager" decoding="sync" style="object-fit: cover; image-rendering: auto;" alt="${caption}" onError="this.src='/assets/class-memories-logo.png';"/>
+              <div class="fi-polaroid-caption">${caption}</div>
+            </div>
+          `;
+        }).join('');
+      }
+
       const particlesContainer = overlay.querySelector('#fi-particles');
       this.spawnParticles(particlesContainer, 20);
 
-      this.playSchoolBell();
-      this.startEmotionalMusic();
+      // Stop every other audio & play custom intro music ONLY
+      this.stopAllAppAudio();
+      this.playCustomMusic();
 
       let isFinished = false;
       const finishIntro = () => {
@@ -512,7 +436,6 @@ class FriendshipIntroManager {
         s1.classList.add('exit');
         s2.classList.add('active');
         overlay.querySelector('#fi-bg-sunrise').style.opacity = '1';
-        this.playBirdChirp();
         setTimeout(() => {
           overlay.querySelector('#fi-gate').classList.add('open');
         }, 300);
@@ -525,15 +448,25 @@ class FriendshipIntroManager {
         s3.classList.add('active');
         setTimeout(() => overlay.querySelector('#fi-chalk-1')?.classList.add('show'), 400);
         setTimeout(() => overlay.querySelector('#fi-chalk-2')?.classList.add('show'), 1400);
-      }, 6500);
+      }, 9700);
 
       setTimeout(() => {
         if (isFinished) return;
         s3.classList.remove('active');
         s3.classList.add('exit');
         s4.classList.add('active');
-        overlay.querySelector('#fi-memory-wall')?.classList.add('show');
-      }, 10500);
+        overlay.querySelector('#fi-polaroids')?.classList.add('show');
+
+        const imgs = overlay.querySelectorAll('#fi-polaroids img');
+        imgs.forEach((img, index) => {
+          console.log(`Image Element ${index + 1}:`, img);
+          console.log(`Current src:`, img.src);
+          console.log(`Natural Width:`, img.naturalWidth);
+          console.log(`Natural Height:`, img.naturalHeight);
+          console.log(`Loaded:`, img.complete && img.naturalWidth > 0);
+          console.log(`Complete:`, img.complete);
+        });
+      }, 13700);
 
       setTimeout(() => {
         if (isFinished) return;
@@ -543,14 +476,14 @@ class FriendshipIntroManager {
         const balloonContainer = overlay.querySelector('#fi-balloons');
         this.spawnBalloons(balloonContainer, 8);
         this.startConfetti(overlay.querySelector('#fi-confetti-canvas'));
-      }, 14500);
+      }, 17700);
 
       setTimeout(() => {
         if (isFinished) return;
         s5.classList.remove('active');
         s5.classList.add('exit');
         s6.classList.add('active');
-      }, 18500);
+      }, 21700);
     });
   }
 

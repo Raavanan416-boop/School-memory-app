@@ -2460,51 +2460,8 @@ async function init() {
     }
   }
 
-  function stopAllAudioSources() {
-    stopPlaylist();
-
-    if (typeof _birthdayAudioEngine !== 'undefined' && _birthdayAudioEngine) {
-      try {
-        _birthdayAudioEngine.stop();
-        _birthdayAudioEngine = null;
-      } catch (e) {}
-    }
-
-    if (typeof friendshipIntroManager !== 'undefined' && friendshipIntroManager) {
-      try {
-        friendshipIntroManager.stopIntroMusic();
-      } catch (e) {}
-    }
-
-    document.querySelectorAll('audio').forEach(a => {
-      try {
-        a.pause();
-        a.currentTime = 0;
-        a.src = '';
-      } catch (e) {}
-    });
-
-    if (typeof MusicPlayer !== 'undefined' && MusicPlayer.bgAudio) {
-      try {
-        MusicPlayer.bgAudio.pause();
-        MusicPlayer.bgAudio.currentTime = 0;
-        MusicPlayer.bgAudio.src = '';
-      } catch (e) {}
-    }
-  }
-
   function startPlaylist() {
-    if (!authManager.currentUser) return;
-    const lastPass = authManager.lastEnteredPassword || sessionStorage.getItem("lastEnteredPassword");
-    const dob = authManager.userData?.dateOfBirth;
-    if (dob && isDobPassword(lastPass, dob)) return;
-    if (authManager.userData?.passwordChanged !== true) return;
-    if (document.querySelector('#force-password-form')) return;
-
     if (typeof MusicPlayer !== 'undefined' && MusicPlayer.start) {
-      if (MusicPlayer.bgAudio && !MusicPlayer.bgAudio.paused && MusicPlayer.bgAudio.src) {
-        return;
-      }
       MusicPlayer.isStopped = false;
       MusicPlayer.hasStarted = false;
       MusicPlayer.currentIndex = 0;
@@ -2622,21 +2579,6 @@ async function init() {
       console.log('[ClassMemories] User logged in:', user.email);
       hideLogin();
       
-      const lastPass = authManager.lastEnteredPassword || sessionStorage.getItem("lastEnteredPassword");
-      const dob = authManager.userData?.dateOfBirth;
-      const isDob = isDobPassword(lastPass, dob);
-      const isDefaultFlag = authManager.userData?.passwordChanged !== true || authManager.userData?.mustChangePassword === true || authManager.userData?.forcePasswordChange === true;
-      const isDobOrDefault = Boolean(authManager.userData && (isDob || isDefaultFlag));
-
-      if (isDobOrDefault) {
-        // Stop every audio source — 100% silent while security update screen is open
-        stopAllAudioSources();
-
-        // Open forced password change modal immediately BEFORE initializing app shell, intros, or music!
-        await showForcedPasswordModal();
-        return;
-      }
-
       const initApp = async () => {
         if (!appShellBuilt) {
           buildAppShell();
@@ -2683,6 +2625,16 @@ async function init() {
       await initApp();
       usageTracker.startSession();
       loginTracker.startSession();
+
+      const lastPass = authManager.lastEnteredPassword || sessionStorage.getItem("lastEnteredPassword");
+      const dob = authManager.userData?.dateOfBirth;
+      const isDob = isDobPassword(lastPass, dob);
+      const isDefaultFlag = authManager.userData?.passwordChanged !== true;
+
+      if (authManager.userData && (isDob || isDefaultFlag)) {
+        await showForcedPasswordModal();
+        showToast('Password security update complete! 🎓', 'success');
+      }
     } else {
       console.log('[ClassMemories] No user, showing login...');
       sessionStorage.removeItem("friendshipIntroShownThisLogin");

@@ -99,9 +99,10 @@ class AuthManager {
           }
         } catch (e) { console.error('Error loading saved posts:', e); }
       } else {
-        // Create minimal user document if it doesn't exist
+        const defaultName = this._isOwner ? 'Raavanan' : (this.currentUser.displayName || this.currentUser.email?.split('@')[0] || '');
         const defaultData = {
-          fullName: this._isOwner ? 'Raavanan' : (this.currentUser.email?.split('@')[0] || 'User'),
+          displayName: defaultName,
+          fullName: defaultName,
           email: this.currentUser.email,
           profilePic: '',
           nickname: '',

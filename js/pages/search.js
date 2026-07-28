@@ -270,7 +270,7 @@ function performSearch(container, searchQuery, tab) {
 
 function userCard(u) {
   const cached = userCache.getUser(u.id) || u;
-  const displayName = cached.displayName || 'User';
+  const displayName = cached.displayName || cached.fullName || cached.username || u.displayName || u.fullName || '';
   const pic = cached.photoURL || '';
   const rollNumber = cached.rollNumber || '—';
   const username = cached.username || '';

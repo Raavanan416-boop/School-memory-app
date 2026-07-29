@@ -134,6 +134,8 @@ class FriendshipIntroManager {
   // Save Firestore settings (Owner panel)
   async saveSettings(enabled, selectedDate) {
     const formattedDate = this.formatToYYYYMMDD(selectedDate) || '2026-08-02';
+    // Reset local intro flags when admin saves settings (date changed or disabled/re-enabled)
+    this.resetLocalSeen();
     const data = {
       enabled: Boolean(enabled),
       selectedDate: formattedDate,
@@ -146,17 +148,40 @@ class FriendshipIntroManager {
     return true;
   }
 
-  // Session storage check
-  hasSeenIntroInSession() {
-    return sessionStorage.getItem('friendshipIntroShownThisLogin') === 'true';
+  // Persistent storage check for Friendship Intro
+  hasSeenIntro(activationDate) {
+    const shown = localStorage.getItem('friendshipIntroShown') === 'true';
+    const shownDate = localStorage.getItem('friendshipIntroShownDate');
+    if (!activationDate) {
+      return shown;
+    }
+    return Boolean(shown && shownDate === activationDate);
   }
 
-  markIntroSeenInSession() {
+  markIntroSeen(activationDate) {
+    const dateStr = activationDate || this.cachedSettings?.selectedDate || this.getTodayDateString();
+    localStorage.setItem('friendshipIntroShown', 'true');
+    localStorage.setItem('friendshipIntroShownDate', dateStr);
     sessionStorage.setItem('friendshipIntroShownThisLogin', 'true');
   }
 
-  resetSessionSeen() {
+  resetLocalSeen() {
+    localStorage.removeItem('friendshipIntroShown');
+    localStorage.removeItem('friendshipIntroShownDate');
     sessionStorage.removeItem('friendshipIntroShownThisLogin');
+  }
+
+  // Alias methods
+  hasSeenIntroInSession(activationDate) {
+    return this.hasSeenIntro(activationDate);
+  }
+
+  markIntroSeenInSession(activationDate) {
+    this.markIntroSeen(activationDate);
+  }
+
+  resetSessionSeen() {
+    this.resetLocalSeen();
   }
 
   // Alias for playing Friendship Intro
@@ -178,7 +203,7 @@ class FriendshipIntroManager {
     const today = this.getTodayDateString();
 
     const dateFormatMatch = Boolean(activationDate && activationDate === today);
-    const introAlreadyShown = (sessionStorage.getItem('friendshipIntroShownThisLogin') === 'true');
+    const introAlreadyShown = this.hasSeenIntro(activationDate);
     const shouldShowIntro = Boolean(isLoggedIn && enabled && dateFormatMatch && !introAlreadyShown);
 
     // 3. Exact REQUIRED Console Logs
@@ -194,14 +219,14 @@ class FriendshipIntroManager {
     // 4. Trigger Intro or log exact reason why not called
     if (shouldShowIntro) {
       console.log("[FriendshipIntro] Immediately calling showFriendshipIntro()...");
-      sessionStorage.setItem('friendshipIntroShownThisLogin', 'true');
+      this.markIntroSeen(activationDate);
       await this.showFriendshipIntro(false);
     } else {
       const reasons = [];
       if (!isLoggedIn) reasons.push("User is not logged in");
       if (!enabled) reasons.push("Friendship Intro is not enabled in Firestore");
       if (!dateFormatMatch) reasons.push(`Activation date (${activationDate}) does not match today's date (${today})`);
-      if (introAlreadyShown) reasons.push("Intro has already been shown in this login session (friendshipIntroShownThisLogin === true)");
+      if (introAlreadyShown) reasons.push("Intro has already been shown for this activation date");
 
       console.log("Reason showFriendshipIntro() was not called:", reasons.join(" | "));
     }

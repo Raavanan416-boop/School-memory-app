@@ -1501,7 +1501,8 @@ function renderTaggedTab(el, posts) {
 
 
   function showChangePasswordModal() {
-    const modal = router.openModal('', { title: '🔐 Change Password' });
+    if (typeof window.stopPlaylist === 'function') window.stopPlaylist();
+    const modal = router.openModal('', { title: '🔐 Change Password', className: 'change-password-modal' });
     modal.body.innerHTML = `
     <div class="p-4 space-y-4">
       <div>

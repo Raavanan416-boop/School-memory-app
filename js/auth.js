@@ -183,6 +183,8 @@ class AuthManager {
     sessionStorage.removeItem("birthdayIntroShownThisLogin");
     sessionStorage.removeItem("playlistStartedThisLogin");
     sessionStorage.removeItem("friendshipIntroShownThisLogin");
+    localStorage.removeItem("friendshipIntroShown");
+    localStorage.removeItem("friendshipIntroShownDate");
     sessionStorage.removeItem("lastEnteredPassword");
     localStorage.removeItem("birthdayIntroLastShown");
     this.lastEnteredPassword = null;

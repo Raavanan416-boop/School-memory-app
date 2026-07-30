@@ -94,8 +94,8 @@ export async function renderHome(container, data = null) {
         <button class="quick-action-chip" data-action="diary">📖 Diary</button>
         <button class="quick-action-chip" data-action="polls">📊 Polls</button>
         <button class="quick-action-chip" data-action="leaderboard">🏆 Leaderboard</button>
-        <button class="quick-action-chip" data-action="birthday">🎂 Birthdays</button>
         <button class="quick-action-chip" data-action="games">🎮 Games</button>
+        <button class="quick-action-chip" data-action="birthday">🎂 Birthdays</button>
         <button class="quick-action-chip" data-action="feedback">📝 Feedback</button>
       </div>
     </section>

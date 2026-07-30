@@ -98,4 +98,56 @@
   if (window.top !== window.self) {
     window.top.location = window.self.location;
   }
+
+  // 9. Platform-Specific Screenshot Protection
+  // If running as a native Android app: Disable screenshots using the Android secure flag (FLAG_SECURE).
+  // If running in a web browser: Do not attempt to block screenshots because browsers do not support reliable screenshot detection.
+  function applyNativeScreenshotProtection() {
+    const isAndroidNative = (
+      (window.Android && typeof window.Android.enableFLAG_SECURE === 'function') ||
+      (window.Android && typeof window.Android.setFlagSecure === 'function') ||
+      (window.AndroidInterface && typeof window.AndroidInterface.enableFLAG_SECURE === 'function') ||
+      (window.AndroidSecure && typeof window.AndroidSecure.enable === 'function') ||
+      (window.NativeBridge && typeof window.NativeBridge.enableFLAG_SECURE === 'function') ||
+      (window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform() && window.Capacitor.getPlatform() === 'android') ||
+      (window.cordova && window.cordova.platformId === 'android') ||
+      window.isNativeAndroidApp === true
+    );
+
+    if (isAndroidNative) {
+      try {
+        if (window.Android && typeof window.Android.enableFLAG_SECURE === 'function') {
+          window.Android.enableFLAG_SECURE();
+        } else if (window.Android && typeof window.Android.setFlagSecure === 'function') {
+          window.Android.setFlagSecure(true);
+        } else if (window.AndroidInterface && typeof window.AndroidInterface.enableFLAG_SECURE === 'function') {
+          window.AndroidInterface.enableFLAG_SECURE();
+        } else if (window.AndroidSecure && typeof window.AndroidSecure.enable === 'function') {
+          window.AndroidSecure.enable();
+        } else if (window.NativeBridge && typeof window.NativeBridge.enableFLAG_SECURE === 'function') {
+          window.NativeBridge.enableFLAG_SECURE();
+        } else if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.PrivacyScreen && typeof window.Capacitor.Plugins.PrivacyScreen.enable === 'function') {
+          window.Capacitor.Plugins.PrivacyScreen.enable();
+        } else if (window.plugins && window.plugins.preventscreenshot && typeof window.plugins.preventscreenshot.enable === 'function') {
+          window.plugins.preventscreenshot.enable();
+        }
+        console.log('[Security] Native Android screenshot protection (FLAG_SECURE) activated.');
+      } catch (err) {
+        console.warn('[Security] Could not enable native FLAG_SECURE:', err);
+      }
+    } else {
+      // In a web browser: Browsers do not support reliable screenshot detection.
+      // Keep all existing functionality completely unchanged without attempting screenshot blocking.
+    }
+  }
+
+  // Expose function globally for native bridge execution
+  window.enableAndroidSecureFlag = applyNativeScreenshotProtection;
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', applyNativeScreenshotProtection);
+  } else {
+    applyNativeScreenshotProtection();
+  }
 })();
+

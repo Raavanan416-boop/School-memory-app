@@ -70,6 +70,12 @@ const MusicPlayer = {
   },
 
   start(restore = false) {
+    // RULE 1: Never start playlist while Friendship/Birthday Intro is active
+    if (window.__introActive) {
+      console.log('[MusicPlayer] Intro active — refusing to start playlist');
+      this.hideStopButton();
+      return;
+    }
     if (typeof window.isSecurityUpdateRequired === 'function' && window.isSecurityUpdateRequired()) {
       console.log('[ClassMemories] Security update required — suppressing playlist playback');
       this.stopAll();
@@ -97,6 +103,11 @@ const MusicPlayer = {
   },
 
   playNextSong(restore = false) {
+    // RULE 1: Block during active intro
+    if (window.__introActive) {
+      console.log('[MusicPlayer] Intro active — refusing to play next song');
+      return;
+    }
     if (typeof window.isSecurityUpdateRequired === 'function' && window.isSecurityUpdateRequired()) {
       console.log('[ClassMemories] Security update required — suppressing next song');
       this.stopAll();
@@ -152,7 +163,7 @@ const MusicPlayer = {
 
   showStopButton() {
     let btn = document.getElementById('global-music-stop');
-    if (!btn && !this.isStopped) {
+    if (!btn && !this.isStopped && !window.__introActive) {
       btn = document.createElement('button');
       btn.id = 'global-music-stop';
       btn.innerHTML = `
@@ -849,8 +860,8 @@ function showForcedPasswordModal() {
             <input type="password" id="confirm-pass" minlength="6" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-navy-500 outline-none" placeholder="Confirm Password" required>
           </div>
           <div id="pwd-error" class="text-red-500 text-xs hidden font-medium p-2 bg-red-50 rounded-xl text-center"></div>
-          <button type="submit" id="pwd-submit" class="w-full bg-navy-600 text-white font-bold py-3.5 rounded-xl shadow-md hover:bg-navy-700 transition-colors mt-2">
-            Update Password
+          <button type="submit" id="pwd-submit" class="w-full bg-navy-600 text-white font-bold py-3.5 rounded-xl shadow-md hover:bg-navy-700 transition-colors mt-2 flex items-center justify-center gap-2">
+            <span>CHANGE PASSWORD 🔐</span>
           </button>
         </form>
       </div>
@@ -860,13 +871,20 @@ function showForcedPasswordModal() {
     const form = overlay.querySelector('#force-password-form');
     const errEl = overlay.querySelector('#pwd-error');
     const btn = overlay.querySelector('#pwd-submit');
+    const currentInput = overlay.querySelector('#current-pass');
+    const newPassInput = overlay.querySelector('#new-pass');
+    const confirmInput = overlay.querySelector('#confirm-pass');
+
+    let isSubmitting = false;
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (isSubmitting) return;
+
       errEl.classList.add('hidden');
-      const current = overlay.querySelector('#current-pass').value.trim();
-      const newPass = overlay.querySelector('#new-pass').value.trim();
-      const confirmPass = overlay.querySelector('#confirm-pass').value.trim();
+      const current = currentInput.value.trim();
+      const newPass = newPassInput.value.trim();
+      const confirmPass = confirmInput.value.trim();
       const dob = authManager.userData?.dateOfBirth;
 
       if (!current || !newPass || !confirmPass) {
@@ -890,15 +908,27 @@ function showForcedPasswordModal() {
         return;
       }
 
+      // Immediately disable inputs and button, show loading spinner
+      isSubmitting = true;
+      currentInput.disabled = true;
+      newPassInput.disabled = true;
+      confirmInput.disabled = true;
       btn.disabled = true;
-      btn.textContent = 'Updating...';
+
+      const originalBtnHTML = btn.innerHTML;
+      btn.innerHTML = `
+        <span class="inline-flex items-center justify-center gap-2">
+          <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+          <span>Updating Password...</span>
+        </span>
+      `;
 
       try {
-        // 1. Verify current password & 2. Update Firebase Auth & 3. Update Firestore & 4. Remove flags
+        // 1. Verify current password & Update Firebase Auth & Firestore
         await authManager.changePassword(current, newPass);
         console.log('[ClassMemories] Password updated successfully in Auth & Firestore');
 
-        // 5. Refresh authenticated user data
+        // 2. Refresh authenticated user data
         if (authManager.currentUser) {
           try {
             await authManager.currentUser.reload();
@@ -908,31 +938,44 @@ function showForcedPasswordModal() {
           await authManager._loadUserData(authManager.currentUser.uid);
         }
 
-        // 6. Re-check security status
+        // 3. Re-check security status
         if (isSecurityUpdateRequired()) {
+          isSubmitting = false;
+          currentInput.disabled = false;
+          newPassInput.disabled = false;
+          confirmInput.disabled = false;
           btn.disabled = false;
-          btn.textContent = 'Update Password';
+          btn.innerHTML = originalBtnHTML;
           errEl.textContent = '❌ Security check failed. Password cannot be your Date of Birth.';
           errEl.classList.remove('hidden');
           return;
         }
 
-        // 7. Remove security update page immediately and redirect to Home screen
+        // 4. Show success animation on button & green toast
+        btn.className = 'w-full py-3.5 bg-emerald-600 text-white font-bold rounded-xl shadow-md flex items-center justify-center gap-2 transition-all duration-300 transform scale-102 mt-2';
+        btn.innerHTML = `
+          <span class="inline-flex items-center justify-center gap-2 animate-bounce">
+            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+            <span>Password Changed Successfully</span>
+          </span>
+        `;
+
+        showToast('✅ Password Changed Successfully', 'success');
+
+        // Wait ~1 second so user sees success feedback, then remove overlay & resolve promise to resume login pipeline
+        await new Promise(r => setTimeout(r, 1000));
         overlay.remove();
-        console.log('[ClassMemories] Security update complete. Redirecting to Home screen...');
-        router.navigate('home');
-
-        // 8. Start normal 5-song playlist only AFTER entering Home
-        setTimeout(() => {
-          console.log('[ClassMemories] Home screen entered — starting normal playlist');
-          startPlaylist();
-        }, 300);
-
+        console.log('[ClassMemories] Security update complete. Resuming login pipeline...');
         resolve();
       } catch (err) {
         console.error('[ClassMemories] Security password update failed:', err);
+        isSubmitting = false;
+        currentInput.disabled = false;
+        newPassInput.disabled = false;
+        confirmInput.disabled = false;
         btn.disabled = false;
-        btn.textContent = 'Update Password';
+        btn.innerHTML = originalBtnHTML;
+
         let msg = 'Failed to update password. Please check your current password.';
         if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
           msg = 'Incorrect current password. Please try again.';
@@ -2504,8 +2547,14 @@ async function init() {
       MusicPlayer.hasStarted = false;
       MusicPlayer.currentIndex = 0;
       if (MusicPlayer.bgAudio) {
-        MusicPlayer.bgAudio.pause();
-        MusicPlayer.bgAudio.src = '';
+        try {
+          MusicPlayer.bgAudio.pause();
+          MusicPlayer.bgAudio.currentTime = 0;
+          MusicPlayer.bgAudio.removeAttribute('src');
+          MusicPlayer.bgAudio.src = '';
+          MusicPlayer.bgAudio.load();
+        } catch (e) {}
+        MusicPlayer.bgAudio = null;
       }
       sessionStorage.removeItem("musicCurrentIndex");
       sessionStorage.removeItem("musicIsStopped");
@@ -2522,6 +2571,11 @@ async function init() {
   window.stopPlaylist = stopPlaylist;
 
   function startPlaylist() {
+    // RULE 1: Never start during active intro
+    if (window.__introActive) {
+      console.log('[ClassMemories] Intro active — refusing startPlaylist()');
+      return;
+    }
     // Do NOT start playlist if user needs a forced security update / password change
     if (isSecurityUpdateRequired()) {
       console.log('[ClassMemories] Security update required — suppressing playlist playback');
@@ -2596,10 +2650,29 @@ async function init() {
   }
 
   async function startAppMusicFlow() {
-    console.log("Login Success");
+    console.log("[ClassMemories] Login Success - Starting App Audio Control Flow");
+
+    // RULE 1: Set global intro guard IMMEDIATELY — blocks all playlist/button activity
+    window.__introActive = true;
+
+    // Kill everything — playlist, audio, stop button
+    stopPlaylist();
+    if (typeof friendshipIntroManager !== 'undefined') {
+      friendshipIntroManager.stopAllAppAudio();
+    }
+
+    // RULE 3: Clear stale sessionStorage music state so page refresh cannot auto-resume
+    sessionStorage.removeItem("musicCurrentIndex");
+    sessionStorage.removeItem("musicIsStopped");
+    sessionStorage.removeItem("musicHasStarted");
+    sessionStorage.removeItem("musicCurrentTime");
+    sessionStorage.removeItem("musicStarted");
+    sessionStorage.removeItem("homeMusicStarted");
+    sessionStorage.removeItem("playlistStartedThisLogin");
 
     if (isSecurityUpdateRequired()) {
-      console.log('[ClassMemories] Security update required — skipping playlist in startAppMusicFlow');
+      console.log('[ClassMemories] Security update required — suppressing playlist in startAppMusicFlow');
+      window.__introActive = false;
       stopPlaylist();
       return;
     }
@@ -2614,37 +2687,46 @@ async function init() {
     console.log("Intro Required:", introRequired ? "YES" : "NO");
 
     if (birthdayReq) {
-      console.log("Stopping Playlist");
-      stopPlaylist();
-
-      console.log("Playing Intro");
+      console.log("Playing Birthday Intro (intro guard active)");
       await playBirthdayIntro();
 
-      console.log("Intro Finished");
+      console.log("Birthday Intro Finished -> Waiting 300ms");
       await new Promise(r => setTimeout(r, 300));
 
-      console.log("Starting Playlist");
+      // RULE 2: Clear guard, THEN start playlist
+      window.__introActive = false;
+      console.log("Starting Playlist after Birthday Intro");
       startPlaylist();
+      if (typeof router !== 'undefined' && router.navigate) {
+        router.navigate('home');
+      }
       return;
     }
 
     if (friendshipReq) {
-      console.log("Stopping Playlist");
-      stopPlaylist();
-
-      console.log("Playing Intro");
+      console.log("Playing Friendship Intro (intro guard active, ONLY Intro Music)");
       await playFriendshipIntro();
 
-      console.log("Intro Finished");
+      console.log("Friendship Intro Finished -> Waiting 300ms");
       await new Promise(r => setTimeout(r, 300));
 
-      console.log("Starting Playlist");
+      // RULE 2: Clear guard, THEN start playlist
+      window.__introActive = false;
+      console.log("Starting Playlist after Friendship Intro");
       startPlaylist();
+      if (typeof router !== 'undefined' && router.navigate) {
+        router.navigate('home');
+      }
       return;
     }
 
-    console.log("Starting Playlist");
+    // No intro needed — safe to start playlist
+    window.__introActive = false;
+    console.log("No Intro required -> Starting Playlist");
     startPlaylist();
+    if (typeof router !== 'undefined' && router.navigate) {
+      router.navigate('home');
+    }
   }
 
   let appShellBuilt = false;
@@ -2654,75 +2736,65 @@ async function init() {
       console.log('[ClassMemories] User logged in:', user.email);
       hideLogin();
       
+      if (!appShellBuilt) {
+        buildAppShell();
+        appShellBuilt = true;
+      }
+      usageTracker.startSession();
+      loginTracker.startSession();
+
       const securityUpdateNeeded = isSecurityUpdateRequired();
 
       if (securityUpdateNeeded) {
-        console.log('[ClassMemories] Security update required on login — immediately stopping playlist');
+        console.log('[ClassMemories] Security update required on login — stopping playlist');
         stopPlaylist();
-
-        if (!appShellBuilt) {
-          buildAppShell();
-          appShellBuilt = true;
-        }
-        usageTracker.startSession();
-        loginTracker.startSession();
-
         await showForcedPasswordModal();
-        showToast('Password security update complete! 🎓', 'success');
-      } else {
-        const initApp = async () => {
-          if (!appShellBuilt) {
-            buildAppShell();
-            appShellBuilt = true;
-
-            const isExplicitLogin = sessionStorage.getItem("isExplicitLoginEvent") === "true";
-            const loginSession = sessionStorage.getItem("loginSession") === "true";
-
-            if (isExplicitLogin) {
-              // Explicit login success event
-              sessionStorage.removeItem("isExplicitLoginEvent");
-              sessionStorage.removeItem("isFreshLogin");
-
-              // Clear temporary login flags & reset Friendship Intro session
-              sessionStorage.removeItem("birthdayIntroShownThisLogin");
-              sessionStorage.removeItem("playlistStartedThisLogin");
-              friendshipIntroManager.resetSessionSeen();
-
-              // Reset birthday intro state to allow replay on re-login
-              window.hasPlayedBirthdayIntro = false;
-              sessionStorage.removeItem("birthdayIntroCompleted");
-
-              await startAppMusicFlow();
-            } else {
-              // Page reload / Auto-login
-              try {
-                const friendshipReq = await shouldShowFriendshipIntro();
-                if (friendshipReq) {
-                  stopPlaylist();
-                  await playFriendshipIntro();
-                } else {
-                  if (shouldShowBirthdayIntro()) {
-                    stopPlaylist();
-                    await playBirthdayIntro();
-                  }
-                }
-              } catch (e) {
-                console.error("[ClassMemories] Intro check on auto-login error:", e);
-              }
-            }
-          }
-        };
-
-        await initApp();
-        usageTracker.startSession();
-        loginTracker.startSession();
       }
+
+      const initApp = async () => {
+        // Guard: music flow should only run ONCE per session (on explicit login).
+        // Subsequent onChange fires (profile update, password change, etc.) must NOT restart music.
+        if (window.__musicFlowCompleted) {
+          console.log('[ClassMemories] Music flow already completed this session — skipping');
+          return;
+        }
+
+        const isExplicitLogin = sessionStorage.getItem("isExplicitLoginEvent") === "true";
+
+        if (isExplicitLogin) {
+          // Explicit login success event — this is the ONLY path that starts the playlist
+          sessionStorage.removeItem("isExplicitLoginEvent");
+          sessionStorage.removeItem("isFreshLogin");
+
+          // Clear temporary login flags & reset Friendship Intro session
+          sessionStorage.removeItem("birthdayIntroShownThisLogin");
+          sessionStorage.removeItem("playlistStartedThisLogin");
+          friendshipIntroManager.resetSessionSeen();
+
+          // Reset birthday intro state to allow replay on re-login
+          window.hasPlayedBirthdayIntro = false;
+          sessionStorage.removeItem("birthdayIntroCompleted");
+
+          await startAppMusicFlow();
+          window.__musicFlowCompleted = true;
+        } else {
+          // Page reload / Auto-login — restore UI only, do NOT start music
+          console.log('[ClassMemories] Page reload detected — restoring UI without auto-starting music');
+          window.__musicFlowCompleted = true;
+          if (typeof router !== 'undefined' && router.navigate) {
+            router.navigate('home');
+          }
+        }
+      };
+
+      await initApp();
     } else {
       console.log('[ClassMemories] No user, showing login...');
       sessionStorage.removeItem("friendshipIntroShownThisLogin");
       localStorage.removeItem("friendshipIntroShown");
       localStorage.removeItem("friendshipIntroShownDate");
       appShellBuilt = false;
+      window.__musicFlowCompleted = false;
       usageTracker.endSession();
       loginTracker.endSession();
       $('#app')?.classList.add('hidden');

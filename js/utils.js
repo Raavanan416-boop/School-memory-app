@@ -68,9 +68,13 @@ export function showToast(msg, type = 'info') {
     warning: 'toast-warning'
   };
   const icons = { info: 'ℹ️', success: '✅', error: '❌', warning: '⚠️' };
+  const iconStr = icons[type] || 'ℹ️';
+  const hasIconPrefix = typeof msg === 'string' && (msg.startsWith(iconStr) || msg.startsWith('✅') || msg.startsWith('❌') || msg.startsWith('⚠️') || msg.startsWith('ℹ️'));
+  const iconSpan = hasIconPrefix ? '' : `<span>${iconStr}</span>`;
+
   const toast = document.createElement('div');
   toast.className = `toast ${colors[type] || 'toast-info'}`;
-  toast.innerHTML = `<span>${icons[type] || 'ℹ️'}</span><span>${sanitizeHTML(msg)}</span>`;
+  toast.innerHTML = `${iconSpan}<span>${sanitizeHTML(msg)}</span>`;
   container.appendChild(toast);
   requestAnimationFrame(() => toast.classList.add('toast-visible'));
   setTimeout(() => {

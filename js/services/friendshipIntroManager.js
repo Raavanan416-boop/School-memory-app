@@ -36,9 +36,12 @@ class FriendshipIntroManager {
   constructor() {
     this.settingsRef = doc(db, 'systemSettings', 'friendshipIntro');
     this.customAudio = null;
+    this.audioActive = false;
     this.isPlaying = false;
     this.activeOverlay = null;
     this.cachedSettings = { enabled: false, selectedDate: '2026-08-02' };
+    this.introTimers = [];
+    this.unloadHandler = null;
   }
 
   preloadImages(images) {
@@ -241,20 +244,35 @@ class FriendshipIntroManager {
         try {
           a.pause();
           a.currentTime = 0;
+          a.removeAttribute('src');
+          a.src = '';
+          a.load();
         } catch (e) {}
       });
     } catch (e) {}
 
-    if (typeof window !== 'undefined' && window.bgAudio) {
-      try {
-        window.bgAudio.pause();
-        window.bgAudio.currentTime = 0;
-      } catch (e) {}
+    if (typeof window !== 'undefined') {
+      if (window.bgAudio) {
+        try {
+          window.bgAudio.pause();
+          window.bgAudio.currentTime = 0;
+          window.bgAudio.removeAttribute('src');
+          window.bgAudio.src = '';
+          window.bgAudio.load();
+          window.bgAudio = null;
+        } catch (e) {}
+      }
+      if (typeof window.stopPlaylist === 'function') {
+        try {
+          window.stopPlaylist();
+        } catch (e) {}
+      }
     }
   }
 
   playCustomMusic() {
     this.stopIntroMusic();
+    this.audioActive = true;
     const primaryPath = FRIENDSHIP_INTRO_MUSIC || '/assets/96slowbgm.mp3';
     const candidatePaths = Array.from(new Set([
       primaryPath,
@@ -266,16 +284,33 @@ class FriendshipIntroManager {
     ].filter(Boolean)));
 
     const tryPlayIndex = (idx) => {
-      if (idx >= candidatePaths.length) return;
+      if (!this.audioActive || idx >= candidatePaths.length) return;
       const src = candidatePaths[idx];
       const audio = new Audio(src);
       audio.volume = 1.0;
+      audio.preload = 'auto';
 
       audio.play().then(() => {
+        if (!this.audioActive) {
+          try {
+            audio.pause();
+            audio.currentTime = 0;
+            audio.removeAttribute('src');
+            audio.src = '';
+            audio.load();
+          } catch (e) {}
+          return;
+        }
+
         this.customAudio = audio;
+        audio.onended = () => {
+          this.stopIntroMusic();
+        };
       }).catch((err) => {
-        console.warn(`[FriendshipIntro] Audio candidate failed (${src}), trying next candidate...`, err);
-        tryPlayIndex(idx + 1);
+        if (this.audioActive) {
+          console.warn(`[FriendshipIntro] Audio candidate failed (${src}), trying next candidate...`, err);
+          tryPlayIndex(idx + 1);
+        }
       });
     };
 
@@ -283,13 +318,34 @@ class FriendshipIntroManager {
   }
 
   stopIntroMusic() {
+    this.audioActive = false;
     this.isPlaying = false;
+
+    if (Array.isArray(this.introTimers)) {
+      this.introTimers.forEach(timerId => clearTimeout(timerId));
+      this.introTimers = [];
+    }
+
     if (this.customAudio) {
       try {
+        this.customAudio.onended = null;
+        this.customAudio.ontimeupdate = null;
+        this.customAudio.onerror = null;
         this.customAudio.pause();
         this.customAudio.currentTime = 0;
+        this.customAudio.removeAttribute('src');
+        this.customAudio.src = '';
+        this.customAudio.load();
       } catch (e) {}
       this.customAudio = null;
+    }
+
+    if (this.unloadHandler) {
+      try {
+        window.removeEventListener('beforeunload', this.unloadHandler);
+        window.removeEventListener('pagehide', this.unloadHandler);
+      } catch (e) {}
+      this.unloadHandler = null;
     }
   }
 
@@ -302,6 +358,12 @@ class FriendshipIntroManager {
       if (!isPreview) {
         this.markIntroSeenInSession();
       }
+
+      this.unloadHandler = () => {
+        this.stopIntroMusic();
+      };
+      window.addEventListener('beforeunload', this.unloadHandler);
+      window.addEventListener('pagehide', this.unloadHandler);
 
       const overlay = document.createElement('div');
       overlay.id = 'friendship-intro-overlay';
@@ -344,9 +406,14 @@ class FriendshipIntroManager {
           <!-- Screen 3: Classroom Blackboard -->
           <div class="fi-screen" id="fi-s3">
             <div class="fi-blackboard">
+              <div class="fi-chalk-dust-overlay"></div>
               <div class="fi-chalk-text">
-                <div class="fi-chalk-line1" id="fi-chalk-1">"Once classmates..."</div>
-                <div class="fi-chalk-line2" id="fi-chalk-2">"...Forever Friends ❤️"</div>
+                <div class="fi-chalk-line1" id="fi-chalk-1">Once Classmates...</div>
+                <div class="fi-chalk-line2" id="fi-chalk-2">Forever Friends ❤️</div>
+                <div class="fi-chalk-quote" id="fi-chalk-quote">
+                  "School mudinjiduchu...<br/>
+                  Memories mattum innum classroom la iruku. ❤️"
+                </div>
               </div>
             </div>
           </div>
@@ -363,9 +430,7 @@ class FriendshipIntroManager {
               <div class="fi-balloons-container" id="fi-balloons"></div>
               <div class="fi-polaroid-frame-wrapper" id="fi-unforgettable-frame">
                 <div class="fi-premium-polaroid-frame">
-                  <div class="fi-frame-photo-container">
-                    <img src="${friendshipImages[0] || '/assets/school.jpg'}" class="fi-frame-photo" loading="eager" decoding="sync" alt="Unforgettable Days" onError="this.src='/assets/class-memories-logo.png';"/>
-                  </div>
+                  <img src="${friendshipImages[0] || '/assets/school.jpg'}" class="fi-frame-photo" loading="eager" decoding="sync" alt="Unforgettable Days" onError="this.src='/assets/class-memories-logo.png';"/>
                 </div>
               </div>
               <p class="font-caveat text-2xl text-amber-300 font-bold mt-4">Unforgettable Days 🎓</p>
@@ -429,18 +494,25 @@ class FriendshipIntroManager {
       const finishIntro = () => {
         if (isFinished) return;
         isFinished = true;
+
+        // 1. Immediately STOP Intro Music, Reset Audio, Clear Timers, Destroy Audio Instance
         this.stopIntroMusic();
 
         if (!isPreview) {
           this.markIntroSeenInSession();
         }
 
-        overlay.style.opacity = '0';
+        if (overlay) {
+          overlay.style.opacity = '0';
+        }
+
         setTimeout(() => {
-          if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+          if (overlay && overlay.parentNode) {
+            overlay.parentNode.removeChild(overlay);
+          }
           this.activeOverlay = null;
           resolve();
-        }, 800);
+        }, 300);
       };
 
       overlay.querySelector('#fi-enter-btn').addEventListener('click', finishIntro);
@@ -455,27 +527,29 @@ class FriendshipIntroManager {
 
       s1.classList.add('active');
 
-      setTimeout(() => {
+      this.introTimers.push(setTimeout(() => {
         if (isFinished) return;
         s1.classList.remove('active');
         s1.classList.add('exit');
         s2.classList.add('active');
         overlay.querySelector('#fi-bg-sunrise').style.opacity = '1';
-        setTimeout(() => {
+        this.introTimers.push(setTimeout(() => {
           overlay.querySelector('#fi-gate').classList.add('open');
-        }, 300);
-      }, 3000);
+        }, 300));
+      }, 3000));
 
-      setTimeout(() => {
+      this.introTimers.push(setTimeout(() => {
         if (isFinished) return;
         s2.classList.remove('active');
         s2.classList.add('exit');
         s3.classList.add('active');
-        setTimeout(() => overlay.querySelector('#fi-chalk-1')?.classList.add('show'), 400);
-        setTimeout(() => overlay.querySelector('#fi-chalk-2')?.classList.add('show'), 1400);
-      }, 9700);
+        this.introTimers.push(setTimeout(() => overlay.querySelector('#fi-chalk-1')?.classList.add('show'), 300));
+        this.introTimers.push(setTimeout(() => overlay.querySelector('#fi-chalk-2')?.classList.add('show'), 1200));
+        this.introTimers.push(setTimeout(() => overlay.querySelector('#fi-chalk-quote')?.classList.add('show'), 2100));
+      }, 9700));
 
-      setTimeout(() => {
+      // Screen 3 -> Screen 4: Writing finishes by ~3.3s; holds visible for 3 full seconds (total 6.3s on Screen 3 -> 16000ms)
+      this.introTimers.push(setTimeout(() => {
         if (isFinished) return;
         s3.classList.remove('active');
         s3.classList.add('exit');
@@ -491,24 +565,25 @@ class FriendshipIntroManager {
           console.log(`Loaded:`, img.complete && img.naturalWidth > 0);
           console.log(`Complete:`, img.complete);
         });
-      }, 13700);
+      }, 16000));
 
-      setTimeout(() => {
+      this.introTimers.push(setTimeout(() => {
         if (isFinished) return;
         s4.classList.remove('active');
         s4.classList.add('exit');
         s5.classList.add('active');
         const balloonContainer = overlay.querySelector('#fi-balloons');
-        this.spawnBalloons(balloonContainer, 8);
+        this.spawnBalloons(balloonContainer, 28);
         this.startConfetti(overlay.querySelector('#fi-confetti-canvas'));
-      }, 17700);
+      }, 20000));
 
-      setTimeout(() => {
+      // Screen 5 (Single Polaroid): Holds for 4 seconds after entrance animation (~0.7s) completes = ~4.7s total (triggers at 24700ms)
+      this.introTimers.push(setTimeout(() => {
         if (isFinished) return;
         s5.classList.remove('active');
         s5.classList.add('exit');
         s6.classList.add('active');
-      }, 21700);
+      }, 24700));
     });
   }
 
@@ -527,17 +602,54 @@ class FriendshipIntroManager {
     }
   }
 
-  spawnBalloons(container, count = 8) {
+  spawnBalloons(container, count = 28) {
     if (!container) return;
-    const colors = ['#ff7675', '#74b9ff', '#ffeaa7', '#55efc4', '#a29bfe'];
+    container.innerHTML = '';
+
+    const colors = [
+      '#ff7675', '#74b9ff', '#ffeaa7', '#55efc4', '#a29bfe',
+      '#ff6b6b', '#f1c40f', '#fd79a8', '#0984e3', '#f39c12',
+      '#e84393', '#00b894', '#d63031', '#e17055', '#6c5ce7'
+    ];
+
+    // Spawn 28 balloons continuously with varied sizes, colors, and left-right swaying
     for (let i = 0; i < count; i++) {
       const b = document.createElement('div');
       b.className = 'fi-balloon';
-      b.style.background = colors[i % colors.length];
-      b.style.left = `${10 + Math.random() * 80}%`;
-      b.style.animationDuration = `${Math.random() * 3 + 5}s`;
-      b.style.animationDelay = `${i * 0.4}s`;
+      const color = colors[i % colors.length];
+      const leftPos = Math.random() * 92;
+      const sizeScale = (Math.random() * 0.5 + 0.75).toFixed(2);
+      const width = Math.round(28 * sizeScale);
+      const height = Math.round(38 * sizeScale);
+      const duration = (Math.random() * 4 + 4.5).toFixed(2);
+      const delay = (Math.random() * 5).toFixed(2);
+      const swayOffset = (Math.random() * 30 - 15).toFixed(0);
+
+      b.style.background = color;
+      b.style.width = `${width}px`;
+      b.style.height = `${height}px`;
+      b.style.left = `${leftPos}%`;
+      b.style.setProperty('--sway', `${swayOffset}px`);
+      b.style.animationDuration = `${duration}s`;
+      b.style.animationDelay = `${delay}s`;
       container.appendChild(b);
+    }
+
+    // Add tiny sparkle particles between balloons
+    for (let j = 0; j < 20; j++) {
+      const sp = document.createElement('div');
+      sp.className = 'fi-balloon-sparkle';
+      sp.innerText = Math.random() > 0.5 ? '✨' : '✦';
+      const size = (Math.random() * 0.6 + 0.7).toFixed(1);
+      const leftPos = Math.random() * 95;
+      const duration = (Math.random() * 3 + 3.5).toFixed(2);
+      const delay = (Math.random() * 4).toFixed(2);
+
+      sp.style.left = `${leftPos}%`;
+      sp.style.fontSize = `${size}rem`;
+      sp.style.animationDuration = `${duration}s`;
+      sp.style.animationDelay = `${delay}s`;
+      container.appendChild(sp);
     }
   }
 

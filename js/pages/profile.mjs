@@ -1518,27 +1518,72 @@ function renderTaggedTab(el, posts) {
         <input type="password" id="confirm-pass" placeholder="Re-enter new password" class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-navy-800 focus:outline-none focus:border-navy-500 bg-white"/>
       </div>
       <div id="pass-error" class="hidden text-xs text-red-500 bg-red-50 p-2 rounded-xl"></div>
-      <button id="save-password" class="btn-primary">CHANGE PASSWORD 🔐</button>
+      <button id="save-password" class="btn-primary w-full flex items-center justify-center gap-2">CHANGE PASSWORD 🔐</button>
     </div>
   `;
 
-    modal.body.querySelector('#save-password')?.addEventListener('click', async () => {
-      const current = modal.body.querySelector('#current-pass')?.value;
-      const newPass = modal.body.querySelector('#new-pass')?.value;
-      const confirm = modal.body.querySelector('#confirm-pass')?.value;
-      const errEl = modal.body.querySelector('#pass-error');
+    const currentInput = modal.body.querySelector('#current-pass');
+    const newPassInput = modal.body.querySelector('#new-pass');
+    const confirmInput = modal.body.querySelector('#confirm-pass');
+    const btn = modal.body.querySelector('#save-password');
+    const errEl = modal.body.querySelector('#pass-error');
+
+    let isSubmitting = false;
+
+    btn?.addEventListener('click', async () => {
+      if (isSubmitting) return;
+
+      const current = currentInput?.value;
+      const newPass = newPassInput?.value;
+      const confirm = confirmInput?.value;
 
       if (!current || !newPass || !confirm) { errEl.textContent = 'All fields are required'; errEl.classList.remove('hidden'); return; }
       if (newPass.length < 6) { errEl.textContent = 'Password must be at least 6 characters'; errEl.classList.remove('hidden'); return; }
       if (newPass !== confirm) { errEl.textContent = 'Passwords do not match'; errEl.classList.remove('hidden'); return; }
 
+      // Prevent multiple clicks & immediately disable form and show loading spinner
+      isSubmitting = true;
+      currentInput.disabled = true;
+      newPassInput.disabled = true;
+      confirmInput.disabled = true;
+      btn.disabled = true;
+      errEl.classList.add('hidden');
+
+      const originalBtnHTML = btn.innerHTML;
+      btn.innerHTML = `
+        <span class="inline-flex items-center justify-center gap-2">
+          <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+          <span>Updating Password...</span>
+        </span>
+      `;
+
       try {
         await authManager.changePassword(current, newPass);
-        showToast('Password changed! 🔐', 'success');
+
+        // Show success animation on button
+        btn.className = 'w-full py-3 bg-emerald-600 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-md transition-all duration-300 transform scale-102';
+        btn.innerHTML = `
+          <span class="inline-flex items-center justify-center gap-2 animate-bounce">
+            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+            <span>Password Changed Successfully</span>
+          </span>
+        `;
+
+        showToast('✅ Password Changed Successfully', 'success');
+
+        await new Promise(r => setTimeout(r, 1000));
         modal.close();
       } catch (err) {
+        isSubmitting = false;
+        currentInput.disabled = false;
+        newPassInput.disabled = false;
+        confirmInput.disabled = false;
+        btn.disabled = false;
+        btn.className = 'btn-primary w-full flex items-center justify-center gap-2';
+        btn.innerHTML = originalBtnHTML;
+
         let msg = 'Failed to change password';
-        if (err.code === 'auth/wrong-password') msg = 'Current password is incorrect';
+        if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') msg = 'Current password is incorrect';
         else if (err.code === 'auth/weak-password') msg = 'New password is too weak';
         errEl.textContent = msg;
         errEl.classList.remove('hidden');

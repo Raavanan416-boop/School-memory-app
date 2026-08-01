@@ -18,15 +18,15 @@ export const friendshipImages = [
 ];
 
 const FRIENDSHIP_CAPTIONS = [
-  'Classroom Fun 📸',
-  'Lunch Breaks 🥪',
-  'Bench Partners ✏️',
+  'Last Click 📸',
+  'Sweet Memories 🌷',
+  'School Kings 👑',
   'Golden Days 🎓',
-  'Sports Day 🏆',
+  'Winning Hearts ❤️',
   'Assembly Time 🔔',
   'Farewell 💖',
-  'Best Friends 🌟',
-  'School Gate 🏫',
+  'One Plate,Memories🍛',
+  'Final Goodbye 🥹',
   'Magic Memories ✨',
   'Laughter & Smiles 😁',
   'Forever Together ❤️'
@@ -380,7 +380,10 @@ class FriendshipIntroManager {
         <div class="fi-screen-stage">
           <!-- Screen 1: Dark Intro Text -->
           <div class="fi-screen" id="fi-s1">
-            <h2 class="fi-text-s1">"Some friendships<br/>never grow old..."</h2>
+            <h2 class="fi-text-s1">"Naama daily meet pannadhu mudinjiduchu...<br/>
+            aana ovvoru memory-yum innum namma kooda dhaan nadakkudhu. ❤️‍🩹<br/>Indha app open pannum bodhu...<br/>
+            school-ku illa...<br/>
+            namma azhagana naatkalukku thirumbi porom. 🏫❤️"</h2>
           </div>
 
           <!-- Screen 2: School Gate Sunrise & Memory Collage -->
@@ -442,8 +445,8 @@ class FriendshipIntroManager {
             <div class="fi-final-card">
               <h1 class="fi-final-title">Happy Friendship Day</h1>
               <p class="fi-final-subtext">
-                "No matter where life takes us,<br/>
-                our memories will always keep us together."
+                "Life ellaraiyum vera vera vazhila kondu ponaalum...<br/>namma nenapugal eppovum ore classroom-la dhaan irukum. 🏫🤍<br/>
+                Namma daily meet panna mudiyama irukalam...<br/> aana oru memory pothum, school days-ku thirumbi poganum-nu thonum."
               </p>
               <button class="fi-enter-btn" id="fi-enter-btn">
                 Enter Class Memories ❤️

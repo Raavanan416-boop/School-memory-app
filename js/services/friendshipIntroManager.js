@@ -380,10 +380,8 @@ class FriendshipIntroManager {
         <div class="fi-screen-stage">
           <!-- Screen 1: Dark Intro Text -->
           <div class="fi-screen" id="fi-s1">
-            <h2 class="fi-text-s1">"Naama daily meet pannadhu mudinjiduchu...<br/>
-            aana ovvoru memory-yum innum namma kooda dhaan nadakkudhu. ❤️‍🩹<br/>Indha app open pannum bodhu...<br/>
-            school-ku illa...<br/>
-            namma azhagana naatkalukku thirumbi porom. 🏫❤️"</h2>
+            <h2 class="fi-text-s1">"Oru classroom... 37 hearts... oru lifetime memories... 🤍<br/>
+            Innum oru thadava... school-ku polaama? 🏫❤️"</h2>
           </div>
 
           <!-- Screen 2: School Gate Sunrise & Memory Collage -->
@@ -539,7 +537,7 @@ class FriendshipIntroManager {
         this.introTimers.push(setTimeout(() => {
           overlay.querySelector('#fi-gate').classList.add('open');
         }, 300));
-      }, 3000));
+      }, 8000));
 
       this.introTimers.push(setTimeout(() => {
         if (isFinished) return;
@@ -549,9 +547,9 @@ class FriendshipIntroManager {
         this.introTimers.push(setTimeout(() => overlay.querySelector('#fi-chalk-1')?.classList.add('show'), 300));
         this.introTimers.push(setTimeout(() => overlay.querySelector('#fi-chalk-2')?.classList.add('show'), 1200));
         this.introTimers.push(setTimeout(() => overlay.querySelector('#fi-chalk-quote')?.classList.add('show'), 2100));
-      }, 9700));
+      }, 12700));
 
-      // Screen 3 -> Screen 4: Writing finishes by ~3.3s; holds visible for 3 full seconds (total 6.3s on Screen 3 -> 16000ms)
+      // Screen 3 -> Screen 4: Writing finishes by ~3.3s; holds visible for 3 full seconds (total 6.3s on Screen 3 -> 19000ms)
       this.introTimers.push(setTimeout(() => {
         if (isFinished) return;
         s3.classList.remove('active');
@@ -568,7 +566,7 @@ class FriendshipIntroManager {
           console.log(`Loaded:`, img.complete && img.naturalWidth > 0);
           console.log(`Complete:`, img.complete);
         });
-      }, 16000));
+      }, 19000));
 
       this.introTimers.push(setTimeout(() => {
         if (isFinished) return;
@@ -578,15 +576,15 @@ class FriendshipIntroManager {
         const balloonContainer = overlay.querySelector('#fi-balloons');
         this.spawnBalloons(balloonContainer, 28);
         this.startConfetti(overlay.querySelector('#fi-confetti-canvas'));
-      }, 20000));
+      }, 23000));
 
-      // Screen 5 (Single Polaroid): Holds for 4 seconds after entrance animation (~0.7s) completes = ~4.7s total (triggers at 24700ms)
+      // Screen 5 (Single Polaroid): Holds for 4 seconds after entrance animation (~0.7s) completes = ~4.7s total (triggers at 27700ms)
       this.introTimers.push(setTimeout(() => {
         if (isFinished) return;
         s5.classList.remove('active');
         s5.classList.add('exit');
         s6.classList.add('active');
-      }, 24700));
+      }, 27700));
     });
   }
 

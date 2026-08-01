@@ -570,6 +570,11 @@ function buildAppShell() {
   // Start presence tracking (online/offline status)
   presenceManager.startPresenceTracking();
 
+  // Initialize screenshot detection (non-blocking)
+  import('./services/screenshotDetector.js').then(({ screenshotDetector }) => {
+    screenshotDetector.init();
+  }).catch(e => console.log('[App] Screenshot detector init:', e));
+
   router.navigate('home');
 
   // ===== HIDDEN OWNER CONTROL SYSTEM =====

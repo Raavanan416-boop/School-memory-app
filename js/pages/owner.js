@@ -1,4 +1,4 @@
-import { db, collection, getDocs, doc, updateDoc, writeBatch, deleteDoc, query, limit, getDoc, onSnapshot, addDoc, serverTimestamp, orderBy } from '../firebase-config.js';
+import { db, collection, getDocs, doc, updateDoc, writeBatch, deleteDoc, query, limit, getDoc, onSnapshot, addDoc, serverTimestamp, orderBy, setDoc } from '../firebase-config.js';
 import { authManager } from '../auth.js';
 import { router } from '../router.js';
 import { showToast, sanitizeHTML } from '../utils.js';
@@ -18,6 +18,11 @@ export async function renderOwnerPanel(container) {
 
     router.registerDestroy('owner', () => {
       document.body.className = originalTheme;
+      // Clean up screenshot activity real-time listener
+      if (screenshotActivityUnsubscribe) {
+        screenshotActivityUnsubscribe();
+        screenshotActivityUnsubscribe = null;
+      }
     });
 
     container.innerHTML = `
@@ -59,6 +64,7 @@ export async function renderOwnerPanel(container) {
           <button class="owner-tab-btn" data-tab="history">🕒 Logins</button>
           <button class="owner-tab-btn" data-tab="bday_history">🎂 Bday Hist</button>
           <button class="owner-tab-btn" data-tab="reset">☢️ Reset</button>
+          <button class="owner-tab-btn" data-tab="screenshots">📸 Screenshots</button>
         </div>
 
         <!-- Tab Contents -->
@@ -305,6 +311,41 @@ export async function renderOwnerPanel(container) {
           </div>
         </div>
 
+        <div id="tab-screenshots" class="owner-tab-content hidden space-y-4">
+          <!-- Screenshot Alert Mode Toggle -->
+          <div class="bg-[#1e293b] rounded-2xl p-4 border border-red-500/30 shadow-[0_0_15px_rgba(239,68,68,0.1)]">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <span class="text-2xl">📸</span>
+                <div>
+                  <h3 class="text-white font-bold text-sm">Screenshot Alert Mode</h3>
+                  <p class="text-[10px] text-gray-400 mt-0.5">ON = All users notified &bull; OFF = Owner only</p>
+                </div>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="toggle-screenshot-alert" class="sr-only peer">
+                <div class="w-11 h-6 bg-gray-700 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-500"></div>
+              </label>
+            </div>
+          </div>
+
+          <!-- Screenshot Activity Log -->
+          <div class="bg-[#1e293b] rounded-2xl p-4 border border-gray-700/50 shadow-md">
+            <div class="flex justify-between items-center mb-3">
+              <h3 class="text-white font-bold text-sm flex items-center gap-2">
+                <span class="text-lg">📋</span> Screenshot Activity
+              </h3>
+              <div class="flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                <span class="text-[10px] text-green-400 font-mono">REALTIME</span>
+              </div>
+            </div>
+            <div id="screenshot-activity-list" class="space-y-3 max-h-[60vh] overflow-y-auto hide-scrollbar">
+              <p class="text-center text-gray-500 py-4 font-mono text-sm">Loading screenshot activity...</p>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
   `;
@@ -370,12 +411,14 @@ export async function renderOwnerPanel(container) {
   setupBirthdayToggle(container);
   setupLaunchControl(container);
   setupFriendshipIntroControl(container);
+  setupScreenshotAlertToggle(container);
 
   // Load data in background
   setTimeout(() => loadPosts(container), 500);
   setTimeout(() => loadFeedback(container), 1000);
   setTimeout(() => loadHistory(container), 1500);
   setTimeout(() => loadBdayHistory(container), 2000);
+  setTimeout(() => loadScreenshotActivity(container), 2500);
 
   } catch (err) {
     console.error('Owner Panel Error:', err);
@@ -2029,5 +2072,103 @@ async function loadBdayHistory(container) {
   } catch (err) {
     console.error('Error loading bday history:', err);
     list.innerHTML = `<p class="text-center text-red-500 py-4 font-mono text-sm">Failed to load history</p>`;
+  }
+}
+
+// ==========================================
+// SCREENSHOT ALERT TOGGLE & ACTIVITY LOG
+// ==========================================
+
+let screenshotActivityUnsubscribe = null;
+
+async function setupScreenshotAlertToggle(container) {
+  const toggle = container.querySelector('#toggle-screenshot-alert');
+  if (!toggle) return;
+
+  try {
+    const settingsRef = doc(db, 'settings', 'features');
+    const snap = await getDoc(settingsRef);
+    if (snap.exists()) {
+      toggle.checked = snap.data().screenshotAlertMode ?? false;
+    }
+  } catch (e) { console.error('Error fetching screenshot alert settings:', e); }
+
+  toggle.addEventListener('change', async (e) => {
+    try {
+      const settingsRef = doc(db, 'settings', 'features');
+      await updateDoc(settingsRef, { screenshotAlertMode: e.target.checked }).catch(async () => {
+        // Create document if it doesn't exist
+        await setDoc(settingsRef, { screenshotAlertMode: e.target.checked }, { merge: true });
+      });
+      showToast('Screenshot Alert Mode ' + (e.target.checked ? 'ON — All users will be notified' : 'OFF — Owner only'), 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to update setting', 'error');
+      e.target.checked = !e.target.checked;
+    }
+  });
+}
+
+async function loadScreenshotActivity(container) {
+  const list = container.querySelector('#screenshot-activity-list');
+  if (!list) return;
+
+  // Clean up previous listener if any
+  if (screenshotActivityUnsubscribe) {
+    screenshotActivityUnsubscribe();
+    screenshotActivityUnsubscribe = null;
+  }
+
+  try {
+    const q = query(
+      collection(db, 'screenshotActivity'),
+      orderBy('timestamp', 'desc')
+    );
+
+    // Real-time listener
+    screenshotActivityUnsubscribe = onSnapshot(q, (snapshot) => {
+      if (snapshot.empty) {
+        list.innerHTML = `<p class="text-center text-gray-500 py-4 font-mono text-sm">No screenshot activity yet.</p>`;
+        return;
+      }
+
+      let html = '';
+      snapshot.forEach(docSnap => {
+        const d = docSnap.data();
+        const photo = d.userPhoto;
+        const initial = (d.userName || '?')[0].toUpperCase();
+
+        html += `
+          <div class="bg-gray-800/60 rounded-xl p-3 border border-gray-700/40 hover:border-red-500/30 transition-colors">
+            <div class="flex items-start gap-3">
+              <div class="flex-shrink-0">
+                ${photo
+                  ? `<img src="${sanitizeHTML(photo)}" class="w-10 h-10 rounded-full object-cover border border-gray-600" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+                  : ''}
+                <div class="w-10 h-10 rounded-full bg-red-600 items-center justify-center text-white font-bold text-sm" style="display:${photo ? 'none' : 'flex'}">${initial}</div>
+              </div>
+              <div class="flex-1 min-w-0">
+                <p class="text-white font-semibold text-sm">👤 ${sanitizeHTML(d.userName || 'Unknown')}</p>
+                <p class="text-xs text-gray-400 mt-1">📍 ${sanitizeHTML(d.pageName || 'Unknown Page')}</p>
+                ${d.contentTitle ? `<p class="text-xs text-gray-300 mt-0.5">📖 ${sanitizeHTML(d.contentTitle)}</p>` : ''}
+                <div class="flex items-center gap-3 mt-2">
+                  <span class="text-[10px] text-gray-500 flex items-center gap-1">🕒 ${sanitizeHTML(d.time || '')}</span>
+                  <span class="text-[10px] text-gray-500 flex items-center gap-1">📅 ${sanitizeHTML(d.date || '')}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+      });
+
+      list.innerHTML = html;
+    }, (error) => {
+      console.error('Screenshot activity listener error:', error);
+      list.innerHTML = `<p class="text-center text-red-500 py-4 font-mono text-sm">Failed to load activity. Index may need creation.</p>`;
+    });
+
+  } catch (err) {
+    console.error('Error setting up screenshot activity:', err);
+    list.innerHTML = `<p class="text-center text-red-500 py-4 font-mono text-sm">Failed to load screenshot activity</p>`;
   }
 }

@@ -396,5 +396,12 @@ service cloud.firestore {
     match /storyViews/{viewId} {
       allow read, write: if isAuthenticated();
     }
+
+    // Screenshot Activity — any authenticated user can log, all can read, admin can delete
+    match /screenshotActivity/{activityId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow delete: if isAdmin();
+    }
   }
 }

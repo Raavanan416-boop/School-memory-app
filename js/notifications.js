@@ -187,6 +187,11 @@ const NOTIF_CONFIG = {
     bodyTemplate: (name) => `${name} voted in your poll.`,
     getUrl: (data) => `/?page=polls&id=${data.pollId || ''}`,
   },
+  screenshot_alert: {
+    title: '📸 Screenshot Alert',
+    bodyTemplate: (name, data) => `${name} took a screenshot${data.screenshotPage ? ' on ' + data.screenshotPage : ''}.`,
+    getUrl: () => `/?page=home`,
+  },
 };
 
 class NotificationManager {

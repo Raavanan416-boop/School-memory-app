@@ -87,8 +87,18 @@ const NOTIF_CONFIG = {
   },
   diary_entry: {
     title: '📖 New Diary Entry',
-    bodyTemplate: (name) => `${name} wrote in the diary.`,
-    getUrl: () => `/?page=diary`,
+    bodyTemplate: (name) => `${name} published a new diary entry.`,
+    getUrl: (data) => `/?page=diary&entryId=${data.diaryId || ''}`,
+  },
+  new_memory: {
+    title: '📸 New Memory',
+    bodyTemplate: (name) => `${name} added a new memory.`,
+    getUrl: (data) => `/?page=home&postId=${data.postId || ''}`,
+  },
+  admin_announcement: {
+    title: '📢 Announcement',
+    bodyTemplate: () => `New announcement from admin.`,
+    getUrl: () => `/?page=home`,
   },
   // Call notifications
   voice_call_incoming: {

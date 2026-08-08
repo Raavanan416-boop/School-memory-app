@@ -685,6 +685,23 @@ export async function renderUpload(container) {
         }
       }
 
+      // Send New Memory Notifications
+      try {
+        const allUsers = userCache.getAllUsers();
+        allUsers.forEach(u => {
+          if (u.id !== uid && !pendingTags.includes(u.id) && !mentions.some(m => m.id === u.id)) {
+            if (privacy === 'public' || privacy === 'all_friends') {
+              createNotification('new_memory', u.id, { postId: docRef.id });
+            } else if (privacy === 'close_friends') {
+              const closeFriends = authManager.userData?.closeFriends || [];
+              if (closeFriends.includes(u.id)) {
+                createNotification('new_memory', u.id, { postId: docRef.id });
+              }
+            }
+          }
+        });
+      } catch (e) { console.error('Memory notification error:', e); }
+
       await awardPoints(uid, 20, 'Memory Created');
 
       // Success state

@@ -7,6 +7,7 @@ import { authManager, awardPoints } from '../auth.js';
 import { router } from '../router.js';
 import { showDeleteConfirmation, deleteDocFull } from '../delete-confirm.js';
 import { userCache } from '../services/userCache.js';
+import { createNotification } from '../notifications.js';
 
 let unsubDiary = null;
 let replyUnsubs = {};  // Track reply listeners per entry
@@ -20,7 +21,7 @@ export function destroyDiary() {
   replyUnsubs = {};
 }
 
-export async function renderDiary(container) {
+export async function renderDiary(container, data = null) {
   router.registerDestroy('diary', destroyDiary);
   destroyDiary();
 
@@ -55,19 +56,21 @@ export async function renderDiary(container) {
   container.querySelector('#add-diary-btn')?.addEventListener('click', () => showDiaryEntryModal());
 
   let activeFilter = 'all';
+  const targetEntryId = data?.entryId || data?.diaryId || data?.id || null;
+
   container.querySelectorAll('.diary-filter').forEach(btn => {
     btn.addEventListener('click', () => {
       container.querySelectorAll('.diary-filter').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       activeFilter = btn.dataset.filter;
-      loadDiary(container, activeFilter);
+      loadDiary(container, activeFilter, targetEntryId);
     });
   });
 
-  loadDiary(container, activeFilter);
+  loadDiary(container, activeFilter, targetEntryId);
 }
 
-function loadDiary(container, filter = 'all') {
+function loadDiary(container, filter = 'all', targetEntryId = null) {
   const diaryEl = container.querySelector('#diary-container');
   
   // Clear previous list state immediately before fetching
@@ -131,6 +134,15 @@ function loadDiary(container, filter = 'all') {
             <h3 class="font-handwriting text-xl text-navy-700 mb-1">Nothing here yet</h3>
             <p class="text-sm text-gray-400">${filter === 'private' ? 'Your private entries will appear here' : 'No entries in this category'}</p>
           </div>`;
+      } else if (targetEntryId) {
+        setTimeout(() => {
+          const targetCard = container.querySelector(`#diary-entry-${targetEntryId}`);
+          if (targetCard) {
+            targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            targetCard.classList.add('ring-2', 'ring-amber-400', 'shadow-lg');
+            setTimeout(() => targetCard.classList.remove('ring-2', 'ring-amber-400', 'shadow-lg'), 3000);
+          }
+        }, 300);
       }
     });
   } catch (e) {
@@ -158,6 +170,7 @@ function createDiaryEntry(entry) {
   const finalAuthorPic = cachedAuthor.profilePic || entry.authorPhoto;
 
   const card = document.createElement('div');
+  card.id = `diary-entry-${entry.id}`;
   card.className = 'diary-entry-card animate-fadeIn';
   card.innerHTML = `
     <div class="diary-entry-paper">
@@ -623,7 +636,7 @@ function showDiaryEntryModal() {
         imageUrl = res.url;
       }
 
-      await addDoc(collection(db, 'diary'), {
+      const docRef = await addDoc(collection(db, 'diary'), {
         authorId: authManager.currentUser.uid,
         authorName: authManager.userData?.fullName || 'Unknown',
         authorPhoto: authManager.userData?.profilePic || '',
@@ -637,6 +650,24 @@ function showDiaryEntryModal() {
         replyCount: 0,
         createdAt: serverTimestamp()
       });
+
+      // Send Diary Entry Notifications respecting privacy
+      try {
+        const allUsers = userCache.getAllUsers();
+        const myUid = authManager.currentUser.uid;
+        allUsers.forEach(u => {
+          if (u.id !== myUid) {
+            if (selectedPrivacy === 'all') {
+              createNotification('diary_entry', u.id, { diaryId: docRef.id });
+            } else if (selectedPrivacy === 'close') {
+              if (selectedCloseFriends.includes(u.id)) {
+                createNotification('diary_entry', u.id, { diaryId: docRef.id });
+              }
+            }
+          }
+        });
+      } catch (e) { console.error('Diary notification error:', e); }
+
       showToast('Diary entry added! +4 Points 📖', 'success');
       await awardPoints(authManager.currentUser.uid, 4, 'Diary Created');
       modal.close();

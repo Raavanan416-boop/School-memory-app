@@ -1,5 +1,6 @@
 // Notifications page — Premium notification center with grouping, delete, and deep links
-import { db, collection, query, where, orderBy, limit, onSnapshot, doc, updateDoc, deleteDoc, arrayUnion, arrayRemove, setDoc, serverTimestamp, getDoc } from '../firebase-config.js';
+// Enhanced: All/Unread tabs, sender profile pics, notification grouping
+import { db, collection, query, where, orderBy, limit, onSnapshot, doc, updateDoc, deleteDoc, arrayUnion, arrayRemove, setDoc, serverTimestamp, getDoc, addDoc } from '../firebase-config.js';
 import { timeAgo, sanitizeHTML } from '../utils.js';
 import { authManager } from '../auth.js';
 import { notificationManager } from '../notifications.js';
@@ -7,6 +8,7 @@ import { router } from '../router.js';
 import { userCache } from '../services/userCache.js';
 
 let unsubNotifs = null;
+let currentFilter = 'all'; // 'all' or 'unread'
 
 export function destroyNotifications() {
   if (unsubNotifs) {
@@ -22,7 +24,7 @@ export async function renderNotifications(container) {
 
   container.innerHTML = `
     <section class="px-4 pt-4 pb-32 min-h-screen overflow-y-auto">
-      <div class="flex items-center gap-3 mb-5">
+      <div class="flex items-center gap-3 mb-4">
         <button id="notif-back-btn" class="inner-back-btn">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/></svg>
         </button>
@@ -45,6 +47,12 @@ export async function renderNotifications(container) {
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- All / Unread Filter Tabs -->
+      <div class="notif-tab-bar mb-4">
+        <button class="notif-tab active" data-filter="all">All</button>
+        <button class="notif-tab" data-filter="unread">Unread</button>
       </div>
 
       <!-- Unread count banner -->
@@ -86,6 +94,17 @@ export async function renderNotifications(container) {
       </div>
     </div>
   `;
+
+  // Tab filter logic
+  container.querySelectorAll('.notif-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      container.querySelectorAll('.notif-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      currentFilter = tab.dataset.filter;
+      // Re-render with current filter
+      loadNotifications(container);
+    });
+  });
 
   // Event listeners
   container.querySelector('#mark-all-read')?.addEventListener('click', async () => {
@@ -186,6 +205,55 @@ export async function renderNotifications(container) {
   loadNotifications(container);
 }
 
+// ===== NOTIFICATION GROUPING =====
+// Groups notifications of the same type + target (e.g. multiple likes on same post)
+function groupNotifications(notifications) {
+  const groupable = ['like', 'comment', 'poll_vote'];
+  const groups = new Map(); // key => { primary, count, names, ids }
+  const result = [];
+
+  for (const notif of notifications) {
+    // Only group unread notifications of groupable types
+    const targetKey = notif.postId || notif.pollId || notif.capsuleId || '';
+    if (groupable.includes(notif.type) && targetKey && !notif.read) {
+      const groupKey = `${notif.type}_${targetKey}`;
+      if (groups.has(groupKey)) {
+        const g = groups.get(groupKey);
+        g.count++;
+        if (g.names.length < 3) {
+          g.names.push(notif.fromName || 'Someone');
+        }
+        g.ids.push(notif.id);
+      } else {
+        groups.set(groupKey, {
+          primary: notif,
+          count: 1,
+          names: [notif.fromName || 'Someone'],
+          ids: [notif.id]
+        });
+        result.push({ __groupKey: groupKey });
+      }
+    } else {
+      result.push(notif);
+    }
+  }
+
+  // Replace group placeholders with enriched notifications
+  return result.map(item => {
+    if (item.__groupKey) {
+      const g = groups.get(item.__groupKey);
+      return {
+        ...g.primary,
+        _grouped: true,
+        _groupedCount: g.count,
+        _groupedNames: g.names,
+        _groupedIds: g.ids,
+      };
+    }
+    return item;
+  });
+}
+
 function loadNotifications(container) {
   const notifsEl = container.querySelector('#notifs-container');
   const unreadBanner = container.querySelector('#unread-banner');
@@ -229,9 +297,50 @@ function loadNotifications(container) {
         const bTime = b.data().createdAt?.toMillis() || 0;
         return bTime - aTime;
       });
+
+      // Build notification list
+      let allNotifs = allDocs.map(d => ({ id: d.id, ...d.data() }));
+
+      // Apply filter
+      let filteredNotifs = currentFilter === 'unread'
+        ? allNotifs.filter(n => !n.read)
+        : allNotifs;
       
       // Apply pagination limit locally
-      const pageDocs = allDocs.slice(0, notifLimit);
+      const pageDocs = filteredNotifs.slice(0, notifLimit);
+
+      // Count total unread (always from full list)
+      let unreadCount = allNotifs.filter(n => !n.read).length;
+
+      // Update unread banner
+      if (unreadCount > 0) {
+        if (unreadBanner) unreadBanner.classList.remove('hidden');
+        if (unreadCountText) unreadCountText.textContent = unreadCount;
+      } else {
+        if (unreadBanner) unreadBanner.classList.add('hidden');
+      }
+
+      // Update tab badge count
+      const unreadTab = container.querySelector('.notif-tab[data-filter="unread"]');
+      if (unreadTab) {
+        unreadTab.textContent = unreadCount > 0 ? `Unread (${unreadCount})` : 'Unread';
+      }
+
+      // Show empty state for filtered view
+      if (pageDocs.length === 0) {
+        notifsEl.innerHTML = `
+          <div class="flex flex-col items-center justify-center py-16 px-6">
+            <div class="w-20 h-20 rounded-full bg-cream-100 flex items-center justify-center mb-4">
+              <svg class="w-10 h-10 text-cream-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
+            </div>
+            <h3 class="font-bold text-navy-700 text-lg mb-1">${currentFilter === 'unread' ? 'No unread notifications' : 'No notifications'}</h3>
+            <p class="text-sm text-gray-400 text-center">${currentFilter === 'unread' ? 'All caught up! 🎉' : "We'll let you know when something happens!"}</p>
+          </div>`;
+        return;
+      }
+
+      // Group notifications (e.g. "Bose and 2 others liked your post")
+      const groupedNotifs = groupNotifications(pageDocs);
 
       // Group notifications by date
       const today = new Date();
@@ -240,12 +349,8 @@ function loadNotifications(container) {
       yesterday.setDate(yesterday.getDate() - 1);
 
       const groups = { today: [], yesterday: [], older: [] };
-      let unreadCount = 0;
 
-      pageDocs.forEach(d => {
-        const notif = { id: d.id, ...d.data() };
-        if (!notif.read) unreadCount++;
-
+      groupedNotifs.forEach(notif => {
         const notifDate = notif.createdAt?.toDate ? notif.createdAt.toDate() : new Date();
         const notifDay = new Date(notifDate);
         notifDay.setHours(0, 0, 0, 0);
@@ -258,14 +363,6 @@ function loadNotifications(container) {
           groups.older.push(notif);
         }
       });
-
-      // Update unread banner
-      if (unreadCount > 0) {
-        if (unreadBanner) unreadBanner.classList.remove('hidden');
-        if (unreadCountText) unreadCountText.textContent = unreadCount;
-      } else {
-        if (unreadBanner) unreadBanner.classList.add('hidden');
-      }
 
       // Render grouped notifications
       notifsEl.innerHTML = '';
@@ -286,7 +383,7 @@ function loadNotifications(container) {
       }
 
       // Add pagination observer target if we reached the limit
-      if (allDocs.length >= notifLimit) {
+      if (filteredNotifs.length >= notifLimit) {
         const topEl = document.createElement('div');
         topEl.id = 'notif-bottom-observer';
         topEl.className = 'py-4 text-center text-[10px] text-navy-300 font-semibold uppercase tracking-wider';
@@ -330,60 +427,98 @@ function createGroupHeader(label) {
   return header;
 }
 
-function createNotifCard(notif) {
-  const typeConfig = {
-    like: { icon: '❤️', color: 'bg-red-50 border-red-100' },
-    comment: { icon: '💬', color: 'bg-blue-50 border-blue-100' },
-    chat_message: { icon: '✉️', color: 'bg-green-50 border-green-100' },
-    birthday: { icon: '🎂', color: 'bg-yellow-50 border-yellow-100' },
-    birthday_wish: { icon: '🎂', color: 'bg-yellow-50 border-yellow-100' },
-    birthday_bonus: { icon: '🎂', color: 'bg-yellow-50 border-yellow-100' },
-    friend_bonus: { icon: '🎁', color: 'bg-pink-50 border-pink-100' },
-    time_capsule_unlock: { icon: '📦', color: 'bg-purple-50 border-purple-100' },
-    capsule_unlock: { icon: '📦', color: 'bg-purple-50 border-purple-100' },
-    capsule_message: { icon: '💬', color: 'bg-purple-50 border-purple-100' },
-    poll_created: { icon: '📊', color: 'bg-indigo-50 border-indigo-100' },
-    announcement: { icon: '📢', color: 'bg-orange-50 border-orange-100' },
-    diary_entry: { icon: '📖', color: 'bg-warm-50 border-warm-100' },
-    call_incoming: { icon: '📞', color: 'bg-green-50 border-green-100' },
-    voice_call_incoming: { icon: '📞', color: 'bg-green-50 border-green-100' },
-    video_call_incoming: { icon: '📹', color: 'bg-green-50 border-green-100' },
-    missed_voice_call: { icon: '📵', color: 'bg-red-50 border-red-100' },
-    missed_video_call: { icon: '📵', color: 'bg-red-50 border-red-100' },
-    game_challenge: { icon: '🎮', color: 'bg-orange-50 border-orange-100' },
-    tag: { icon: '📸', color: 'bg-blue-50 border-blue-100' },
-    tag_request: { icon: '📸', color: 'bg-blue-50 border-blue-100' },
-    tag_accepted: { icon: '✅', color: 'bg-green-50 border-green-100' },
-    tag_declined: { icon: '❌', color: 'bg-red-50 border-red-100' },
-    badge_suggestion: { icon: '🏅', color: 'bg-amber-50 border-amber-100' },
-    miss_you: { icon: '❤️', color: 'bg-pink-50 border-pink-100' },
-    friend_request: { icon: '👋', color: 'bg-blue-50 border-blue-100' },
-    friend_accepted: { icon: '✅', color: 'bg-green-50 border-green-100' },
-    group_message: { icon: '👥', color: 'bg-indigo-50 border-indigo-100' },
-    poll_vote: { icon: '📊', color: 'bg-purple-50 border-purple-100' },
-  };
+// ===== TYPE CONFIG for icons/colors =====
+const typeConfig = {
+  like: { icon: '❤️', color: 'bg-red-50 border-red-100' },
+  comment: { icon: '💬', color: 'bg-blue-50 border-blue-100' },
+  chat_message: { icon: '✉️', color: 'bg-green-50 border-green-100' },
+  birthday: { icon: '🎂', color: 'bg-yellow-50 border-yellow-100' },
+  birthday_wish: { icon: '🎂', color: 'bg-yellow-50 border-yellow-100' },
+  birthday_bonus: { icon: '🎂', color: 'bg-yellow-50 border-yellow-100' },
+  birthday_reply: { icon: '❤️', color: 'bg-yellow-50 border-yellow-100' },
+  birthday_reaction: { icon: '❤️', color: 'bg-yellow-50 border-yellow-100' },
+  friend_bonus: { icon: '🎁', color: 'bg-pink-50 border-pink-100' },
+  time_capsule_unlock: { icon: '⏳', color: 'bg-purple-50 border-purple-100' },
+  capsule_unlock: { icon: '⏳', color: 'bg-purple-50 border-purple-100' },
+  capsule_message: { icon: '💬', color: 'bg-purple-50 border-purple-100' },
+  poll_created: { icon: '📊', color: 'bg-indigo-50 border-indigo-100' },
+  announcement: { icon: '📢', color: 'bg-orange-50 border-orange-100' },
+  admin_announcement: { icon: '📢', color: 'bg-orange-50 border-orange-100' },
+  diary_entry: { icon: '📖', color: 'bg-warm-50 border-warm-100' },
+  new_memory: { icon: '📸', color: 'bg-blue-50 border-blue-100' },
+  call_incoming: { icon: '📞', color: 'bg-green-50 border-green-100' },
+  voice_call_incoming: { icon: '📞', color: 'bg-green-50 border-green-100' },
+  video_call_incoming: { icon: '📹', color: 'bg-green-50 border-green-100' },
+  missed_voice_call: { icon: '📵', color: 'bg-red-50 border-red-100' },
+  missed_video_call: { icon: '📵', color: 'bg-red-50 border-red-100' },
+  game_challenge: { icon: '🎮', color: 'bg-orange-50 border-orange-100' },
+  tag: { icon: '🏷️', color: 'bg-blue-50 border-blue-100' },
+  tag_request: { icon: '🏷️', color: 'bg-blue-50 border-blue-100' },
+  tag_accepted: { icon: '✅', color: 'bg-green-50 border-green-100' },
+  tag_declined: { icon: '❌', color: 'bg-red-50 border-red-100' },
+  badge_suggestion: { icon: '🏅', color: 'bg-amber-50 border-amber-100' },
+  miss_you: { icon: '❤️', color: 'bg-pink-50 border-pink-100' },
+  friend_request: { icon: '👋', color: 'bg-blue-50 border-blue-100' },
+  friend_accepted: { icon: '✅', color: 'bg-green-50 border-green-100' },
+  group_message: { icon: '👥', color: 'bg-indigo-50 border-indigo-100' },
+  poll_vote: { icon: '📊', color: 'bg-purple-50 border-purple-100' },
+  slambook_share: { icon: '📖', color: 'bg-teal-50 border-teal-100' },
+  slambook_response: { icon: '✍️', color: 'bg-teal-50 border-teal-100' },
+  slambook_pinned: { icon: '📌', color: 'bg-teal-50 border-teal-100' },
+  screenshot_alert: { icon: '📸', color: 'bg-red-50 border-red-100' },
+  share: { icon: '🚀', color: 'bg-indigo-50 border-indigo-100' },
+};
 
+function createNotifCard(notif) {
   const config = typeConfig[notif.type] || { icon: '🔔', color: 'bg-gray-50 border-gray-100' };
   const time = notif.createdAt?.toDate ? timeAgo(notif.createdAt.toDate()) : '';
   const title = notif.title || getDefaultTitle(notif.type);
-  const body = notif.body || getDefaultBody(notif);
+  let body = notif.body || getDefaultBody(notif);
+
+  // Handle grouped notifications
+  if (notif._grouped && notif._groupedCount > 1) {
+    const othersCount = notif._groupedCount - 1;
+    const firstName = notif._groupedNames[0] || 'Someone';
+    const typeVerb = {
+      like: 'liked your memory',
+      comment: 'commented on your memory',
+      poll_vote: 'voted in your poll',
+    };
+    body = `${firstName} and ${othersCount} ${othersCount === 1 ? 'other' : 'others'} ${typeVerb[notif.type] || 'interacted'}.`;
+  }
+
+  // Resolve sender profile picture
+  let senderPhoto = notif.fromPhoto || '';
+  if (!senderPhoto && notif.fromId) {
+    try {
+      const u = userCache.getUser(notif.fromId);
+      if (u && u.profilePic) senderPhoto = u.profilePic;
+    } catch (e) {}
+  }
 
   const card = document.createElement('div');
-  card.className = `group relative flex items-start gap-3 p-3.5 rounded-2xl transition-all duration-200 cursor-pointer mb-1 ${
+  card.className = `notif-card group relative flex items-start gap-3 p-3.5 rounded-2xl transition-all duration-200 cursor-pointer mb-1 ${
     notif.read
       ? 'bg-white hover:bg-gray-50'
-      : 'bg-gradient-to-r from-cream-50 to-cream-100/50 border border-cream-200 shadow-sm'
+      : 'notif-card-unread bg-gradient-to-r from-cream-50 to-cream-100/50 border border-cream-200 shadow-sm'
   }`;
 
+  // Build avatar HTML — profile pic with type emoji overlay badge
+  const avatarHTML = senderPhoto
+    ? `<div class="notif-avatar-wrap">
+        <img src="${sanitizeHTML(senderPhoto)}" alt="" class="notif-avatar" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"/>
+        <div class="notif-avatar-fallback" style="display:none">${(notif.fromName || '?')[0].toUpperCase()}</div>
+        <span class="notif-type-badge">${config.icon}</span>
+      </div>`
+    : `<div class="notif-avatar-wrap">
+        <div class="notif-avatar-fallback">${(notif.fromName || '?')[0].toUpperCase()}</div>
+        <span class="notif-type-badge">${config.icon}</span>
+      </div>`;
+
   card.innerHTML = `
-    <div class="w-11 h-11 rounded-full ${config.color} border flex items-center justify-center text-xl flex-shrink-0 mt-0.5">
-      ${config.icon}
-    </div>
+    ${avatarHTML}
     <div class="flex-1 min-w-0">
       <p class="text-[13px] ${notif.read ? 'text-gray-600' : 'text-navy-800 font-semibold'} leading-snug">
-        ${sanitizeHTML(title)}
-      </p>
-      <p class="text-[12px] ${notif.read ? 'text-gray-400' : 'text-navy-600'} mt-0.5 leading-snug truncate">
         ${sanitizeHTML(body)}
       </p>
       <p class="text-[10px] text-gray-400 mt-1">${time}</p>
@@ -415,11 +550,10 @@ function createNotifCard(notif) {
     if (!notif.read) {
       notif.read = true;
       // Update UI classes immediately
-      card.classList.remove('bg-gradient-to-r', 'from-cream-50', 'to-cream-100/50', 'border-cream-200', 'shadow-sm');
+      card.classList.remove('notif-card-unread', 'bg-gradient-to-r', 'from-cream-50', 'to-cream-100/50', 'border-cream-200', 'shadow-sm');
       card.classList.add('bg-white', 'hover:bg-gray-50');
-      card.querySelector('.text-navy-800')?.classList.replace('text-navy-800', 'text-gray-600');
-      card.querySelector('.font-semibold')?.classList.remove('font-semibold');
-      card.querySelector('.text-navy-600')?.classList.replace('text-navy-600', 'text-gray-400');
+      const textEl = card.querySelector('.text-navy-800');
+      if (textEl) { textEl.classList.remove('text-navy-800', 'font-semibold'); textEl.classList.add('text-gray-600'); }
       const dot = card.querySelector('.animate-pulse');
       if (dot) dot.remove();
 
@@ -433,8 +567,13 @@ function createNotifCard(notif) {
         if (notificationManager.unreadCount === 0 && unreadBanner) unreadBanner.classList.add('hidden');
       }
 
-      // Sync to Firebase
-      notificationManager.markRead(notif.id).catch(console.error);
+      // If grouped, mark all grouped notifications as read
+      if (notif._grouped && notif._groupedIds) {
+        notif._groupedIds.forEach(id => notificationManager.markRead(id).catch(console.error));
+      } else {
+        // Sync to Firebase
+        notificationManager.markRead(notif.id).catch(console.error);
+      }
     }
     
     notificationManager.navigateToNotification(notif);
@@ -517,7 +656,12 @@ function createNotifCard(notif) {
     card.style.opacity = '0';
     card.style.transition = 'all 0.3s ease';
     setTimeout(async () => {
-      await notificationManager.deleteNotification(notif.id);
+      if (notif._grouped && notif._groupedIds) {
+        // Delete all grouped notifications
+        await Promise.all(notif._groupedIds.map(id => notificationManager.deleteNotification(id)));
+      } else {
+        await notificationManager.deleteNotification(notif.id);
+      }
     }, 300);
   });
 
@@ -551,7 +695,11 @@ function createNotifCard(notif) {
       card.style.opacity = '0';
       card.style.transition = 'all 0.3s ease';
       setTimeout(async () => {
-        await notificationManager.deleteNotification(notif.id);
+        if (notif._grouped && notif._groupedIds) {
+          await Promise.all(notif._groupedIds.map(id => notificationManager.deleteNotification(id)));
+        } else {
+          await notificationManager.deleteNotification(notif.id);
+        }
       }, 300);
     } else {
       // Reset position
@@ -573,14 +721,19 @@ function getDefaultTitle(type) {
     birthday: '🎂 Birthday',
     birthday_wish: '🎂 New Birthday Wish',
     birthday_bonus: '🎂 Birthday Bonus',
+    birthday_reply: '❤️ Birthday Wish Reply',
+    birthday_reaction: '❤️ Birthday Reaction',
     friend_bonus: '🎁 Birthday Gift',
-    time_capsule_unlock: '📦 Time Capsule Opened',
-    capsule_unlock: '📦 Time Capsule Opened',
+    time_capsule_unlock: '⏳ Time Capsule Ready',
+    capsule_unlock: '⏳ Time Capsule Ready',
     capsule_message: '💬 Capsule Comment',
     poll_created: '📊 New Poll',
     announcement: '📢 School Announcement',
+    admin_announcement: '📢 Announcement',
     diary_entry: '📖 New Diary Entry',
-    slambook_response: '✨ New Slam Book Response',
+    new_memory: '📸 New Memory',
+    slambook_share: '📖 Slam Book Shared',
+    slambook_response: '✍️ Slam Book Signed',
     slambook_pinned: '📌 Response Pinned',
     call_incoming: '📞 Incoming Call',
     voice_call_incoming: '📞 Incoming Voice Call',
@@ -588,8 +741,8 @@ function getDefaultTitle(type) {
     missed_voice_call: '📵 Missed Voice Call',
     missed_video_call: '📵 Missed Video Call',
     game_challenge: '🎮 Game Challenge',
-    tag: '📸 Tagged',
-    tag_request: '📸 Tag Request',
+    tag: '🏷️ Tagged',
+    tag_request: '🏷️ Tag Request',
     tag_accepted: '✅ Tag Accepted',
     tag_declined: '❌ Tag Declined',
     badge_suggestion: '🏅 New Badge',
@@ -598,6 +751,8 @@ function getDefaultTitle(type) {
     friend_accepted: '✅ Request Accepted',
     group_message: '👥 Group Message',
     poll_vote: '📊 Poll Vote',
+    share: '🚀 Memory Shared',
+    screenshot_alert: '📸 Screenshot Alert',
   };
   return titles[type] || '🔔 Notification';
 }
@@ -618,14 +773,19 @@ function getDefaultBody(notif) {
     birthday: `It's ${name}'s birthday today! 🎉`,
     birthday_wish: `${name} sent you a birthday wish.`,
     birthday_bonus: 'You received birthday bonus points! 🎂✨',
+    birthday_reply: `${name} replied to your birthday wish.`,
+    birthday_reaction: `${name} reacted to your birthday wish.`,
     friend_bonus: `${name} gifted you points.`,
-    time_capsule_unlock: 'Your memory capsule is ready.',
-    capsule_unlock: 'Your memory capsule is ready.',
+    time_capsule_unlock: 'Your Time Capsule is ready to open.',
+    capsule_unlock: 'Your Time Capsule is ready to open.',
     capsule_message: `${name} commented on your Time Capsule.`,
-    poll_created: 'Vote in the latest class poll.',
+    poll_created: `${name} created a new poll.`,
     announcement: 'New announcement available.',
-    diary_entry: `${name} wrote in the diary.`,
-    slambook_response: `${name} answered your Slam Book!`,
+    admin_announcement: 'New announcement from admin.',
+    diary_entry: `${name} published a new diary entry.`,
+    new_memory: `${name} added a new memory.`,
+    slambook_share: `${name} shared a Slam Book with you!`,
+    slambook_response: `${name} wrote in your Slam Book!`,
     slambook_pinned: `${name} pinned your Slam Book response!`,
     call_incoming: `Incoming call from ${name}.`,
     voice_call_incoming: `Incoming voice call from ${name}.`,
@@ -643,6 +803,8 @@ function getDefaultBody(notif) {
     friend_accepted: `${name} accepted your friend request.`,
     group_message: `${name} sent a message to the group.`,
     poll_vote: `${name} voted in your poll.`,
+    share: `${name} shared a memory with you!`,
+    screenshot_alert: `${name} took a screenshot.`,
   };
   return bodies[notif.type] || notif.message || 'New notification';
 }
